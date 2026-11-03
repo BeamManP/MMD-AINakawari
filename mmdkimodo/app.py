@@ -16,7 +16,7 @@ import subprocess
 import threading
 import time
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import messagebox, ttk
 
 import win32api
 import win32con
@@ -39,7 +39,6 @@ _set_window_long.restype = ctypes.c_void_p
 SETTINGS_PATH = os.path.join(runner.WORK_DIR, "settings.json")
 SERVER_CMD = r"F:\kimodo\start_textencoder.cmd"
 DEFAULTS = {
-    "pmx": r"E:\oldC_0427\Users\beamman\Desktop\MikuMikuDance_v932x64\UserFile\Model\Tda式初音ミクV4X_Ver1.00\Tda式初音ミクV4X_Ver1.00.pmx",
     "prompt": "A person moves naturally between poses.",
     "steps": 100, "seed": -1, "post_processing": True, "range_start": "", "range_end": "",
     "cfg_text": 2.0, "cfg_key": 2.0, "length": "", "use_keys": True, "use_center": False,
@@ -125,6 +124,7 @@ class App:
             pass
         self.q = queue.Queue()
         self.busy = False
+        self._model_ticks = 1   # 対象のモデルの表示は 2 回に 1 回（1 秒ごと）読み直す。最初はすぐ読む
         self.last_run = runner.load_last_run(self.link)   # この MMD での前回の生成（作り直しと「元に戻す」に使う）。窓を開き直しても残る
         self.last_backup = self.last_run["backup"] if self.last_run else None
         self._build()
@@ -152,10 +152,9 @@ class App:
         f = ttk.Frame(self.root)
         f.pack(fill="both", expand=True)
 
-        ttk.Label(f, text="モデル（PMX）").grid(row=0, column=0, sticky="w", **pad)
-        self.pmx = tk.StringVar(value=self.cfg["pmx"])
-        ttk.Entry(f, textvariable=self.pmx).grid(row=1, column=0, columnspan=3, sticky="we", **pad)
-        ttk.Button(f, text="選ぶ…", command=self._pick_pmx).grid(row=1, column=3, **pad)
+        # MMD のモデル欄で選んだモデルに効く
+        self.model_text = tk.StringVar(value="選択中のモデル：（読み取り中）")
+        ttk.Label(f, textvariable=self.model_text, wraplength=490).grid(row=0, column=0, columnspan=4, sticky="w", **pad)
 
         ttk.Label(f, text="プロンプト（英語・キーの間をどう動くか。「45: …」の行で区間ごとに分けられる）").grid(row=2, column=0, columnspan=4, sticky="w", **pad)
         self.prompt = tk.Text(f, height=7, wrap="word")
@@ -218,10 +217,19 @@ class App:
         f.columnconfigure(0, weight=1)
         f.rowconfigure(12, weight=1)
 
-    def _pick_pmx(self):
-        p = filedialog.askopenfilename(parent=self.root, filetypes=[("PMX", "*.pmx"), ("すべて", "*.*")])
-        if p:
-            self.pmx.set(p)
+    def _show_model(self):
+        """MMD で選択中のモデルを表示する。生成中は MMD を操作しているので読みに行かない。"""
+        self._model_ticks += 1
+        if self.busy or self._model_ticks % 2:
+            return
+        try:
+            model = self.link.selected_model()
+        except Exception as e:  # 読めない理由をそのまま出す（MMD の版が違う・選び替えの途中など）
+            text = f"選択中のモデル：（読み取れません: {e}）"
+        else:
+            text = f"選択中のモデル：{model['name']}" if model else "選択中のモデル：（なし。MMD のモデル欄でモデルを選んでください）"
+        if self.model_text.get() != text:
+            self.model_text.set(text)
 
     def _write_log(self, line):
         self.log.configure(state="normal")
@@ -237,6 +245,7 @@ class App:
         title = f"MMDKimodo - {os.path.basename(scene)}" if scene else "MMDKimodo"
         if self.root.title() != title:
             self.root.title(title)
+        self._show_model()
         while not self.q.empty():
             kind, payload = self.q.get()
             if kind == "log":
@@ -260,7 +269,7 @@ class App:
         def opt_int(s):
             s = s.strip()
             return int(s) if s else None
-        s = runner.Settings(pmx=self.pmx.get().strip(), prompt=self.prompt.get("1.0", "end").strip(),
+        s = runner.Settings(prompt=self.prompt.get("1.0", "end").strip(),
                             steps=int(self.steps.get()), seed=int(self.seed.get()), post_processing=bool(self.post.get()),
                             range_start=opt_int(self.r0.get()), range_end=opt_int(self.r1.get()),
                             cfg_text=float(self.cfg_text.get()), cfg_key=float(self.cfg_key.get()),
@@ -268,7 +277,7 @@ class App:
                             use_center=bool(self.use_center.get()))
         if (s.range_start is None) != (s.range_end is None):
             raise ValueError("範囲は始めと終わりの両方を入れてください（全部使うなら両方空）")
-        self.cfg.update(pmx=s.pmx, prompt=s.prompt, steps=s.steps, seed=s.seed, post_processing=s.post_processing,
+        self.cfg.update(prompt=s.prompt, steps=s.steps, seed=s.seed, post_processing=s.post_processing,
                         range_start=self.r0.get(), range_end=self.r1.get(), cfg_text=s.cfg_text, cfg_key=s.cfg_key,
                         length=self.length.get(), use_keys=s.use_keys, use_center=s.use_center)
         os.makedirs(runner.WORK_DIR, exist_ok=True)

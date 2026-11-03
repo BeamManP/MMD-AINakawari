@@ -20,8 +20,8 @@ WORK_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 
 @dataclass
 class Settings:
-    pmx: str
     prompt: str
+    pmx: str = None             # None なら MMD で選択中のモデル（読み込んだ PMX）
     steps: int = 100
     seed: int = -1
     post_processing: bool = True
@@ -106,8 +106,11 @@ def generate(settings, log=print, link=None, previous=None):
     st = link.state()
     if not st["model_selected"]:
         raise RuntimeError("MMD でモデルを選んでください（今はカメラ・照明・アクセサリが選ばれています）")
-    if not os.path.exists(settings.pmx):
-        raise FileNotFoundError(f"PMX が見つかりません: {settings.pmx}")
+    pmx = settings.pmx or link.selected_model()["path"]
+    if not pmx.lower().endswith(".pmx"):
+        raise RuntimeError(f"PMX のモデルだけに対応しています（「{st['model']}」は {os.path.basename(pmx)}）")
+    if not os.path.exists(pmx):
+        raise FileNotFoundError(f"PMX が見つかりません: {pmx}")
     os.makedirs(WORK_DIR, exist_ok=True)
     stamp = time.strftime("%Y%m%d_%H%M%S")
     backup = os.path.join(WORK_DIR, f"original_{stamp}.vmd")
@@ -116,7 +119,7 @@ def generate(settings, log=print, link=None, previous=None):
     link.export_motion(backup)
     original = vmd.read(backup)
     log(f"  キー {len(original.bones)} 個")
-    skel = MMDSkeleton(settings.pmx)
+    skel = MMDSkeleton(pmx)
     fixed_pos = {vmd.vmd_name(b["name"]) for b in skel.bones if not b["flags"] & 0x0004}
     # 照合は書き戻す骨だけ（それ以外は元のキーをそのまま通しているので、比べても意味が無い）
     written = {vmd.vmd_name(n) for n in pipeline.body_bone_names(skel, pipeline.Retargeter(skel, pipeline.SOMA_JSON))}
@@ -130,7 +133,7 @@ def generate(settings, log=print, link=None, previous=None):
     _check_frame_base(link, original, log)
 
     rng = (settings.range_start, settings.range_end) if settings.range_start is not None else None
-    job = pipeline.prepare(settings.pmx, original, settings.prompt, settings.steps, settings.seed,
+    job = pipeline.prepare(pmx, original, settings.prompt, settings.steps, settings.seed,
                            settings.post_processing, frame_range=rng, cfg=(settings.cfg_text, settings.cfg_key),
                            length=settings.length, use_keys=settings.use_keys, use_center=settings.use_center)
     span = f"{job.first}〜{job.first + job.num_frames - 1}F・{job.num_frames} フレーム・テキストの効き {settings.cfg_text}・キーの効き {settings.cfg_key}"
@@ -179,7 +182,7 @@ def undo(backup, log=print, link=None):
 if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser(description="MMDKimodo を窓なしで 1 回動かす（確認用）")
-    ap.add_argument("--pmx", required=True)
+    ap.add_argument("--pmx", help="省くと MMD で選択中のモデル")
     ap.add_argument("--prompt", required=True)
     ap.add_argument("--seed", type=int, default=-1)
     ap.add_argument("--steps", type=int, default=100)

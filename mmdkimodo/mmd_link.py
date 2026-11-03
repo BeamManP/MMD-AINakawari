@@ -1,14 +1,19 @@
 """開いている MMD とのやり取り（mmd-mcp の中の関数を直接使う）。"""
 import os
 
+from mmd_mcp import bone_state
 from mmd_mcp import edit_actions
 from mmd_mcp import file_operations as files
 from mmd_mcp import scene_controls as scene
 from mmd_mcp import timeline
 from mmd_mcp.bone_controls import get_selected_bone_transform
 from mmd_mcp.bone_selection import select_bone
-from mmd_mcp.ui_state import get_ui_state
+from mmd_mcp.ui_state import UIReader, get_ui_state
 from mmd_mcp.windows import list_windows
+
+# MMD の中のモデルのデータでの、読み込んだファイルの場所（UTF-16・256 文字）。
+# MMDPlugin のヘッダ（MMDModelData::file_path・9.31 の解析）の位置で、9.32 でもそのまま読めた（11-03）。
+MODEL_FILE_PATH = 9544
 
 
 class MMDLink:
@@ -39,6 +44,37 @@ class MMDLink:
         s = get_ui_state(self.hwnd)
         return {"frame": s["displayed_frame"]["value"], "model": s["model_selector"]["selected_name"],
                 "model_selected": not s["model_selector"]["camera_light_accessory_selected"]}
+
+    def selected_model(self):
+        """MMD で選択中のモデルの名前と、読み込んだファイルの場所。モデル以外が選ばれていれば None。
+
+        MMD のメモリを読むので、mmd-mcp と同じく検証済みの MMD 9.32 x64 の実行ファイルでだけ動く。
+        画面のモデル欄の名前とメモリの名前を突き合わせ、合わなければ止める。
+        """
+        hwnd = self.hwnd
+        _, selector_index, name = UIReader(hwnd).anchor()  # モデル欄だけ読む（get_ui_state は全部読むので 0.6 秒かかる）
+        if selector_index <= 0:  # 0 はカメラ・照明・アクセサリ
+            return None
+        target = next((w for w in list_windows() if w.hwnd == hwnd), None)
+        if target is None:
+            raise RuntimeError("MMD が閉じられました")
+        memory = bone_state.BoneMemory(target)
+        try:
+            main = memory.pointer(memory.base + bone_state.MAIN_POINTER_RVA)
+            slot = memory.integer(main + bone_state.SELECTED_MODEL)
+            if not 0 <= slot < 255:
+                return None
+            model = memory.pointer(main + bone_state.MODEL_TABLE + slot * 8)
+            if not model:
+                return None
+            names = {bone_state.decode_name(memory.read(model + offset, 50))
+                     for offset in (bone_state.MODEL_NAME_JA, bone_state.MODEL_NAME_EN)}
+            path = memory.read(model + MODEL_FILE_PATH, 512).decode("utf-16-le", errors="replace").split("\0", 1)[0]
+        finally:
+            memory.close()
+        if name not in names:
+            raise RuntimeError(f"MMD のモデル欄（{name}）と中のモデルが合いません。もう一度選び直してください")
+        return {"name": name, "path": path}
 
     def export_motion(self, path):
         """選択中のモデルのモーションを丸ごと書き出す。MMD は選択したキーだけを書き出す（何も選んでいないと断る）ので、先に全部選ぶ。"""
