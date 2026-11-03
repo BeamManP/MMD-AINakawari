@@ -11,6 +11,7 @@
 #include <cwchar>
 #include <string>
 
+#include "kimodo_panel.h"
 #include "mmd_plugin.h"
 
 #ifndef _WIN64
@@ -106,10 +107,17 @@ public:
                                    GetWindowThreadProcessId(hwnd_, nullptr));
         if (!g_hook) show_error(hwnd_, L"メニューの受け口を作れませんでした（エラー " + std::to_wstring(GetLastError()) + L"）。");
         log_line("menu added id=0x%x at %d hook=%p", open_id_, help + 1, static_cast<void*>(g_hook));
+        if (!panel_.create(hwnd_, [this] { open_window(); })) log_line("panel failed %lu", GetLastError());
+    }
+
+    // MMD の窓の大きさが変わったら、パネルの位置を直す（Send で来るので MMDPlugin の受け口に届く）。
+    void WndProc(CWPSTRUCT* param) override {
+        if (param && param->hwnd == hwnd_ && param->message == WM_SIZE) panel_.request_layout();
     }
 
     void stop() override {
         log_line("stop");
+        panel_.destroy();
         if (g_hook) UnhookWindowsHookEx(g_hook);
         g_hook = nullptr;
         g_plugin = nullptr;
@@ -164,6 +172,7 @@ private:
 
     HWND hwnd_ = nullptr;
     int open_id_ = -1;
+    KimodoPanel panel_;
 };
 
 LRESULT CALLBACK get_message_hook(int code, WPARAM wparam, LPARAM lparam) {

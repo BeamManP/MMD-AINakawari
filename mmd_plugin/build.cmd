@@ -26,7 +26,7 @@ powershell -NoProfile -Command "(Get-Content -LiteralPath $env:MMDKIMODO_SDK\mmd
 if errorlevel 1 (popd & exit /b 1)
 copy /y "%MMDKIMODO_SDK%\MMDPlugin.lib" "build\sdk\MMDPlugin\MMDPlugin.lib" >nul
 rem C++14: the header uses std::result_of and std::experimental::filesystem (2017 era).
-cl /nologo /utf-8 /std:c++14/O2 /MT /LD /EHsc /W4 /WX /DUNICODE /D_UNICODE /D_SILENCE_EXPERIMENTAL_FILESYSTEM_DEPRECATION_WARNING /I"build\sdk" /Fo"build\kimodo_plugin.obj" /Fe"bin\MMDKimodo.dll" "kimodo_plugin.cpp" /link user32.lib /LIBPATH:"build\sdk" /IMPLIB:"build\MMDKimodo.lib"
+cl /nologo /utf-8 /std:c++14 /O2 /MT /LD /EHsc /W4 /WX /DUNICODE /D_UNICODE /D_SILENCE_EXPERIMENTAL_FILESYSTEM_DEPRECATION_WARNING /I"build\sdk" /Fobuild\ /Fe"bin\MMDKimodo.dll" "kimodo_plugin.cpp" "kimodo_panel.cpp" /link user32.lib gdi32.lib /LIBPATH:"build\sdk" /IMPLIB:"build\MMDKimodo.lib"
 set "MMDK_RESULT=%ERRORLEVEL%"
 popd
 exit /b %MMDK_RESULT%
