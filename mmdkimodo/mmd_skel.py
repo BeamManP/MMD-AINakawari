@@ -148,12 +148,24 @@ class MMDSkeleton:
         return Q.mul(self._anim_r[j], self._ik_r[j])
 
 
+def curve_points(interp):
+    """64 バイトの補間から、X・Y・Z・回転 × (x1, y1, x2, y2) の 16 個の制御点。
+
+    64 バイトは同じ 16 個を 1 つずつ左にずらして 4 行並べた形。MMD は 1 行目の 3・4 バイト目（Z と回転の x1）を
+    物理演算のオン・オフの印に使う（11-04、全ての親のキーで 1 行目は 0・0、2 行目の写しは 64・20 だった）ので、そこだけ 2 行目から取る。
+    """
+    points = list(interp[:16])
+    points[2], points[3] = interp[17], interp[18]
+    return points
+
+
 def bezier_weight(interp, channel, u):
     """VMD の補間曲線で、キーの間の割合 u（0〜1）を重みに直す。channel: 0=X 1=Y 2=Z 3=回転。
 
     曲線は (0,0)・(x1,y1)・(x2,y2)・(1,1) の 3 次ベジェ（制御点は 0〜127）。後ろのキーが持つ曲線で、その手前の区間を補間する。
     """
-    x1, y1, x2, y2 = (interp[channel + 4 * r] / 127.0 for r in range(4))
+    points = curve_points(interp)
+    x1, y1, x2, y2 = (points[channel + 4 * r] / 127.0 for r in range(4))
     if x1 == y1 and x2 == y2:
         return u   # 直線
     lo, hi = 0.0, 1.0
