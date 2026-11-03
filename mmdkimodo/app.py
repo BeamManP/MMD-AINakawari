@@ -1,10 +1,12 @@
-"""MMDKimodo の窓。起動すると、起動中の MMD 全部のメニューバー（ヘルプの右）に「MMDKimodo」が出る。
+"""MMDKimodo の窓。MMD のメニュー「MMDKimodo」→「Kimodo の窓を開く」から開く（MMDPlugin のプラグイン mmd_plugin/kimodo_plugin.cpp）。
 
 使い方: MMD でモデルを選び、いつもどおりポーズを付けてキーを打つ → ここでプロンプトを入れて「生成」。
 生成は裏で回すので窓は固まらない。「元に戻す」で生成前のモーションに戻せる。
 窓は MMD ごとに 1 つで、その MMD の持ち物（MMD の上に出て、MMD と一緒に隠れる）。× は隠すだけで、MMD のメニューからまた開ける。
-もう一度起動すると、新しく開いた MMD にもメニューを付けて、一番手前の MMD の窓を出す（2 つ目は立ち上がらない）。
+プロセスは 1 つだけ。プラグインは、動いていれば見えない窓（MMDKimodo.Hub）に「この MMD の窓を開いて」と知らせ、
+動いていなければ --open <MMD の窓> 付きで起動する。全部の MMD が閉じたら終わる。
 """
+import argparse
 import ctypes
 import json
 import os
@@ -12,6 +14,7 @@ import queue
 import socket
 import subprocess
 import threading
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -22,16 +25,14 @@ import win32gui
 import winerror
 
 from mmd_mcp.windows import list_windows
-from mmd_plugin.menu_host import MenuBridge, MessageWindow
 
 from . import runner
+from .message_window import MessageWindow, register_message
 from .mmd_link import MMDLink
 
-MENU_OPEN, MENU_QUIT = 0, 2
-MENU_ITEMS = ["Kimodo の窓を開く", "-", "MMDKimodo を終了"]
 APP_MUTEX = "Local\\MMDKimodo.App.v1"
-HUB_CLASS = "MMDKimodo.Hub"            # 2 回目の起動が 1 回目を探す目印
-RESCAN_MESSAGE = "MMDKimodo.Rescan.v1"
+HUB_CLASS = "MMDKimodo.Hub"           # プラグインと 2 回目の起動が探す目印（kimodo_plugin.cpp と同じ）
+OPEN_MESSAGE = "MMDKimodo.Open.v1"    # wparam = 開きたい MMD の窓
 _set_window_long = ctypes.windll.user32.SetWindowLongPtrW
 _set_window_long.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
 _set_window_long.restype = ctypes.c_void_p
@@ -53,39 +54,36 @@ def server_up(port=9550):
         return False
 
 
+def front_mmd():
+    """一番手前の MMD の窓。無ければ None。"""
+    mmds = {w.hwnd for w in list_windows()}
+    order = []
+    win32gui.EnumWindows(lambda hwnd, _: order.append(hwnd), None)  # 手前から順に並ぶ
+    return next((h for h in order if h in mmds), None)
+
+
 class Hub:
-    """MMD ごとの窓（App）をまとめる。見えない tk の親の窓と、2 回目の起動からの知らせを受ける窓を持つ。"""
+    """MMD ごとの窓（App）をまとめる。見えない tk の親の窓と、プラグインからの知らせを受ける窓を持つ。"""
 
     def __init__(self, root):
         self.root = root
         self.apps = {}   # MMD の窓 → App
         self.alive = True
         self.requests = queue.Queue()
-        self.listener = MessageWindow(HUB_CLASS, {RESCAN_MESSAGE: lambda _w, _l: self.requests.put("rescan")})
+        self.listener = MessageWindow(HUB_CLASS, {OPEN_MESSAGE: lambda w, _l: self.requests.put(int(w))})
         self.listener.start()
         self._poll()
 
-    def rescan(self):
-        """まだメニューの無い MMD に付けて、一番手前の MMD の窓を出す。"""
-        found = list_windows()
-        if not found and not self.apps:
-            messagebox.showerror("MMDKimodo", "MMD が起動していません。MMD を起動してから開いてください")
-        errors = []
-        for mmd in found:
-            if mmd.hwnd in self.apps:
-                continue
-            try:
-                self.apps[mmd.hwnd] = App(tk.Toplevel(self.root), self, mmd)
-            except RuntimeError as e:  # その MMD には付けられなかった。他の MMD は続ける
-                errors.append(f"{mmd.title}: {e}")
-        if errors:
-            messagebox.showerror("MMDKimodo", "MMD にメニューを出せませんでした:\n" + "\n".join(errors))
-        order = []
-        win32gui.EnumWindows(lambda hwnd, _: order.append(hwnd), None)  # 手前から順に並ぶ
-        front = next((self.apps[h] for h in order if h in self.apps), None)
-        if front:
-            front.show()
-        elif not self.apps:
+    def open(self, hwnd):
+        """その MMD の窓を出す（まだ無ければ作る）。"""
+        mmd = next((w for w in list_windows() if w.hwnd == hwnd), None)
+        if mmd is None:
+            messagebox.showerror("MMDKimodo", "開こうとした MMD が見つかりません（閉じられた？）")
+        else:
+            if hwnd not in self.apps:
+                self.apps[hwnd] = App(tk.Toplevel(self.root), self, mmd)
+            self.apps[hwnd].show()
+        if not self.apps:
             self._finish()
 
     def forget(self, app):
@@ -98,21 +96,14 @@ class Hub:
         self.alive = False
         self.root.destroy()
 
-    def quit_all(self):
-        for app in list(self.apps.values()):
-            app.close()
-
     def close(self):
-        for app in list(self.apps.values()):
-            app.menu.detach()
         self.listener.stop()
 
     def _poll(self):
         while not self.requests.empty():
-            self.requests.get()
-            self.rescan()
+            self.open(self.requests.get())
         if self.alive:
-            self.root.after(200, self._poll)
+            self.root.after(100, self._poll)
 
 
 class App:
@@ -136,14 +127,9 @@ class App:
         self.busy = False
         self.last_run = runner.load_last_run(self.link)   # この MMD での前回の生成（作り直しと「元に戻す」に使う）。窓を開き直しても残る
         self.last_backup = self.last_run["backup"] if self.last_run else None
-        self.menu = MenuBridge(MENU_ITEMS, mmd)
         self._build()
-        self.menu.attach()
         root.protocol("WM_DELETE_WINDOW", root.withdraw)
         self._tick()
-        self._poll_menu()
-
-    # ---------------- MMD のメニュー ----------------
 
     def show(self):
         """窓を出す。持ち主（MMD）は出すたびに付け直す（隠したまま作った窓は、出すまで枠の窓が決まらないため）。"""
@@ -154,20 +140,8 @@ class App:
         self.root.lift()
         self.root.focus_force()
 
-    def _poll_menu(self):
-        """MMD のメニューで押された項目を拾う（通知は別スレッドに届くので、ここで取りに行く）。"""
-        while not self.menu.commands.empty():
-            index, _how = self.menu.commands.get()
-            if index == MENU_OPEN:
-                self.show()
-            elif index == MENU_QUIT:
-                self.hub.quit_all()
-                return
-        self.root.after(50, self._poll_menu)
-
     def close(self):
-        """この MMD のメニューと窓を片付ける。"""
-        self.menu.detach()
+        """この MMD の窓を片付ける。"""
         self.root.destroy()
         self.hub.forget(self)
 
@@ -343,14 +317,32 @@ class App:
         self.status.set("サーバーを起動しました（黒い窓）。10〜20 秒で ● になります")
 
 
-def main():
-    mutex = win32event.CreateMutex(None, False, APP_MUTEX)  # 終わるまで持っておく
-    if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
-        # もう起動している: 1 回目に「新しい MMD にも付けて、手前の窓を出して」と知らせて終わる
+def _notify_running(hwnd):
+    """もう動いている MMDKimodo に「この MMD の窓を開いて」と知らせる。起動直後で目印がまだ無ければ少し待つ。"""
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
         hub = win32gui.FindWindowEx(win32con.HWND_MESSAGE, 0, HUB_CLASS, None)
         if hub:
-            win32gui.PostMessage(hub, ctypes.windll.user32.RegisterWindowMessageW(RESCAN_MESSAGE), 0, 0)
-        else:
+            win32gui.PostMessage(hub, register_message(OPEN_MESSAGE), hwnd, 0)
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def main():
+    ap = argparse.ArgumentParser(description="MMDKimodo の窓（ふつうは MMD のメニューから開く）")
+    ap.add_argument("--open", type=int, help="窓を開く MMD の窓（省くと一番手前の MMD）")
+    args = ap.parse_args()
+    hwnd = args.open or front_mmd()
+    if not hwnd:
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror("MMDKimodo", "MMD が起動していません。MMD を起動してから開いてください")
+        root.destroy()
+        return
+    mutex = win32event.CreateMutex(None, False, APP_MUTEX)  # 終わるまで持っておく
+    if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
+        if not _notify_running(hwnd):
             root = tk.Tk()
             root.withdraw()
             messagebox.showerror("MMDKimodo", "MMDKimodo はもう起動中ですが、知らせる先が見つかりません。少し待ってからもう一度開いてください")
@@ -360,8 +352,8 @@ def main():
     root.withdraw()  # 親の窓は見せない。MMD ごとの窓（Toplevel）だけ出す
     hub = Hub(root)
     try:
-        hub.rescan()
-        if hub.apps:
+        hub.open(hwnd)
+        if hub.alive:
             root.mainloop()
     finally:
         hub.close()

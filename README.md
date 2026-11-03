@@ -3,13 +3,19 @@
 MMD でいつもどおりポーズを付けてキーを打つ → MMD のメニュー「MMDKimodo」から開く小さな窓で「生成」→ キーとキーの間を NVIDIA Kimodo が埋めて、MMD のタイムラインに毎フレームのキーで入る。
 2026-11-03 作成（メモリア）。Unity 版 KimodoLink（`E:\UnityProject\PaizuriSim\Assets\KimodoLink`）の MMD 版。
 
+## 入れ方（MMDPlugin のプラグイン）
+1. MMD に [MMDPlugin](https://bowlroll.net/file/121761)（ver0.41 64bit・おいがみ さん）を入れる: `d3d9.dll`・`d3dx9_43.dll`・`MMDPlugin.dll` を MMD のフォルダに。MME も使うなら MME 一式を `plugin\mme\` に移す（MMDPlugin の説明書のとおり。MMD 9.32 で動くのを 11-03 に確認）
+2. `mmd_plugin\build.cmd` でビルドした `mmd_plugin\bin\MMDKimodo.dll` を、MMD の `plugin\MMDKimodo\` に置く
+3. 同じフォルダに `mmd_plugin\MMDKimodo.ini.example` を `MMDKimodo.ini` として置き、`python`（MMDKimodo を動かす pythonw.exe）と `home`（このフォルダ）を書く
+
+マスターの MMD（`E:\oldC_0427\…\MikuMikuDance_v932x64`）は 11-03 にこの形にした。MMAccel は外して `Desktop\MMAccel_退避_20261103\`、MMDPlugin を入れる前の MME 一式は `Desktop\MMDPlugin導入前_20261103\` に控えがある。
+
 ## 使い方
 1. （速くするなら）`F:\kimodo\start_textencoder.cmd` でテキスト読み取りサーバーを起動（窓の「サーバーを起動」でも可。VRAM 約 16GB）
-2. **MMD を起動してから** `E:\Projects\MMDKimodo\MMDKimodo.cmd` を起動する。起動中の MMD 全部のメニューバー（ヘルプの右）に「MMDKimodo」が出て、一番手前の MMD の窓が開く
+2. MMD のメニュー「MMDKimodo」（ヘルプの右）→「Kimodo の窓を開く」。初回は Python の起動で数秒かかる
    - 窓は MMD ごとに 1 つで、その MMD の持ち物（MMD の上に出て、MMD を最小化すると一緒に隠れる）。生成と「元に戻す」はその MMD に効く
-   - 窓の × は隠すだけ。メニュー「MMDKimodo」→「Kimodo の窓を開く」でまた出る。やめる時は「MMDKimodo を終了」（全部の MMD から外れる）。MMD を閉じると、その MMD の分は一緒に終わり、全部閉じると MMDKimodo も終わる
-   - 後から開いた MMD には、`MMDKimodo.cmd` をもう一度叩くと付く（2 つ目は立ち上がらず、動いている方に知らせて、手前の MMD の窓を出す）
-   - MMD が起動していないとエラーで終わる（MMD の起動を待ったりはしない。11-03 マスター判断「スタートアップに入れる前提はちょっと」）
+   - 窓の × は隠すだけ。メニューからまた出る。MMD を閉じると、その MMD の分は一緒に終わり、全部閉じると MMDKimodo（Python）も終わる
+   - `MMDKimodo.cmd` は手で起動する時用（一番手前の MMD の窓を開く）
 3. MMD でモデルを選び、ポーズを付けてキーを打つ（例: 0F・30F・60F）。**0F にもキーがあること**
 4. 窓でプロンプト（英語・キーの間をどう動くか）を入れて「生成」。20〜60 秒で MMD に入る
 5. 気に入らなければ「元に戻す」、または プロンプト・seed を変えてもう一度「生成」（前回の元のキーから作り直す）
@@ -44,15 +50,15 @@ MMD でいつもどおりポーズを付けてキーを打つ → MMD のメニ�
 | 写し替え | MMD の骨 ⇔ Kimodo の SOMA 30 関節。骨ごとに「基準での向きの差」（MMD の A ポーズ ⇔ SOMA の T ポーズ）を掛け、座標は Z 反転、位置は脚の長さの比 | `retarget.py` |
 | 生成 | 最初のキーの腰を原点・正面に揃え、足が床に着くよう上下を合わせて、`F:\kimodo\tools\unity_gen.py` を別プロセスで。体のキーは全身の制約（fullbody）、全ての親だけのキーは腰の XZ の制約（root2d） | `pipeline.py` |
 | 書き戻し | 各フレームで MMD が補間する全ての親を差し引き、書かない親側の骨（足IK親・腰キャンセル・肩C）はマスターのキーの補間値で計算に入れて、残りをセンター・体の骨・足ＩＫに直す。元のモーション（体・指・表情・表示/IK 全部）に体の骨の「キーとキーの間」だけを差し込み、0F で MMD に読み込ませる | `pipeline.build_motion`・`pipeline.merge`・`runner.py` |
-| 窓 | tkinter。生成は裏の処理で回す。見えない親の窓（`Hub`）の下に MMD ごとの窓（`App`・Toplevel）を作り、持ち主をその MMD にする。二重起動は名前付きの mutex で見分け、2 つ目は 1 つ目の見えない窓（クラス `MMDKimodo.Hub`）に知らせて終わる | `app.py` |
-| MMD のメニュー | 小さな DLL を MMD の UI スレッドに限ったフックで読み込ませ（mmd-mcp のボーン選択と同じ入り方）、メニューバーのヘルプの右に「MMDKimodo」を足す。押された項目は Python 側の見えない窓へ Post し、キューで窓に渡す。d3d9.dll に触らないので MME・MMAccel・MMDPlugin とぶつからない。フックを外すと DLL も MMD から抜ける。DLL は `mmd_plugin\build.cmd` でビルド（Visual Studio の x64 C++ ツール） | `mmd_plugin\menu_bridge.cpp`・`mmd_plugin\menu_host.py` |
+| 窓 | tkinter。生成は裏の処理で回す。見えない親の窓（`Hub`）の下に MMD ごとの窓（`App`・Toplevel）を作り、持ち主をその MMD にする。プロセスは 1 つだけ（名前付きの mutex）で、プラグインからの「この MMD の窓を開いて」は見えない窓（クラス `MMDKimodo.Hub`・別スレッド）で受ける | `app.py`・`message_window.py` |
+| MMD のメニュー | MMDPlugin のプラグイン。`start()` でヘルプの右に「MMDKimodo」を足し（項目の番号は MMDPlugin の `createWM_APP_ID()`）、押されたら、Python が動いていれば `MMDKimodo.Hub` に MMD の窓を Post、動いていなければ `MMDKimodo.ini` の Python を `-m mmdkimodo.app --open <MMD の窓>` で起動する。`debug=1` で `MMDKimodo.log` に記録 | `mmd_plugin\kimodo_plugin.cpp`・`build.cmd` |
 
 MMD のメニューで踏んだもの（11-03）:
-- 通知を受ける pywin32 の窓を tkinter と同じスレッドに置くと、押された瞬間に Python ごと落ちる（`PyEval_RestoreThread: … the GIL is released`）。tkinter の mainloop は待ち受け中に GIL を手放しているため。専用スレッドで自前のループを回して避けた
-- Python が落ちるとフックは Windows が外し DLL も抜けるが、メニューの見出しだけ MMD に残る（押しても何も起きない）。次に付ける時に「MMDKimodo」の見出しを全部消してから付け直す
-- メニューの通知は Post で届く（Send ではない）。MMAccel と同じく WH_GETMESSAGE で受けて、MMD には渡さない
-- pywin32 の窓の受け口の関数は窓のクラスごとに 1 つ。MMD ごとに通知の窓を作る時、同じクラス名だと 2 つ目の MMD の通知も 1 つ目に積まれる。`MMDKimodo.MenuHost.1`・`.2`… と名前を分けている
+- **MMDPlugin 0.41 は Send の受け口（`WndProc(CWPSTRUCT*)`＝WH_CALLWNDPROC）しか回してくれない**。`GetMsgProc`・`MsgProc`・`WndProc(hwnd, …)` には何も来なかった（記録で確認）。メニューの `WM_COMMAND` は Post で届くので、プラグインが自分で WH_GETMESSAGE のフックを MMD の UI スレッドに掛けて拾い、MMD には渡さない（`stop()` で外す）
+- MMDPlugin のヘッダは頭で d3dx9 のフック（`MMDPluginDLL4`）を決め打ちで有効にしていて、古い DirectX SDK の `d3dx9.h` を要求する。使うのは `MMDPluginDLL3` までなので、`build.cmd` がヘッダの写しを作ってその 1 行を `struct MMDPluginDLL4;` に置き換える。ヘッダが `std::result_of` と `<experimental/filesystem>` を使うので C++14 でビルド
+- 通知を受ける pywin32 の窓を tkinter と同じスレッドに置くと、通知が来た瞬間に Python ごと落ちる（`PyEval_RestoreThread: … the GIL is released`）。tkinter の mainloop は待ち受け中に GIL を手放しているため。専用スレッドで自前のループを回して避けた（`message_window.py`）
 - 生成側（`MMDLink()`）は MMD を毎回探し直していたので、MMD が 2 つあると「1 つにしてください」で止まっていた。窓ごとに相手の MMD を渡すようにした
+- その前に試した「外から一時的に入る」版（スレッド限定のフックで DLL を入れる・d3d9.dll の代理の案）は git の履歴（`6542f53`〜`05f6270`）にある
 
 書き戻す骨: センター（位置）・下半身・上半身・上半身2・首・頭・肩・腕・ひじ・手首・足・ひざ・足首、と下の「モデルの作りへの対応」で決まる骨。
 グルーブ・腰・肩P・腕捩・手捩は間のフレームで 0（体の動きはセンター・下半身・上半身などに全部載せる）。
@@ -92,7 +98,8 @@ MMD のメニューで踏んだもの（11-03）:
 - **配布する時の重さ**: 公式の説明では全部 GPU で動かすと VRAM 約 17GB（ほぼテキストの読み取りの Llama-3-8B の分。うちの常駐サーバーも 16.8GB）。`TEXT_ENCODER_DEVICE=cpu` でテキストの読み取りだけ CPU に回すと VRAM 3GB 未満（少し遅い。RAM は 8B のモデルが乗る分要るはず）。窓に切り替えを付ける・同じプロンプトの読み取り結果を使い回す・動く目安を書く、は配布の準備の時にやる（11-03 マスター「今はこのままで」）
 
 ## 次にやること（2026-11-03 21時の時点）
-- **MMD の中の UI を増やす**（11-03 夜〜・A 方式＝外から一時的に入る、で進行中）: メニュー、窓を MMD の持ち物にする、MMD 複数・二重起動まで済み
+- **MMD の中の UI を増やす**（11-03 夜〜・MMDPlugin のプラグインで進行中）: メニューから MMD ごとの窓を開くところまで済み。次は右側のパネルにボタンを足す下調べ
+- 配布の時の Python: 今は `MMDKimodo.ini` で手元の venv を指している。使う人の PC に Python と Kimodo をどう入れるかは未決
 - **書き戻す部分を選ぶ**（マスター承認済み・未着手）: 窓に「体・左腕・右腕・左脚・右脚」のチェック。外した部分はキーを打たず、マスターのキーの補間値を計算に入れる（書かない親側の骨と同じ扱い）。部分の振り分けはボーン名でなく SOMA の関節との対応・付与・IK のつながりから（ノイニクの指や腕の機構は肩の子でないので、親子だけでたどると漏れる）
 - **中継のボーン（手捩・腕捩・グルーブ・腰・肩P）を 0 にしない**: 今は生成フレームで 0 にして手首などで埋め合わせているので、マスターが手捩をひねっていると、キーのフレームとの境目や、生成後に一部の骨のキーだけ消した時にカクッとする（ノイニクの 0F→1F で手首が 15〜19° 回った）。マスターのキーの補間値を使う形にしたい
 - **外部親**: 計算に入っていない。外部親（地面など）を付けた骨があると MMD とずれる。外部親の設定が VMD の書き出し・読み込みで残るかも未確認（読み込み前に全ﾌﾚｰﾑのキーを消すので、消える可能性がある）
