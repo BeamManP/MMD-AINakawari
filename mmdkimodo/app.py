@@ -29,6 +29,7 @@ from mmd_mcp.windows import list_windows
 from . import runner
 from .message_window import MessageWindow, register_message
 from .mmd_link import MMDLink
+from .widgets import Fold, PromptRows
 
 APP_MUTEX = "Local\\MMDKimodo.App.v1"
 HUB_CLASS = "MMDKimodo.Hub"           # プラグインと 2 回目の起動が探す目印（kimodo_plugin.cpp と同じ）
@@ -39,11 +40,20 @@ _set_window_long.restype = ctypes.c_void_p
 SETTINGS_PATH = os.path.join(runner.WORK_DIR, "settings.json")
 SERVER_CMD = r"F:\kimodo\start_textencoder.cmd"
 DEFAULTS = {
+    "mode": "fill", "range_mode": "all", "length": "",
     "prompt": "A person moves naturally between poses.",
-    "steps": 100, "seed": -1, "post_processing": True, "range_start": "", "range_end": "",
-    "cfg_text": 2.0, "cfg_key": 2.0, "length": "", "use_keys": True, "use_center": False,
+    "steps": 100, "seed": -1, "post_processing": True, "cfg_text": 2.0, "cfg_key": 2.0, "use_center": False,
+    "stop_at_last_key": True,
 }
-
+OLD_KEYS = ("use_keys", "range_start", "range_end", "pmx")   # 前の窓の保存にあった項目（読む時に変換して捨てる）
+MODES = [("fill", "キーの間を埋める"), ("extend", "続きを足す"), ("fresh", "プロンプトだけで作る")]
+MODE_NOTES = {
+    "fill": "打ったキーのポーズを守って、キーとキーの間を作ります（長さは最後のキーまで）",
+    "extend": "打ったキーのポーズを守って、最後のキーの後ろに続きを作ります",
+    "fresh": "キーのポーズは使わず、最初のキーの場所と向きからプロンプトだけで作ります",
+}
+PARTS = ["体", "左腕", "右腕", "左脚", "右脚"]
+NO_RANGE = 999999   # MMD の範囲選択の終わりの初期値（範囲を入れていない）
 
 def server_up(port=9550):
     try:
@@ -115,16 +125,19 @@ class App:
         self.link = MMDLink(mmd.hwnd)
         root.withdraw()  # 出すのは Hub が決める
         root.title("MMDKimodo")
-        root.geometry("520x690")
+        root.minsize(560, 0)   # 高さは中身に合わせる（畳んだ欄を開くと伸びる）
         root.attributes("-topmost", False)
         self.cfg = dict(DEFAULTS)
         try:
-            self.cfg.update(json.load(open(SETTINGS_PATH, encoding="utf-8")))
+            saved = json.load(open(SETTINGS_PATH, encoding="utf-8"))
         except (OSError, ValueError):
-            pass
+            saved = {}
+        if "mode" not in saved and saved.get("use_keys") is False:   # 前の窓の「打ったキーのポーズを守る」オフ
+            saved["mode"] = "fresh" if saved.get("length") else "fill"
+        self.cfg.update({k: v for k, v in saved.items() if k not in OLD_KEYS})
         self.q = queue.Queue()
         self.busy = False
-        self._model_ticks = 1   # 対象のモデルの表示は 2 回に 1 回（1 秒ごと）読み直す。最初はすぐ読む
+        self._model_ticks = 1   # MMD の読み取り（モデル・今のフレーム・範囲選択）は 2 回に 1 回（1 秒ごと）。最初はすぐ読む
         self.last_run = runner.load_last_run(self.link)   # この MMD での前回の生成（作り直しと「元に戻す」に使う）。窓を開き直しても残る
         self.last_backup = self.last_run["backup"] if self.last_run else None
         self._build()
@@ -148,88 +161,164 @@ class App:
     # ---------------- 画面 ----------------
 
     def _build(self):
-        pad = {"padx": 8, "pady": 3}
+        pad = {"padx": 10, "pady": 4}
         f = ttk.Frame(self.root)
         f.pack(fill="both", expand=True)
+        f.columnconfigure(0, weight=1)
 
         # MMD のモデル欄で選んだモデルに効く
+        head = ttk.Frame(f)
+        head.grid(row=0, column=0, sticky="we", **pad)
         self.model_text = tk.StringVar(value="選択中のモデル：（読み取り中）")
-        ttk.Label(f, textvariable=self.model_text, wraplength=490).grid(row=0, column=0, columnspan=4, sticky="w", **pad)
+        ttk.Label(head, textvariable=self.model_text).pack(side="left")
+        self.server_dot = ttk.Label(head, text="")
+        self.server_dot.pack(side="right")
+        ttk.Separator(f).grid(row=1, column=0, sticky="we", padx=10)
 
-        ttk.Label(f, text="プロンプト（英語・キーの間をどう動くか。「45: …」の行で区間ごとに分けられる）").grid(row=2, column=0, columnspan=4, sticky="w", **pad)
-        self.prompt = tk.Text(f, height=7, wrap="word")
-        self.prompt.insert("1.0", self.cfg["prompt"])
-        self.prompt.grid(row=3, column=0, columnspan=4, sticky="we", **pad)
+        # やりたいこと・範囲・長さ。行ごとに別の並びにする（表の列を共有すると、説明の長さが変わった時にボタンが横にずれる）
+        top = ttk.Frame(f)
+        top.grid(row=2, column=0, sticky="we", **pad)
 
-        ttk.Label(f, text="手数（少ないほど速い）").grid(row=4, column=0, sticky="w", **pad)
-        self.steps = tk.IntVar(value=self.cfg["steps"])
-        ttk.Spinbox(f, from_=10, to=100, increment=10, textvariable=self.steps, width=6).grid(row=4, column=1, sticky="w", **pad)
-        ttk.Label(f, text="seed（-1 で毎回変える）").grid(row=5, column=0, sticky="w", **pad)
-        self.seed = tk.IntVar(value=self.cfg["seed"])
-        ttk.Entry(f, textvariable=self.seed, width=8).grid(row=5, column=1, sticky="w", **pad)
-        # Kimodo の CFG の重み。テキストを上げるとプロンプトの動きが強く出る（回転なら 8・1 で振り向くほど）
-        ttk.Label(f, text="テキストの効き").grid(row=4, column=2, sticky="e", **pad)
-        self.cfg_text = tk.DoubleVar(value=self.cfg["cfg_text"])
-        ttk.Spinbox(f, from_=0.5, to=10, increment=0.5, textvariable=self.cfg_text, width=5).grid(row=4, column=3, sticky="w", **pad)
-        ttk.Label(f, text="キーの効き").grid(row=5, column=2, sticky="e", **pad)
-        self.cfg_key = tk.DoubleVar(value=self.cfg["cfg_key"])
-        ttk.Spinbox(f, from_=0.5, to=10, increment=0.5, textvariable=self.cfg_key, width=5).grid(row=5, column=3, sticky="w", **pad)
-        self.post = tk.BooleanVar(value=self.cfg["post_processing"])
-        ttk.Checkbutton(f, text="キーに合わせる後処理", variable=self.post).grid(row=6, column=0, columnspan=2, sticky="w", **pad)
-        # 外すと完全新規（体のキーのポーズは使わず、最初のキーの場所と向きだけ使う）。全ての親のキーはどちらでも使う
-        self.use_keys = tk.BooleanVar(value=self.cfg["use_keys"])
-        ttk.Checkbutton(f, text="打ったキーのポーズを守る", variable=self.use_keys).grid(row=6, column=2, columnspan=2, sticky="w", **pad)
-        # センターの上下などを毎フレームの腰の目印にする（リズムを残して動きを作る。完全新規と組み合わせる想定）
-        self.use_center = tk.BooleanVar(value=self.cfg["use_center"])
-        ttk.Checkbutton(f, text="センターの動きを使う", variable=self.use_center).grid(row=7, column=2, columnspan=2, sticky="w", **pad)
+        def line(title, pady=(0, 0)):
+            row = ttk.Frame(top)
+            row.pack(fill="x", pady=pady)
+            ttk.Label(row, text=title, width=10).pack(side="left")
+            return row
 
-        ttk.Label(f, text="使うキーの範囲（空なら全部・最大 300 フレーム）").grid(row=7, column=0, columnspan=2, sticky="w", **pad)
-        rf = ttk.Frame(f)
-        rf.grid(row=8, column=0, columnspan=4, sticky="w", **pad)
-        self.r0 = tk.StringVar(value=str(self.cfg["range_start"]))
-        self.r1 = tk.StringVar(value=str(self.cfg["range_end"]))
-        ttk.Entry(rf, textvariable=self.r0, width=7).pack(side="left")
-        ttk.Label(rf, text=" F 〜 ").pack(side="left")
-        ttk.Entry(rf, textvariable=self.r1, width=7).pack(side="left")
-        ttk.Label(rf, text=" F　　長さ ").pack(side="left")
+        mode_row = line("やりたいこと")
+        self.mode = tk.StringVar(value=self.cfg["mode"] if self.cfg["mode"] in MODE_NOTES else "fill")
+        for key, text in MODES:
+            ttk.Radiobutton(mode_row, text=text, value=key, variable=self.mode, command=self._mode_changed).pack(side="left", padx=(0, 12))
+        self.mode_note = tk.StringVar()
+        # 説明が 1 行でも 2 行でも高さを変えない（変わると下の段が縦にずれる）
+        tk.Label(line(""), textvariable=self.mode_note, foreground="#556", background=ttk.Style().lookup("TFrame", "background"),
+                 wraplength=440, height=2, anchor="nw", justify="left").pack(side="left", fill="x")
+        range_row = line("範囲", pady=(6, 0))
+        self.range_mode = tk.StringVar(value=self.cfg["range_mode"])
+        self.range_text = tk.StringVar(value="MMD の範囲選択")
+        ttk.Radiobutton(range_row, text="全部", value="all", variable=self.range_mode).pack(side="left", padx=(0, 12))
+        ttk.Radiobutton(range_row, textvariable=self.range_text, value="mmd", variable=self.range_mode).pack(side="left")
+        length_row = line("長さ", pady=(6, 0))
         self.length = tk.StringVar(value=str(self.cfg["length"]))
-        ttk.Entry(rf, textvariable=self.length, width=6).pack(side="left")
-        ttk.Label(rf, text=" F（空なら最後のキーまで）").pack(side="left")
+        self.length_entry = ttk.Entry(length_row, textvariable=self.length, width=6)
+        self.length_entry.pack(side="left")
+        self.length_note = tk.StringVar()
+        ttk.Label(length_row, textvariable=self.length_note, foreground="#556").pack(side="left", padx=(6, 0))
+        # キーは「その瞬間にこの姿勢を通る」だけなので、止めないと走りなどは最後のキーを勢いのまま通り過ぎる
+        self.stop = tk.BooleanVar(value=self.cfg["stop_at_last_key"])
+        self.stop_check = ttk.Checkbutton(line("", pady=(4, 0)), text="最後のキーで止まる（勢いのまま通り過ぎない）", variable=self.stop)
+        self.stop_check.pack(side="left")
+        ttk.Separator(f).grid(row=3, column=0, sticky="we", padx=10)
 
-        sf = ttk.Frame(f)
-        sf.grid(row=9, column=0, columnspan=4, sticky="we", **pad)
+        # プロンプト（区間ごとの行）
+        pf = ttk.Frame(f)
+        pf.grid(row=4, column=0, sticky="we", **pad)
+        ttk.Label(pf, text="プロンプト（英語・行ごとに、そのフレームから次の行までの動き）").pack(anchor="w")
+        self.prompt_rows = PromptRows(pf)
+        self.prompt_rows.pack(fill="x", pady=(4, 0))
+        self.prompt_rows.load(self.cfg["prompt"])
+        self.split_text = tk.StringVar(value="＋ 今のフレームで区切る")
+        ttk.Button(pf, textvariable=self.split_text, command=self._split_here).pack(anchor="w", pady=(4, 0))
+        ttk.Separator(f).grid(row=5, column=0, sticky="we", padx=10)
+
+        # 書き戻す部分（仕組みはまだ。置き場所だけ）・生成
+        wf = ttk.Frame(f)
+        wf.grid(row=6, column=0, sticky="we", **pad)
+        ttk.Label(wf, text="書き戻す部分").pack(side="left")
+        for part in PARTS:
+            check = ttk.Checkbutton(wf, text=part, state="disabled")
+            check.state(["selected", "!alternate", "disabled"])
+            check.pack(side="left", padx=(8, 0))
+        ttk.Label(wf, text="（準備中）", foreground="#888").pack(side="left", padx=(8, 0))
+        bf = ttk.Frame(f)
+        bf.grid(row=7, column=0, sticky="we", **pad)
+        self.gen_btn = ttk.Button(bf, text="生成", command=self._generate)
+        self.gen_btn.pack(side="left", fill="x", expand=True, ipady=8)
+        self.undo_btn = ttk.Button(bf, text="元に戻す", command=self._undo, state="disabled")
+        self.undo_btn.pack(side="left", padx=(6, 0), ipady=8)
+        self.status = tk.StringVar(value="MMD でキーを打ってから「生成」を押してください")
+        ttk.Label(f, textvariable=self.status, foreground="#335", wraplength=520).grid(row=8, column=0, sticky="w", **pad)
+
+        # 畳む欄: 詳しい設定・ログ
+        details = Fold(f, "詳しい設定")
+        details.grid(row=9, column=0, sticky="we", padx=10, pady=(4, 0))
+        d, g = details.body, {"padx": 4, "pady": 2}
+        ttk.Label(d, text="手数（少ないほど速い）").grid(row=0, column=0, sticky="w", **g)
+        self.steps = tk.IntVar(value=self.cfg["steps"])
+        ttk.Spinbox(d, from_=10, to=100, increment=10, textvariable=self.steps, width=6).grid(row=0, column=1, sticky="w", **g)
+        ttk.Label(d, text="seed（-1 で毎回変える）").grid(row=1, column=0, sticky="w", **g)
+        self.seed = tk.IntVar(value=self.cfg["seed"])
+        ttk.Entry(d, textvariable=self.seed, width=8).grid(row=1, column=1, sticky="w", **g)
+        # Kimodo の CFG の重み。テキストを上げるとプロンプトの動きが強く出る（回転なら 8・1 で振り向くほど）
+        ttk.Label(d, text="テキストの効き").grid(row=0, column=2, sticky="e", **g)
+        self.cfg_text = tk.DoubleVar(value=self.cfg["cfg_text"])
+        ttk.Spinbox(d, from_=0.5, to=10, increment=0.5, textvariable=self.cfg_text, width=5).grid(row=0, column=3, sticky="w", **g)
+        ttk.Label(d, text="キーの効き").grid(row=1, column=2, sticky="e", **g)
+        self.cfg_key = tk.DoubleVar(value=self.cfg["cfg_key"])
+        ttk.Spinbox(d, from_=0.5, to=10, increment=0.5, textvariable=self.cfg_key, width=5).grid(row=1, column=3, sticky="w", **g)
+        self.post = tk.BooleanVar(value=self.cfg["post_processing"])
+        ttk.Checkbutton(d, text="キーに合わせる後処理", variable=self.post).grid(row=2, column=0, columnspan=2, sticky="w", **g)
+        # センターの上下などを毎フレームの腰の目印にする（リズムを残して動きを作る。プロンプトだけで作る時と組み合わせる想定）
+        self.use_center = tk.BooleanVar(value=self.cfg["use_center"])
+        ttk.Checkbutton(d, text="センターの動きを使う", variable=self.use_center).grid(row=2, column=2, columnspan=2, sticky="w", **g)
+        sf = ttk.Frame(d)
+        sf.grid(row=3, column=0, columnspan=4, sticky="we", **g)
         self.server_label = ttk.Label(sf, text="")
         self.server_label.pack(side="left")
         self.server_btn = ttk.Button(sf, text="サーバーを起動", command=self._start_server)
         self.server_btn.pack(side="right")
+        logs = Fold(f, "ログ")
+        logs.grid(row=10, column=0, sticky="nsew", padx=10, pady=(4, 8))
+        self.log = tk.Text(logs.body, height=12, wrap="word", state="disabled", background="#f6f6f6")
+        self.log.pack(fill="both", expand=True)
+        f.rowconfigure(10, weight=1)
+        self._mode_changed()
 
-        bf = ttk.Frame(f)
-        bf.grid(row=10, column=0, columnspan=4, sticky="we", **pad)
-        self.gen_btn = ttk.Button(bf, text="生成（Kimodo で間を埋める）", command=self._generate)
-        self.gen_btn.pack(side="left", fill="x", expand=True, ipady=6)
-        self.undo_btn = ttk.Button(bf, text="元に戻す", command=self._undo, state="disabled")
-        self.undo_btn.pack(side="left", padx=(6, 0), ipady=6)
+    def _mode_changed(self):
+        mode = self.mode.get()
+        self.mode_note.set(MODE_NOTES[mode])
+        if mode == "fill":
+            self.length_entry.configure(state="disabled")
+            self.length_note.set("F（最後のキーまで）")
+        else:
+            self.length_entry.configure(state="normal")
+            self.length_note.set("F（最初のキーから。必須）" if mode == "fresh" else "F（最初のキーから。最後のキーより長く）")
+        self.stop_check.configure(state="disabled" if mode == "fresh" else "normal")   # プロンプトだけで作る時は止める位置のキーが無い
 
-        self.status = tk.StringVar(value="MMD でモデルを選び、キーを打ってから「生成」を押してください")
-        ttk.Label(f, textvariable=self.status, foreground="#335", wraplength=490).grid(row=11, column=0, columnspan=4, sticky="w", **pad)
-        self.log = tk.Text(f, height=12, wrap="word", state="disabled", background="#f6f6f6")
-        self.log.grid(row=12, column=0, columnspan=4, sticky="nsew", **pad)
-        f.columnconfigure(0, weight=1)
-        f.rowconfigure(12, weight=1)
+    def _split_here(self):
+        """MMD で今いるフレームから新しい区間にする。"""
+        try:
+            frame = self.link.current_frame()
+        except Exception as e:
+            frame, error = None, e
+        else:
+            error = None
+        if frame is None:
+            self.status.set(f"MMD の今のフレームを読めませんでした{f'（{error}）' if error else ''}")
+        elif not self.prompt_rows.add_at(frame):
+            self.status.set(f"{frame}F から始まる区間はもうあります")
 
-    def _show_model(self):
-        """MMD で選択中のモデルを表示する。生成中は MMD を操作しているので読みに行かない。"""
+    def _read_mmd(self):
+        """MMD の選択中のモデル・今のフレーム・範囲選択を読んで表示する（1 秒ごと）。生成中は MMD を操作しているので読みに行かない。"""
         self._model_ticks += 1
         if self.busy or self._model_ticks % 2:
             return
+        frame = selection = None
         try:
             model = self.link.selected_model()
+            frame = self.link.current_frame()
+            selection = self.link.range_selection()
         except Exception as e:  # 読めない理由をそのまま出す（MMD の版が違う・選び替えの途中など）
             text = f"選択中のモデル：（読み取れません: {e}）"
         else:
             text = f"選択中のモデル：{model['name']}" if model else "選択中のモデル：（なし。MMD のモデル欄でモデルを選んでください）"
-        if self.model_text.get() != text:
-            self.model_text.set(text)
+        updates = [(self.model_text, text),
+                   (self.split_text, f"＋ 今のフレーム（{frame}F）で区切る" if frame is not None else "＋ 今のフレームで区切る"),
+                   (self.range_text, f"MMD の範囲選択（{selection[0]}〜{selection[1]}F）"
+                    if selection and selection[1] < NO_RANGE else "MMD の範囲選択（未設定）")]
+        for var, value in updates:
+            if var.get() != value:
+                var.set(value)
 
     def _write_log(self, line):
         self.log.configure(state="normal")
@@ -245,7 +334,7 @@ class App:
         title = f"MMDKimodo - {os.path.basename(scene)}" if scene else "MMDKimodo"
         if self.root.title() != title:
             self.root.title(title)
-        self._show_model()
+        self._read_mmd()
         while not self.q.empty():
             kind, payload = self.q.get()
             if kind == "log":
@@ -257,6 +346,7 @@ class App:
                 if not ok:
                     messagebox.showerror("MMDKimodo", msg, parent=self.root)
         up = server_up()
+        self.server_dot.configure(text="● サーバー" if up else "○ サーバー停止中", foreground="#2a7" if up else "#a33")
         self.server_label.configure(text="● テキスト読み取りサーバー起動中" if up else "○ サーバー停止中（無いと毎回 Llama を読み込むので遅い）")
         self.server_btn.configure(state="disabled" if up else "normal")
         self.gen_btn.configure(state="disabled" if self.busy else "normal")
@@ -269,17 +359,24 @@ class App:
         def opt_int(s):
             s = s.strip()
             return int(s) if s else None
-        s = runner.Settings(prompt=self.prompt.get("1.0", "end").strip(),
+        mode = self.mode.get()
+        length = opt_int(self.length.get()) if mode != "fill" else None
+        if mode != "fill" and length is None:
+            raise ValueError("「続きを足す」「プロンプトだけで作る」では長さを入れてください")
+        selection = None
+        if self.range_mode.get() == "mmd":
+            selection = self.link.range_selection()
+            if not selection or selection[1] >= NO_RANGE:
+                raise ValueError("MMD の範囲選択が入っていません（タイムラインの下の開始〜終了フレーム）")
+        s = runner.Settings(prompt=self.prompt_rows.text(),
                             steps=int(self.steps.get()), seed=int(self.seed.get()), post_processing=bool(self.post.get()),
-                            range_start=opt_int(self.r0.get()), range_end=opt_int(self.r1.get()),
+                            range_start=selection[0] if selection else None, range_end=selection[1] if selection else None,
                             cfg_text=float(self.cfg_text.get()), cfg_key=float(self.cfg_key.get()),
-                            length=opt_int(self.length.get()), use_keys=bool(self.use_keys.get()),
-                            use_center=bool(self.use_center.get()))
-        if (s.range_start is None) != (s.range_end is None):
-            raise ValueError("範囲は始めと終わりの両方を入れてください（全部使うなら両方空）")
-        self.cfg.update(prompt=s.prompt, steps=s.steps, seed=s.seed, post_processing=s.post_processing,
-                        range_start=self.r0.get(), range_end=self.r1.get(), cfg_text=s.cfg_text, cfg_key=s.cfg_key,
-                        length=self.length.get(), use_keys=s.use_keys, use_center=s.use_center)
+                            length=length, use_keys=mode != "fresh", use_center=bool(self.use_center.get()),
+                            stop_at_last_key=mode != "fresh" and bool(self.stop.get()))
+        self.cfg.update(mode=mode, range_mode=self.range_mode.get(), length=self.length.get(), prompt=s.prompt,
+                        steps=s.steps, seed=s.seed, post_processing=s.post_processing,
+                        cfg_text=s.cfg_text, cfg_key=s.cfg_key, use_center=s.use_center, stop_at_last_key=bool(self.stop.get()))
         os.makedirs(runner.WORK_DIR, exist_ok=True)
         json.dump(self.cfg, open(SETTINGS_PATH, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         return s
@@ -304,7 +401,7 @@ class App:
     def _generate(self):
         try:
             s = self._settings()
-        except ValueError as e:
+        except (ValueError, RuntimeError) as e:
             messagebox.showerror("MMDKimodo", str(e), parent=self.root)
             return
         self._write_log("―" * 20)

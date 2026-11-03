@@ -32,6 +32,7 @@ class Settings:
     length: int = None          # 作るフレーム数（最初のキーから）。None なら最後のキーまで
     use_keys: bool = True       # False なら体のキーのポーズを使わない（完全新規）
     use_center: bool = False    # True なら毎フレームの腰の位置（センターの上下など）を目印にする
+    stop_at_last_key: bool = True   # 最後の体のキーで止まる（キーの後ろに腰を止める目印を足す）
 
 
 def _check_frame_base(link, motion, log):
@@ -135,7 +136,8 @@ def generate(settings, log=print, link=None, previous=None):
     rng = (settings.range_start, settings.range_end) if settings.range_start is not None else None
     job = pipeline.prepare(pmx, original, settings.prompt, settings.steps, settings.seed,
                            settings.post_processing, frame_range=rng, cfg=(settings.cfg_text, settings.cfg_key),
-                           length=settings.length, use_keys=settings.use_keys, use_center=settings.use_center)
+                           length=settings.length, use_keys=settings.use_keys, use_center=settings.use_center,
+                           stop_at_last_key=settings.stop_at_last_key)
     span = f"{job.first}〜{job.first + job.num_frames - 1}F・{job.num_frames} フレーム・テキストの効き {settings.cfg_text}・キーの効き {settings.cfg_key}"
     if settings.use_keys:
         log(f"体のキー {len(job.frames)} 個: {job.frames}（{span}）")
@@ -145,6 +147,10 @@ def generate(settings, log=print, link=None, previous=None):
         log(f"センターの動きを使う: {len(job.root_frames)} フレームで腰の位置と高さを目印にします")
     elif job.root_frames:
         log(f"全ての親だけのキー {len(job.root_frames)} 個: {job.root_frames}（腰がそこを通るように作る）")
+    if job.stop_frames:
+        outside = job.stop_frames[-1] - (job.first + job.num_frames - 1)
+        log(f"最後のキー（{job.stop_frames[0] - 1}F）で止まる: {job.stop_frames[0]}〜{job.stop_frames[-1]}F は腰を動かさない"
+            + (f"（後ろ {outside} フレームは止まるために余分に作るだけで、書き戻さない）" if outside > 0 else ""))
     if job.limb_frames:
         log(f"手足の IK だけのキー {len(job.limb_frames)} 個: {job.limb_frames}（手足の位置だけ合わせ、体は任せる）")
     if len(job.segments) > 1:

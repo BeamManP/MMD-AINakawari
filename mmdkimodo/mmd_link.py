@@ -76,6 +76,19 @@ class MMDLink:
             raise RuntimeError(f"MMD のモデル欄（{name}）と中のモデルが合いません。もう一度選び直してください")
         return {"name": name, "path": path}
 
+    def current_frame(self):
+        """MMD で今いるフレーム（タイムラインの上の現在フレームの欄）。読めなければ None。"""
+        text = UIReader(self.hwnd).edit(417)
+        return int(text) if text and text.strip().isdigit() else None
+
+    def range_selection(self):
+        """MMD の範囲選択の欄（タイムラインの下の開始〜終了フレーム）。MMD の初期値は 0〜999999。読めなければ None。"""
+        reader = UIReader(self.hwnd)
+        start, end = reader.edit(425), reader.edit(426)
+        if not (start and end and start.strip().isdigit() and end.strip().isdigit()):
+            return None
+        return int(start), int(end)
+
     def export_motion(self, path):
         """選択中のモデルのモーションを丸ごと書き出す。MMD は選択したキーだけを書き出す（何も選んでいないと断る）ので、先に全部選ぶ。"""
         r = timeline.select_range(0, 999999, "全ﾌﾚｰﾑ", self.hwnd)

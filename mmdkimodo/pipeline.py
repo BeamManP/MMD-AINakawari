@@ -22,6 +22,7 @@ KIMODO_SCRIPT = r"F:\kimodo\tools\unity_gen.py"
 KIMODO_HF_CACHE = r"F:\kimodo\hf_cache"
 SOMA_JSON = r"F:\kimodo\tools\somaskel30.json"
 MAX_FRAMES = 300  # Kimodo は 10 秒（30fps）までで学習している
+STOP_HOLD = 10    # 「最後のキーで止まる」で、キーの後ろに腰を止めておくフレーム数
 ROOT_BONE = "全ての親"
 IGNORED_ROOTS = ("操作中心",)
 
@@ -41,6 +42,7 @@ class Job:
     ref_pos: np.ndarray = None    # 最初のキーの腰の XZ（Kimodo 座標・m）
     ref_yaw: float = 0.0          # 最初のキーの腰の向き（ラジアン）。Kimodo には +Z 向き・原点で渡す
     ground_lift: float = 0.0      # 足が床に着くように上げ下げした量（m）
+    stop_frames: list = field(default_factory=list)   # 最後のキーで止まるために腰を止めておくフレーム（MMD のフレーム。範囲の外も含む）
     request: dict = field(default_factory=dict)
 
 
@@ -155,7 +157,7 @@ def prompt_segments(prompt, first, num):
 
 
 def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame_range=None, cfg=(2.0, 2.0),
-            length=None, use_keys=True, use_center=False):
+            length=None, use_keys=True, use_center=False, stop_at_last_key=False):
     """cfg: (テキストの効き, キーの効き)。Kimodo の既定は (2, 2)。テキストを上げるとプロンプトの動きが強く出る（回転は 8・1 で振り向くほど）。
 
     length: 作るフレーム数（最初のキーから数える）。None なら最後のキーまで。最後のキーより長くすると、その先は続きを作る。
@@ -163,6 +165,11 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
               全ての親のキー（腰の通り道）はどちらでも使う。
     use_center: True なら、体のキーのフレーム以外の毎フレームで、腰の世界の位置（センター・グルーブ・全ての親などの補間込み）を
                 XZ と高さの目印にする。センターの上下のリズムを残して動きを作る用（完全新規と組み合わせる想定）。
+    stop_at_last_key: True なら最後の体のキーで止まる。キーは「その瞬間にこの姿勢を通る」だけで止まる意味は持たないので、
+                走りなどは勢いを残して通り過ぎる。キーの後ろ STOP_HOLD フレームに「腰はキーの位置から動かない」目印を足すと、
+                Kimodo はキーの手前で減速して止まる（11-04 実験: 走って 60F のキーに着く動きで、行き過ぎ 1.55m → 0.08m・跳び無し）。
+                作る範囲がそのキーで終わる時は、裏で余分に作らせる（書き戻すのは元の範囲だけ）。
+                キーの後ろに全ての親・手足の目印がある（その先も動かす）時と、センターの動きを使う時は止めない。
     """
     skel = MMDSkeleton(pmx)
     rt = Retargeter(skel, SOMA_JSON)
@@ -252,9 +259,28 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
         if use_center:
             root_y_keys.append({"frame": f - first, "y": float(h[1])})
             job.hip_targets[f] = np.asarray(hips, float)   # 書き戻しで腰の高さをこれに合わせる（世界・Kimodo 座標）
+    pad = 0   # 止まるために、元の範囲の後ろへ余分に作らせるフレーム数
+    if stop_at_last_key and frames and not use_center:
+        stop_key = frames[-1]
+        later = [f for f in root_frames + list(limb_keys) if f > stop_key]
+        hold = list(range(stop_key + 1, min(stop_key + STOP_HOLD, first + MAX_FRAMES - 1) + 1))
+        if not later and hold:
+            hips, loc = poses[stop_key]
+            h = canon_hips(hips)
+            # Kimodo の向きの目印は全部に付けるか全部に付けないか。ほかに腰の目印が無ければ、向きも止める（その場で回らないように）
+            with_heading = use_heading or not root_keys
+            for f in hold:
+                rk = {"frame": f - first, "xz": [float(h[0]), float(h[2])]}
+                if with_heading:
+                    rk["heading"] = _yaw_of(Q.mul(to_canon, loc[0]))
+                root_keys.append(rk)
+            job.stop_frames = hold
+            pad = max(0, hold[-1] - last)
     job.segments = prompt_segments(prompt, first, num)
-    job.request = {"prompt": job.segments[0][2], "num_frames": num, "steps": int(steps), "seed": int(seed),
-                   "segments": [{"prompt": t, "frames": n} for _, n, t in job.segments],
+    segments = [{"prompt": t, "frames": n} for _, n, t in job.segments]
+    segments[-1]["frames"] += pad
+    job.request = {"prompt": job.segments[0][2], "num_frames": num + pad, "steps": int(steps), "seed": int(seed),
+                   "segments": segments,
                    "post_processing": bool(post_processing), "keys": keys, "root_keys": root_keys,
                    "root_y_keys": root_y_keys, "ee_keys": ee_keys, "cfg_weight": [float(cfg[0]), float(cfg[1])]}
     return job
@@ -323,7 +349,8 @@ def build_motion(job, result, include_keys=False, workers=None):
     root = np.array(result["root"]).reshape(T, 3)
     rot = np.array(result["local_rot"]).reshape(T, J, 4)
     key_set = {f - job.first for f in job.frames}
-    ks = [k for k in range(T) if include_keys or k not in key_set]
+    # 最後のキーで止まるために余分に作らせたフレーム（job.num_frames より後ろ）は書き戻さない
+    ks = [k for k in range(min(T, job.num_frames)) if include_keys or k not in key_set]
     if workers is None:
         workers = max(1, min(8, (os.cpu_count() or 2) // 2))   # PC 全体を使い切らない（読み上げや MMD が止まらないように）
     workers = max(1, min(workers, len(ks) // 8))   # 少ないフレームは子プロセスを立てる方が遅い
