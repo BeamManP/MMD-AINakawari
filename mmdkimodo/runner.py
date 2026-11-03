@@ -75,20 +75,34 @@ def _same_motion(a, b, tol=1e-3, fixed_pos=(), names=None):
 LAST_RUN = os.path.join(WORK_DIR, "last_run.json")
 
 
-def load_last_run():
-    """前回の生成の控えと結果（窓を開き直した時・コマンドで回した後も、作り直しと「元に戻す」に使う）。無ければ None。"""
+def _last_runs():
     try:
-        r = json.load(open(LAST_RUN, encoding="utf-8"))
+        runs = json.load(open(LAST_RUN, encoding="utf-8"))
     except (OSError, ValueError):
-        return None
-    return r if os.path.exists(r.get("backup", "")) and os.path.exists(r.get("output", "")) else None
+        return {}
+    return runs if isinstance(runs, dict) and "backup" not in runs else {}  # 11-03 以前の 1 件だけの形は捨てる
+
+
+def load_last_run(link):
+    """その MMD での前回の生成の控えと結果（窓を開き直した時・コマンドで回した後も、作り直しと「元に戻す」に使う）。無ければ None。
+
+    MMD ごと（プロセス番号と起動時刻）に分けて残す。MMD を開き直したら引き継がない（別の場面に古い控えを読み込ませないため）。
+    """
+    r = _last_runs().get(link.key)
+    return r if r and os.path.exists(r.get("backup", "")) and os.path.exists(r.get("output", "")) else None
+
+
+def _save_last_run(link, backup, out):
+    runs = _last_runs()
+    runs[link.key] = {"backup": backup, "output": out}
+    json.dump(runs, open(LAST_RUN, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
 
 def generate(settings, log=print, link=None, previous=None):
     """previous: 前回の generate の戻り値（省くと last_run.json）。MMD の中身が前回の結果のままなら、前回の元のキーから作り直す。"""
     t0 = time.time()
-    previous = previous or load_last_run()
     link = link or MMDLink()
+    previous = previous or load_last_run(link)
     st = link.state()
     if not st["model_selected"]:
         raise RuntimeError("MMD でモデルを選んでください（今はカメラ・照明・アクセサリが選ばれています）")
@@ -149,7 +163,7 @@ def generate(settings, log=print, link=None, previous=None):
     root_err = result.get("root_key_error_m") or []
     extra = f"・全ての親のキーとの腰のずれ最大 {max(root_err) * 100:.0f}cm" if root_err else ""
     log(f"できました（{time.time() - t0:.0f} 秒・生成 {result.get('seconds_generate', 0):.1f} 秒・キーとのずれ最大 {max(err) * 100:.1f}cm{extra}）")
-    json.dump({"backup": backup, "output": out}, open(LAST_RUN, "w", encoding="utf-8"), ensure_ascii=False)
+    _save_last_run(link, backup, out)
     return {"backup": backup, "output": out, "job": job}
 
 

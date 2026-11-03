@@ -26,6 +26,15 @@ class MMDLink:
             raise RuntimeError(f"MMD が {len(wins)} 個起動しています。1 つにしてください")
         return wins[0]["hwnd"]
 
+    @property
+    def key(self):
+        """相手の MMD の見分け（プロセス番号と起動時刻。MMD を開き直すと変わる）。"""
+        hwnd = self.hwnd
+        wins = [w for w in list_windows() if w.hwnd == hwnd]
+        if not wins:
+            raise RuntimeError("MMD が閉じられました")
+        return f"{wins[0].pid}-{wins[0].process_started:.0f}"
+
     def state(self):
         s = get_ui_state(self.hwnd)
         return {"frame": s["displayed_frame"]["value"], "model": s["model_selector"]["selected_name"],
