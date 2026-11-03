@@ -5,9 +5,11 @@ d3d9.dll には触らないので、MME・MMAccel・MMDPlugin とぶつからな
 """
 import ctypes
 import mmap
+import queue
 import secrets
 import struct
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -23,7 +25,8 @@ MAX_ITEMS = 16
 PROTOCOL = struct.Struct("<IIQQii1024sii")  # menu_bridge.cpp の Request と同じ並び
 MAGIC, VERSION = 0x4E4D4B4D, 1
 STATUS = {-1: "依頼の中身が合わない", -2: "MMD の窓が違う／メニューが無い", -3: "項目の数が不正",
-          -4: "メニューの番号が他とぶつかる", -5: "メニューを作れなかった"}
+          -4: "メニューの番号が他とぶつかる", -5: "メニューを作れなかった",
+          -6: "メニューバーに「ヘルプ」が見つからない"}
 WH_GETMESSAGE, WH_CALLWNDPROC = 3, 4
 
 _user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -55,18 +58,23 @@ def _mmd_window():
 
 
 class MenuBridge:
-    """attach で MMD にメニューを出し、押されると on_command(番号, 届き方) を呼ぶ。届き方は "post" か "send"。"""
+    """attach で MMD にメニューを出す。押されると commands に (番号, 届き方) が積まれる。届き方は "post" か "send"。
 
-    def __init__(self, items, on_command):
+    通知を受ける窓は専用のスレッドで回す。tkinter の mainloop は待ち受け中に GIL を手放すので、
+    同じスレッドに pywin32 の窓を置くと、通知が来た瞬間に Python ごと落ちる（2026-11-03 に実際に落ちた）。
+    """
+
+    def __init__(self, items):
         if not 1 <= len(items) <= MAX_ITEMS or any(len(i) > 31 for i in items):
             raise ValueError(f"項目は 1〜{MAX_ITEMS} 個、1 つ 31 文字までです")
         self.items = list(items)
-        self.on_command = on_command
+        self.commands = queue.Queue()
         self.window = None
         self.thread = None
         self.module = None
         self.hooks = []
         self.notify = None
+        self.notify_thread = None
         self.position = None
         self._notify_message = _user32.RegisterWindowMessageW("MMDKimodo.MenuCommand.v1")
         self._control_message = _user32.RegisterWindowMessageW("MMDKimodo.MenuControl.v1")
@@ -84,7 +92,7 @@ class MenuBridge:
         self.thread, pid = win32process.GetWindowThreadProcessId(self.window.hwnd)
         if pid != self.window.pid or not self.thread:
             raise RuntimeError("MMD の UI スレッドを特定できません")
-        self._create_notify_window()
+        self._start_notify_thread()
         self.module = _kernel32.LoadLibraryW(str(DLL_PATH))
         if not self.module:
             raise ctypes.WinError(ctypes.get_last_error())
@@ -104,13 +112,11 @@ class MenuBridge:
         if not self.attached:
             return
         try:
-            self._request(2)
+            if win32gui.IsWindow(self.window.hwnd):  # MMD が先に閉じていたら、外すメニューも無い
+                self._request(2)
         finally:
             self._release()
-
-    def pump(self):
-        """こちらの窓に届いた通知を処理する。呼ぶ側のループで回す。"""
-        win32gui.PumpWaitingMessages()
+            self._stop_notify_thread()
 
     def _request(self, command):
         nonce = secrets.randbits(64) or 1
@@ -129,25 +135,51 @@ class MenuBridge:
             raise RuntimeError(f"MMD の中での処理に失敗しました: {STATUS.get(status, status)}")
         return position
 
-    def _create_notify_window(self):
+    def _start_notify_thread(self):
         if self.notify:
             return
-        instance = win32api.GetModuleHandle(None)
-        wc = win32gui.WNDCLASS()
-        wc.lpszClassName = "MMDKimodo.MenuHost"
-        wc.hInstance = instance
-        wc.lpfnWndProc = self._wndproc
-        try:
-            win32gui.RegisterClass(wc)
-        except win32gui.error as error:
-            if error.winerror != 1410:  # 登録済み
-                raise
-        self.notify = win32gui.CreateWindow("MMDKimodo.MenuHost", "", 0, 0, 0, 0, 0,
-                                            win32con.HWND_MESSAGE, 0, instance, None)
+        ready = threading.Event()
+        failure = []
+
+        def run():
+            try:
+                instance = win32api.GetModuleHandle(None)
+                wc = win32gui.WNDCLASS()
+                wc.lpszClassName = "MMDKimodo.MenuHost"
+                wc.hInstance = instance
+                wc.lpfnWndProc = self._wndproc
+                try:
+                    win32gui.RegisterClass(wc)
+                except win32gui.error as error:
+                    if error.winerror != 1410:  # 登録済み
+                        raise
+                self.notify = win32gui.CreateWindow("MMDKimodo.MenuHost", "", 0, 0, 0, 0, 0,
+                                                    win32con.HWND_MESSAGE, 0, instance, None)
+            except Exception as error:  # 呼んだ側で投げ直す
+                failure.append(error)
+                return
+            finally:
+                ready.set()
+            win32gui.PumpMessages()
+
+        self.notify_thread = threading.Thread(target=run, name="MMDKimodo.MenuHost", daemon=True)
+        self.notify_thread.start()
+        ready.wait()
+        if failure:
+            raise failure[0]
+
+    def _stop_notify_thread(self):
+        if self.notify:
+            win32gui.PostMessage(self.notify, win32con.WM_CLOSE, 0, 0)
+            self.notify_thread.join(5)
+            self.notify = None
 
     def _wndproc(self, hwnd, message, wparam, lparam):
         if message == self._notify_message:
-            self.on_command(int(wparam), {1: "post", 2: "send"}.get(lparam, lparam))
+            self.commands.put((int(wparam), {1: "post", 2: "send"}.get(lparam, lparam)))
+            return 0
+        if message == win32con.WM_DESTROY:
+            win32gui.PostQuitMessage(0)
             return 0
         return win32gui.DefWindowProc(hwnd, message, wparam, lparam)
 
@@ -165,21 +197,19 @@ def main():
     sys.stdout.reconfigure(encoding="utf-8")
     seconds = float(sys.argv[1]) if len(sys.argv) > 1 else 300
     items = ["動作テスト", "-", "メニューを外す"]
-    done = []
-
-    def on_command(index, how):
-        print(f"{time.strftime('%H:%M:%S')} 押された: {index}「{items[index]}」（{how} で届いた）", flush=True)
-        if items[index] == "メニューを外す":
-            done.append(True)
-
-    bridge = MenuBridge(items, on_command)
+    bridge = MenuBridge(items)
     bridge.attach()
     print(f"{time.strftime('%H:%M:%S')} メニューを付けました（メニューバーの {bridge.position} 番目）", flush=True)
     deadline = time.monotonic() + seconds
     try:
-        while not done and time.monotonic() < deadline:
-            bridge.pump()
-            time.sleep(0.05)
+        while (left := deadline - time.monotonic()) > 0:
+            try:
+                index, how = bridge.commands.get(timeout=left)
+            except queue.Empty:
+                break
+            print(f"{time.strftime('%H:%M:%S')} 押された: {index}「{items[index]}」（{how} で届いた）", flush=True)
+            if items[index] == "メニューを外す":
+                break
     finally:
         bridge.detach()
         print(f"{time.strftime('%H:%M:%S')} メニューを外しました", flush=True)

@@ -1,8 +1,10 @@
-"""MMDKimodo の窓。MMD の横に置いて使う。
+"""MMDKimodo の窓。起動すると MMD のメニューバー（ヘルプの右）に「MMDKimodo」が出る。
 
 使い方: MMD でモデルを選び、いつもどおりポーズを付けてキーを打つ → ここでプロンプトを入れて「生成」。
 生成は裏で回すので窓は固まらない。「元に戻す」で生成前のモーションに戻せる。
+窓は MMD の持ち物（MMD の上に出て、MMD と一緒に隠れる）。× は隠すだけで、MMD のメニューからまた開ける。
 """
+import ctypes
 import json
 import os
 import queue
@@ -12,8 +14,17 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+import win32gui
+
+from mmd_plugin.menu_host import MenuBridge
+
 from . import runner
 
+MENU_OPEN, MENU_QUIT = 0, 2
+MENU_ITEMS = ["Kimodo の窓を開く", "-", "MMDKimodo を終了"]
+_set_window_long = ctypes.windll.user32.SetWindowLongPtrW
+_set_window_long.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
+_set_window_long.restype = ctypes.c_void_p
 SETTINGS_PATH = os.path.join(runner.WORK_DIR, "settings.json")
 SERVER_CMD = r"F:\kimodo\start_textencoder.cmd"
 DEFAULTS = {
@@ -47,8 +58,38 @@ class App:
         self.busy = False
         self.last_run = runner.load_last_run()   # 前回の生成（作り直しと「元に戻す」に使う）。開き直しても残る
         self.last_backup = self.last_run["backup"] if self.last_run else None
+        self.menu = MenuBridge(MENU_ITEMS)
         self._build()
+        self._attach_to_mmd()
         self._tick()
+        self._poll_menu()
+
+    # ---------------- MMD のメニュー ----------------
+
+    def _attach_to_mmd(self):
+        """MMD にメニューを出し、この窓の持ち主を MMD にする。"""
+        self.menu.attach()
+        self.root.update_idletasks()
+        frame = int(self.root.wm_frame(), 16)
+        _set_window_long(frame, -8, self.menu.window.hwnd)  # GWLP_HWNDPARENT（トップレベルの窓では持ち主）
+        self.root.protocol("WM_DELETE_WINDOW", self.root.withdraw)
+
+    def _poll_menu(self):
+        """MMD のメニューで押された項目を拾う（通知は別スレッドに届くので、ここで取りに行く）。"""
+        while not self.menu.commands.empty():
+            index, _how = self.menu.commands.get()
+            if index == MENU_OPEN:
+                self.root.deiconify()
+                self.root.lift()
+                self.root.focus_force()
+            elif index == MENU_QUIT:
+                self.quit()
+                return
+        self.root.after(50, self._poll_menu)
+
+    def quit(self):
+        self.menu.detach()
+        self.root.destroy()
 
     # ---------------- 画面 ----------------
 
@@ -135,6 +176,9 @@ class App:
         self.log.configure(state="disabled")
 
     def _tick(self):
+        if not win32gui.IsWindow(self.menu.window.hwnd):  # MMD が閉じたら一緒に終わる
+            self.quit()
+            return
         while not self.q.empty():
             kind, payload = self.q.get()
             if kind == "log":
@@ -217,8 +261,17 @@ class App:
 
 def main():
     root = tk.Tk()
-    App(root)
-    root.mainloop()
+    try:
+        app = App(root)
+    except RuntimeError as e:  # MMD が無い・メニューを付けられない
+        root.withdraw()
+        messagebox.showerror("MMDKimodo", f"MMD にメニューを出せませんでした: {e}")
+        root.destroy()
+        return
+    try:
+        root.mainloop()
+    finally:
+        app.menu.detach()
 
 
 if __name__ == "__main__":

@@ -49,6 +49,17 @@ bool is_title(HMENU bar, int position) {
     return std::wcscmp(text, kTitle) == 0;
 }
 
+// MMD 自身の「ヘルプ」の位置。英語表示では「Help」。
+int help_position(HMENU bar) {
+    const int n = GetMenuItemCount(bar);
+    for (int i = 0; i < n; ++i) {
+        wchar_t text[64]{};
+        GetMenuStringW(bar, i, text, 64, MF_BYPOSITION);
+        if (std::wcsncmp(text, L"ヘルプ", 3) == 0 || std::wcsncmp(text, L"Help", 4) == 0) return i;
+    }
+    return -1;
+}
+
 // 足す番号が MMD や他の拡張のメニューと重なっていないか、子メニューまでたどって確かめる。
 bool ids_free(HMENU menu, int count) {
     const int n = GetMenuItemCount(menu);
@@ -75,6 +86,8 @@ void remove_menus(HMENU bar) {
 LONG attach(Request* request, HWND hwnd, HMENU bar) {
     if (request->item_count < 1 || request->item_count > kMaxItems) return -3;
     remove_menus(bar);
+    const int help = help_position(bar);
+    if (help < 0) return -6;
     if (!ids_free(bar, request->item_count)) return -4;
     const HMENU popup = CreatePopupMenu();
     if (!popup) return -5;
@@ -88,7 +101,7 @@ LONG attach(Request* request, HWND hwnd, HMENU bar) {
     info.fMask = MIIM_STRING | MIIM_SUBMENU;
     info.hSubMenu = popup;
     info.dwTypeData = const_cast<wchar_t*>(kTitle);
-    const int position = GetMenuItemCount(bar);
+    const int position = help + 1;  // ヘルプの右。MMAccel・MMEffect はその後ろへずれる
     if (!InsertMenuItemW(bar, position, TRUE, &info)) {
         DestroyMenu(popup);
         return -5;
