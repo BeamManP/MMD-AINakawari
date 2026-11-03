@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from . import pipeline, vmd
+from . import pipeline, smooth_stop, vmd
 from .mmd_link import MMDLink
 from .mmd_skel import MMDSkeleton
 
@@ -33,6 +33,7 @@ class Settings:
     use_keys: bool = True       # False なら体のキーのポーズを使わない（完全新規）
     use_center: bool = False    # True なら毎フレームの腰の位置（センターの上下など）を目印にする
     stop_at_last_key: bool = True   # 最後の体のキーで止まる（キーの後ろに腰を止める目印を足す）
+    smooth_stop: bool = True        # 止まる所を MotionBricks で作り直して、なめらかに止まる（smooth_stop.py）
 
 
 def _check_frame_base(link, motion, log):
@@ -159,6 +160,9 @@ def generate(settings, log=print, link=None, previous=None):
 
     log("Kimodo で生成中…")
     result = pipeline.run_kimodo(job, os.path.join(WORK_DIR, "kimodo"), on_line=lambda l: log("  " + l))
+    if settings.smooth_stop and job.stop_frames:
+        log("MotionBricks で止まり方を作り直し中…")
+        result = smooth_stop.apply(job, result, os.path.join(WORK_DIR, "motionbricks"), log=log)
     generated = pipeline.build_motion(job, result)
     merged = pipeline.merge(original, generated, job)
     out = os.path.join(WORK_DIR, f"kimodo_{stamp}.vmd")

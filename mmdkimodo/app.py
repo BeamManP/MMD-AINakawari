@@ -26,7 +26,7 @@ import winerror
 
 from mmd_mcp.windows import list_windows
 
-from . import runner
+from . import runner, smooth_stop
 from .message_window import MessageWindow, register_message
 from .mmd_link import MMDLink
 from .widgets import Fold, PromptRows
@@ -43,7 +43,7 @@ DEFAULTS = {
     "mode": "fill", "range_mode": "all", "length": "",
     "prompt": "A person moves naturally between poses.",
     "steps": 100, "seed": -1, "post_processing": True, "cfg_text": 2.0, "cfg_key": 2.0, "use_center": False,
-    "stop_at_last_key": True,
+    "stop_at_last_key": True, "smooth_stop": True,
 }
 OLD_KEYS = ("use_keys", "range_start", "range_end", "pmx")   # 前の窓の保存にあった項目（読む時に変換して捨てる）
 MODES = [("fill", "キーの間を埋める"), ("extend", "続きを足す"), ("fresh", "プロンプトだけで作る")]
@@ -206,8 +206,14 @@ class App:
         ttk.Label(length_row, textvariable=self.length_note, foreground="#556").pack(side="left", padx=(6, 0))
         # キーは「その瞬間にこの姿勢を通る」だけなので、止めないと走りなどは最後のキーを勢いのまま通り過ぎる
         self.stop = tk.BooleanVar(value=self.cfg["stop_at_last_key"])
-        self.stop_check = ttk.Checkbutton(line("", pady=(4, 0)), text="最後のキーで止まる（勢いのまま通り過ぎない）", variable=self.stop)
+        stop_row = line("", pady=(4, 0))
+        self.stop_check = ttk.Checkbutton(stop_row, text="最後のキーで止まる（勢いのまま通り過ぎない）", variable=self.stop,
+                                          command=self._stop_changed)
         self.stop_check.pack(side="left")
+        # Kimodo だけだとキーの直前で急に止まるので、止まる所を MotionBricks で作り直す（smooth_stop.py）
+        self.smooth = tk.BooleanVar(value=self.cfg["smooth_stop"] and smooth_stop.available())
+        self.smooth_check = ttk.Checkbutton(stop_row, text="なめらかに（MotionBricks）", variable=self.smooth)
+        self.smooth_check.pack(side="left", padx=(12, 0))
         ttk.Separator(f).grid(row=3, column=0, sticky="we", padx=10)
 
         # プロンプト（区間ごとの行）
@@ -284,6 +290,11 @@ class App:
             self.length_entry.configure(state="normal")
             self.length_note.set("F（最初のキーから。必須）" if mode == "fresh" else "F（最初のキーから。最後のキーより長く）")
         self.stop_check.configure(state="disabled" if mode == "fresh" else "normal")   # プロンプトだけで作る時は止める位置のキーが無い
+        self._stop_changed()
+
+    def _stop_changed(self):
+        usable = self.mode.get() != "fresh" and self.stop.get() and smooth_stop.available()
+        self.smooth_check.configure(state="normal" if usable else "disabled")
 
     def _split_here(self):
         """MMD で今いるフレームから新しい区間にする。"""
@@ -373,10 +384,12 @@ class App:
                             range_start=selection[0] if selection else None, range_end=selection[1] if selection else None,
                             cfg_text=float(self.cfg_text.get()), cfg_key=float(self.cfg_key.get()),
                             length=length, use_keys=mode != "fresh", use_center=bool(self.use_center.get()),
-                            stop_at_last_key=mode != "fresh" and bool(self.stop.get()))
+                            stop_at_last_key=mode != "fresh" and bool(self.stop.get()),
+                            smooth_stop=bool(self.smooth.get()) and smooth_stop.available())
         self.cfg.update(mode=mode, range_mode=self.range_mode.get(), length=self.length.get(), prompt=s.prompt,
                         steps=s.steps, seed=s.seed, post_processing=s.post_processing,
-                        cfg_text=s.cfg_text, cfg_key=s.cfg_key, use_center=s.use_center, stop_at_last_key=bool(self.stop.get()))
+                        cfg_text=s.cfg_text, cfg_key=s.cfg_key, use_center=s.use_center, stop_at_last_key=bool(self.stop.get()),
+                        smooth_stop=bool(self.smooth.get()))
         os.makedirs(runner.WORK_DIR, exist_ok=True)
         json.dump(self.cfg, open(SETTINGS_PATH, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         return s
