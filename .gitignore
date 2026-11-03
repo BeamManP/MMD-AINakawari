@@ -1,0 +1,6 @@
+# 試しの書き出し・生成物
+work/
+mmd_plugin/bin/
+mmd_plugin/build/
+__pycache__/
+*.pyc
