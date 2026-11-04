@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cwchar>
+#include <utility>
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 
@@ -111,9 +112,11 @@ bool KimodoPanel::create(HWND mmd, std::function<void(int)> on_command) {
     // プロンプトは 1 行。区間は「run / 45: stop」のように「 / 」でつなぐ（窓の方では行に分かれる。mmdkimodo/panel.py）。
     // MMD の入力欄と同じく、細い枠の平らな欄（立体の枠 WS_EX_CLIENTEDGE だと MMD の中で浮いた）
     add(L"EDIT", L"", WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL, kPrompt);
-    add(L"BUTTON", L"生成", BS_PUSHBUTTON | WS_TABSTOP, kGenerate);
-    add(L"BUTTON", L"元に戻す", BS_PUSHBUTTON | WS_TABSTOP, kUndo);
-    add(L"BUTTON", L"詳細", BS_PUSHBUTTON | WS_TABSTOP, kDetails);
+    // ボタンは MMD のボタン（再生・登録など。ＭＳ Ｐゴシック 12）と同じ字にする（11-05 マスター）。字体は MMD のを借りる（消さない）
+    for (const auto& b : {std::make_pair(L"生　成", kGenerate), std::make_pair(L"元に戻す", kUndo), std::make_pair(L"詳　細", kDetails)}) {
+        const HWND button = add(L"BUTTON", b.first, BS_PUSHBUTTON | WS_TABSTOP, b.second);
+        if (mmd_font) SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(mmd_font), FALSE);
+    }
     add(L"STATIC", L"MMDKimodo を起動中…", SS_OWNERDRAW, kStatus);
     SetTimer(panel_, kLayoutTimer, 500, nullptr);
     request_layout();
@@ -176,7 +179,9 @@ void KimodoPanel::arrange(int width, int height) {
     const int inner = width - pad * 2;
     const int button = (inner - 8) / 3;
     auto place = [this](int id, int x, int y, int w, int h) {
-        SetWindowPos(GetDlgItem(panel_, id), nullptr, x, y, std::max(1, w), std::max(1, h), SWP_NOZORDER | SWP_NOACTIVATE);
+        // 古い絵を写さない（作った時の 10×10 の灰色が写って、モード選択がマウスを乗せるまで灰色のままだった。11-05 マスター）
+        SetWindowPos(GetDlgItem(panel_, id), nullptr, x, y, std::max(1, w), std::max(1, h),
+                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOCOPYBITS);
     };
     place(kEngine, pad, top, 92, 120);   // 高さは開いた時の一覧の高さ
     place(kRange, pad + 98, top + 2, inner - 98, 16);
@@ -188,7 +193,7 @@ void KimodoPanel::arrange(int width, int height) {
     // 範囲のチェックの字の背景は、その高さのグラデーションの色（隣のパネルの字と同じく背景になじませる）
     if (label_brush_) DeleteObject(label_brush_);
     label_brush_ = CreateSolidBrush(color_at(top + 10));
-    InvalidateRect(panel_, nullptr, TRUE);
+    RedrawWindow(panel_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);   // 子の部品まで描き直す
 }
 
 COLORREF KimodoPanel::color_at(int y) const {
@@ -203,6 +208,13 @@ COLORREF KimodoPanel::color_at(int y) const {
 void KimodoPanel::paint() {
     PAINTSTRUCT ps;
     const HDC dc = BeginPaint(panel_, &ps);
+    draw(dc);
+    EndPaint(panel_, &ps);
+}
+
+// 背景（グラデーション・枠・見出し）を描く。WM_PAINT のほか、Windows 10 風のコンボボックスが自分の後ろの背景を
+// 親に描かせる時（WM_PRINTCLIENT）にも使う
+void KimodoPanel::draw(HDC dc) {
     RECT r;
     GetClientRect(panel_, &r);
     for (int y = 0; y < r.bottom; ++y) {
@@ -218,7 +230,6 @@ void KimodoPanel::paint() {
     const HGDIOBJ old = font_ ? SelectObject(dc, font_) : nullptr;
     DrawTextW(dc, kCaption, -1, &caption, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     if (old) SelectObject(dc, old);
-    EndPaint(panel_, &ps);
 }
 
 // 字の部品（プロンプトの見出し・状態の 1 行）は、背景のグラデーションの上に白い字で描く。
@@ -254,6 +265,9 @@ LRESULT CALLBACK KimodoPanel::proc(HWND hwnd, UINT message, WPARAM wparam, LPARA
             return 0;
         case WM_ERASEBKGND:
             return 1;
+        case WM_PRINTCLIENT:
+            self->draw(reinterpret_cast<HDC>(wparam));
+            return 0;
         case WM_TIMER:
             if (wparam == kLayoutTimer) self->layout();
             return 0;

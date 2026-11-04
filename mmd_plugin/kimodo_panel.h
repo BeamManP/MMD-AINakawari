@@ -24,13 +24,14 @@ private:
     void layout();
     void arrange(int width, int height);
     void paint();
+    void draw(HDC dc);
     void draw_label(const DRAWITEMSTRUCT* item);
     COLORREF color_at(int y) const;
     HWND add(const wchar_t* cls, const wchar_t* text, DWORD style, int id, DWORD ex_style = 0);
 
     HWND mmd_ = nullptr;
     HWND panel_ = nullptr;
-    HFONT font_ = nullptr;   // MMD のボタンの字体を一回り小さくしたもの（自分で作って消す）
+    HFONT font_ = nullptr;   // MMD のボタンの字体を一回り小さくしたもの（自分で作って消す）。ボタンだけは MMD の字体のまま
     HBRUSH label_brush_ = nullptr;
     RECT placed_{};
     std::function<void(int)> on_command_;
