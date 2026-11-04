@@ -88,7 +88,9 @@ def _save_last_run(link, backup, out):
     with _LAST_RUN_LOCK:   # 窓（MMD ごと）は同じプロセスのスレッドで生成するので、読んで書き戻す間をまとめて守る
         runs = _last_runs()
         runs[link.key] = {"backup": backup, "output": out}
-        tmp = LAST_RUN + ".tmp"   # 書き終わってから置き換える（途中で止まっても前のものが残る）
+        # 書き終わってから置き換える（途中で止まっても前のものが残る）。一時ファイルは保存ごとに別の名前
+        # （窓と確認用のスクリプトのように別のプロセスが同時に保存すると、同じ名前では片方の置き換えが失敗した。11-04 Codex のレビュー）
+        tmp = f"{LAST_RUN}.{os.getpid()}.{threading.get_ident()}.tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(runs, f, ensure_ascii=False, indent=1)
         os.replace(tmp, LAST_RUN)

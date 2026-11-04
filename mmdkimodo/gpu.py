@@ -79,14 +79,21 @@ def _gpu():
         raise _Unknown(f"nvidia-smi の出力を読めません（{out.stdout.strip()[:80]}）")
     visible = os.environ.get("CUDA_VISIBLE_DEVICES")
     want = visible.split(",")[0].strip() if visible is not None else "0"
-    for index, uuid, name, total, free in rows:
-        if want == index or (want and uuid.startswith(want)):
-            return name, total, free
+    hits = [r for r in rows if r[0] == want] or [r for r in rows if want.startswith("GPU-") and r[1].startswith(want)]
+    if len(hits) == 1:
+        _, _, name, total, free = hits[0]
+        return name, total, free
+    if len(hits) > 1:   # 短い UUID は 1 枚に決まる時だけ（CUDA の決まり）
+        raise _Unknown(f"CUDA_VISIBLE_DEVICES={visible!r} が GPU を 1 枚に決めていません")
     raise _Unknown(f"使う GPU（CUDA_VISIBLE_DEVICES={visible!r}）が見つかりません" if visible is not None else "GPU の一覧が空です")
 
 
 def diagnose():
     ram, ram_free = _ram()
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if visible is not None and visible.split(",")[0].strip() in ("", "-1"):   # GPU を見せない設定。どちらのモードも動かない
+        return Diagnosis("", 0.0, 0.0, ram, ram_free, False, False,
+                         f"CUDA_VISIBLE_DEVICES={visible!r} で GPU が無効になっています（この設定を外してください）")
     try:
         g = _gpu()
     except _Unknown as e:   # 調べられない時も窓は開く。高速は選べず、低負荷で試せる
