@@ -1,7 +1,7 @@
 """MotionBricks の橋渡し（MotionBricks の Python で動かす）。依頼の JSON → 結果の JSON。
 
     F:\\motionbricks\\.venv\\Scripts\\python.exe tools\\mb_gen.py 依頼.json 結果.json     1 回だけ
-    F:\\motionbricks\\.venv\\Scripts\\python.exe tools\\mb_gen.py --serve 9552         常駐（mmdkimodo/resident.py から頼む）
+    F:\\motionbricks\\.venv\\Scripts\\python.exe tools\\mb_gen.py --serve 9552         常駐（mmd_ainakawari/resident.py から頼む）
 
 姿勢は Kimodo と同じ形（SOMA 30 関節・Y が上・+Z が前・メートル。回転は基準の T ポーズで 0 の、親から見た四元数 x,y,z,w）。
 MotionBricks の骨格（77 関節の USD）は基準の回転が 0 でないので、世界の向きを介して付け替える:
@@ -40,7 +40,7 @@ from motionbricks.model.soma.contract import SOMA_N1_FP32_ONNX_PATH
 from motionbricks.model.soma.engine import MotionBricksSOMAEngine
 
 MIN_TOKENS, MAX_TOKENS = 6, 16   # 1 回で 4k-6 フレーム（両端込み）＝ 18〜58
-AUTHKEY = b"MMDKimodo.resident.v1"   # mmdkimodo/resident.py と同じ
+AUTHKEY = b"AINakawari.resident.v1"   # mmd_ainakawari/resident.py と同じ
 IDLE_SECONDS = 30 * 60               # 常駐で、これだけ頼まれなければ終わる
 
 

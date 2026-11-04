@@ -19,8 +19,8 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
-from mmdkimodo import pipeline, vmd
-from mmdkimodo import quat as Q
+from mmd_ainakawari import pipeline, vmd
+from mmd_ainakawari import quat as Q
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCENES_DIR = os.path.join(HERE, "bench_scenes")

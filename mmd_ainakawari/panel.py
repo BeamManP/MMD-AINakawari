@@ -1,4 +1,4 @@
-"""MMD の右下の「Kimodo操作」パネル（mmd_plugin/kimodo_panel.cpp）を読み書きする。
+"""MMD の右下の「Kimodo操作」パネル（mmd_plugin/nakawari_panel.cpp）を読み書きする。
 
 パネルはプラグイン（MMD のプロセスの中）が作る MMD の窓の子で、部品を並べるだけ。中身は窓（app.py の App）が 0.5 秒ごとに
 読み書きして、窓の設定と同期する（プロンプト・Kimodo か中割りか。範囲は字で出すだけ）。ボタンが押されるとプラグインが Hub に知らせる。
@@ -11,14 +11,14 @@ from ctypes import wintypes
 
 import win32gui
 
-CLASS = "MMDKimodo.Panel"
-# 部品の番号（kimodo_panel.cpp と同じ）
+CLASS = "AINakawari.Panel"
+# 部品の番号（nakawari_panel.cpp と同じ）
 ENGINE, RANGE, PROMPT, GENERATE, UNDO, DETAILS, STATUS, SAMPLES = 101, 102, 103, 104, 105, 106, 107, 108
 
 WM_GETTEXT, WM_SETTEXT, WM_GETTEXTLENGTH = 0x000D, 0x000C, 0x000E
 CB_GETCURSEL, CB_SETCURSEL = 0x0147, 0x014E
 SMTO_ABORTIFHUNG = 0x0002
-ENABLE_MESSAGE = 0x8000 + 2   # WM_APP + 2。パネルに部品の押せる・押せないを頼む（kimodo_panel.cpp の kEnableMessage）
+ENABLE_MESSAGE = 0x8000 + 2   # WM_APP + 2。パネルに部品の押せる・押せないを頼む（nakawari_panel.cpp の kEnableMessage）
 TIMEOUT_MS = 200
 
 _user32 = ctypes.WinDLL("user32", use_last_error=True)

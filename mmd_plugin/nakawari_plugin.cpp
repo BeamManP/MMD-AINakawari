@@ -1,9 +1,9 @@
-// MMDKimodo の MMDPlugin 用プラグイン。MMD のメニューバー（ヘルプの右）に「MMDKimodo」を足し、
-// 「Kimodo の窓を開く」で Python の窓（mmdkimodo.app）を開く。
+// AIナカワリ の MMDPlugin 用プラグイン。MMD のメニューバー（ヘルプの右）に「AIナカワリ」を足し、
+// 「AIナカワリの窓を開く」で Python の窓（mmd_ainakawari.app）を開く。
 // 窓がもう動いていれば「この MMD の窓を開いて」と知らせ、動いていなければ Python を起動する。
-// 下の段の右の空き地には「Kimodo操作」パネル（kimodo_panel.cpp）を置く。パネルの中身は Python の窓が読み書きするので、
+// 下の段の右の空き地には「Kimodo操作」パネル（nakawari_panel.cpp）を置く。パネルの中身は Python の窓が読み書きするので、
 // MMD の起動時に Python の窓を隠したまま立ち上げておく（--attach）。
-// Python の場所は、この DLL の横の MMDKimodo.ini に書く。
+// Python の場所は、この DLL の横の MMD-AINakawari.ini に書く。
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -14,7 +14,7 @@
 #include <cwchar>
 #include <string>
 
-#include "kimodo_panel.h"
+#include "nakawari_panel.h"
 #include "mmd_plugin.h"
 
 #ifndef _WIN64
@@ -24,15 +24,15 @@
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 
 namespace {
-constexpr wchar_t kTitle[] = L"MMDKimodo";
-constexpr wchar_t kOpenLabel[] = L"Kimodo の窓を開く";
-constexpr wchar_t kHubClass[] = L"MMDKimodo.Hub";       // 動いている Python の窓の目印（app.py と同じ）
-constexpr wchar_t kOpenMessage[] = L"MMDKimodo.Open.v1";
-constexpr wchar_t kAttachMessage[] = L"MMDKimodo.Attach.v1";   // この MMD の窓を隠したまま作って（パネル用）
-constexpr wchar_t kPanelMessage[] = L"MMDKimodo.Panel.v1";     // パネルのボタンが押された（lparam はボタンの番号）
-constexpr wchar_t kPanelClass[] = L"MMDKimodo.Panel";          // kimodo_panel.cpp のパネル
-constexpr int kDetailsButton = 106;                            // kimodo_panel.cpp の「詳しく…」
-constexpr int kStatusLabel = 107;                              // kimodo_panel.cpp の状態の 1 行
+constexpr wchar_t kTitle[] = L"AIナカワリ";
+constexpr wchar_t kOpenLabel[] = L"AIナカワリの窓を開く";
+constexpr wchar_t kHubClass[] = L"AINakawari.Hub";       // 動いている Python の窓の目印（app.py と同じ）
+constexpr wchar_t kOpenMessage[] = L"AINakawari.Open.v1";
+constexpr wchar_t kAttachMessage[] = L"AINakawari.Attach.v1";   // この MMD の窓を隠したまま作って（パネル用）
+constexpr wchar_t kPanelMessage[] = L"AINakawari.Panel.v1";     // パネルのボタンが押された（lparam はボタンの番号）
+constexpr wchar_t kPanelClass[] = L"AINakawari.Panel";          // nakawari_panel.cpp のパネル
+constexpr int kDetailsButton = 106;                            // nakawari_panel.cpp の「詳しく…」
+constexpr int kStatusLabel = 107;                              // nakawari_panel.cpp の状態の 1 行
 
 std::wstring module_dir() {
     wchar_t path[MAX_PATH]{};
@@ -45,7 +45,7 @@ void show_error(HWND owner, const std::wstring& text) {
     MessageBoxW(owner, text.c_str(), kTitle, MB_OK | MB_ICONERROR);
 }
 
-// MMDKimodo.ini に debug=1 がある時だけ、DLL の横の MMDKimodo.log に書く。
+// MMD-AINakawari.ini に debug=1 がある時だけ、DLL の横の MMD-AINakawari.log に書く。
 FILE* g_log = nullptr;
 
 void log_line(const char* format, ...) {
@@ -146,26 +146,26 @@ void restore_keys() {
     }
 }
 
-class KimodoPlugin;
-KimodoPlugin* g_plugin = nullptr;
+class NakawariPlugin;
+NakawariPlugin* g_plugin = nullptr;
 HHOOK g_hook = nullptr;
 LRESULT CALLBACK get_message_hook(int code, WPARAM wparam, LPARAM lparam);
 
-class KimodoPlugin : public MMDPluginDLL3 {
+class NakawariPlugin : public MMDPluginDLL3 {
 public:
-    const char* getPluginTitle() const override { return "MMDKimodo"; }
+    const char* getPluginTitle() const override { return "MMD-AINakawari"; }
 
     void start() override {
         hwnd_ = getHWND();
         const std::wstring dir = module_dir();
-        if (GetPrivateProfileIntW(L"MMDKimodo", L"debug", 0, (dir + L"\\MMDKimodo.ini").c_str()) == 1) {
-            g_log = _wfsopen((dir + L"\\MMDKimodo.log").c_str(), L"a", _SH_DENYNO);  // 動いている間も外から読めるように
+        if (GetPrivateProfileIntW(L"MMD-AINakawari", L"debug", 0, (dir + L"\\MMD-AINakawari.ini").c_str()) == 1) {
+            g_log = _wfsopen((dir + L"\\MMD-AINakawari.log").c_str(), L"a", _SH_DENYNO);  // 動いている間も外から読めるように
         }
         log_line("start hwnd=%p mmd-ui-thread=%lu", static_cast<void*>(hwnd_), GetWindowThreadProcessId(hwnd_, nullptr));
         const HMENU bar = GetMenu(hwnd_);
         const int help = bar ? help_position(bar) : -1;
         if (help < 0) {
-            show_error(hwnd_, L"メニューバーに「ヘルプ」が見つからないので、MMDKimodo のメニューを出せませんでした。");
+            show_error(hwnd_, L"メニューバーに「ヘルプ」が見つからないので、AIナカワリ のメニューを出せませんでした。");
             return;
         }
         open_id_ = createWM_APP_ID();  // プラグイン同士でぶつからない番号を MMDPlugin からもらう
@@ -216,7 +216,7 @@ public:
     }
 
     // 取り出された（PM_REMOVE）メッセージを見る。自分の項目の WM_COMMAND なら開き、MMD には渡さない。
-    // パネルのプロンプト欄宛てのキーも、パネルで処理して MMD には渡さない（KimodoPanel::filter）。
+    // パネルのプロンプト欄宛てのキーも、パネルで処理して MMD には渡さない（NakawariPanel::filter）。
     void on_message(MSG* message) {
         if (panel_.filter(message)) return;
         if (message->message != WM_COMMAND || message->hwnd != hwnd_ || HIWORD(message->wParam) != 0
@@ -228,11 +228,11 @@ public:
 private:
     static HWND hub() { return FindWindowExW(HWND_MESSAGE, nullptr, kHubClass, nullptr); }
 
-    // パネルの「サンプル」の一覧。MMDKimodo.ini の home（MMDKimodo のフォルダ）の中にある
+    // パネルの「サンプル」の一覧。MMD-AINakawari.ini の home（AIナカワリ のフォルダ）の中にある
     static std::wstring samples_path() {
         wchar_t home[MAX_PATH]{};
-        GetPrivateProfileStringW(L"MMDKimodo", L"home", L"", home, MAX_PATH, (module_dir() + L"\\MMDKimodo.ini").c_str());
-        return *home ? std::wstring(home) + L"\\mmdkimodo\\prompt_samples.txt" : std::wstring();
+        GetPrivateProfileStringW(L"MMD-AINakawari", L"home", L"", home, MAX_PATH, (module_dir() + L"\\MMD-AINakawari.ini").c_str());
+        return *home ? std::wstring(home) + L"\\mmd_ainakawari\\prompt_samples.txt" : std::wstring();
     }
 
     void open_window() {
@@ -268,30 +268,30 @@ private:
         // Python が終わっていた。立ち上げ直して、もう一度押してもらう
         attach();
         if (const HWND panel = FindWindowExW(hwnd_, nullptr, kPanelClass, nullptr)) {
-            SetDlgItemTextW(panel, kStatusLabel, L"MMDKimodo を起動しています。少ししてからもう一度押してください");
+            SetDlgItemTextW(panel, kStatusLabel, L"AIナカワリ を起動しています。少ししてからもう一度押してください");
         }
     }
 
     // Python の窓を起動する。どの MMD かを --open（窓を出す）か --attach（隠したまま）で渡す。
     void launch(const wchar_t* how, bool show_errors) {
-        const std::wstring ini = module_dir() + L"\\MMDKimodo.ini";
+        const std::wstring ini = module_dir() + L"\\MMD-AINakawari.ini";
         wchar_t python[MAX_PATH]{}, home[MAX_PATH]{};
-        GetPrivateProfileStringW(L"MMDKimodo", L"python", L"", python, MAX_PATH, ini.c_str());
-        GetPrivateProfileStringW(L"MMDKimodo", L"home", L"", home, MAX_PATH, ini.c_str());
+        GetPrivateProfileStringW(L"MMD-AINakawari", L"python", L"", python, MAX_PATH, ini.c_str());
+        GetPrivateProfileStringW(L"MMD-AINakawari", L"home", L"", home, MAX_PATH, ini.c_str());
         if (!*python || !*home) {
             log_line("launch: python/home missing");
-            if (show_errors) show_error(hwnd_, L"MMDKimodo.ini に python と home を書いてください:\n" + ini);
+            if (show_errors) show_error(hwnd_, L"MMD-AINakawari.ini に python と home を書いてください:\n" + ini);
             return;
         }
         wchar_t args[96]{};
-        swprintf_s(args, L" -m mmdkimodo.app %s %llu", how, static_cast<unsigned long long>(reinterpret_cast<UINT_PTR>(hwnd_)));
+        swprintf_s(args, L" -m mmd_ainakawari.app %s %llu", how, static_cast<unsigned long long>(reinterpret_cast<UINT_PTR>(hwnd_)));
         std::wstring command = L"\"" + std::wstring(python) + L"\"" + args;
         STARTUPINFOW startup{};
         startup.cb = sizeof(startup);
         PROCESS_INFORMATION process{};
         if (!CreateProcessW(python, &command[0], nullptr, nullptr, FALSE, 0, nullptr, home, &startup, &process)) {
             log_line("launch failed %lu", GetLastError());
-            if (show_errors) show_error(hwnd_, L"MMDKimodo を起動できませんでした（エラー " + std::to_wstring(GetLastError()) + L"）:\n"
+            if (show_errors) show_error(hwnd_, L"AIナカワリ を起動できませんでした（エラー " + std::to_wstring(GetLastError()) + L"）:\n"
                               + python + L"\n作業フォルダ: " + home);
             return;
         }
@@ -301,7 +301,7 @@ private:
 
     HWND hwnd_ = nullptr;
     int open_id_ = -1;
-    KimodoPanel panel_;
+    NakawariPanel panel_;
 };
 
 LRESULT CALLBACK get_message_hook(int code, WPARAM wparam, LPARAM lparam) {
@@ -314,6 +314,6 @@ LRESULT CALLBACK get_message_hook(int code, WPARAM wparam, LPARAM lparam) {
 
 int version() { return 3; }
 
-MMDPluginDLL3* create3(IDirect3DDevice9*) { return new KimodoPlugin(); }
+MMDPluginDLL3* create3(IDirect3DDevice9*) { return new NakawariPlugin(); }
 
 void destroy3(MMDPluginDLL3* p) { delete p; }

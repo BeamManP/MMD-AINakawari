@@ -1,4 +1,4 @@
-#include "kimodo_panel.h"
+#include "nakawari_panel.h"
 
 #include <algorithm>
 #include <cwchar>
@@ -10,7 +10,7 @@
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 
 namespace {
-constexpr wchar_t kClass[] = L"MMDKimodo.Panel";   // Python（mmdkimodo/panel.py）はこの名前でパネルを探す
+constexpr wchar_t kClass[] = L"AINakawari.Panel";   // Python（mmd_ainakawari/panel.py）はこの名前でパネルを探す
 constexpr wchar_t kCaption[] = L"AIナカワリ簡易操作";
 constexpr int kCameraButton = 536;   // 3D 画面の下の帯の「カメラ編／モデル編」。字体を借りる・今のモードを見る
 constexpr wchar_t kModelModeText[] = L"モデル編";   // カメラ用のモードの時の、このボタンの字
@@ -27,7 +27,7 @@ constexpr int kMinVisible = 40;  // 右に見えるのがこれより狭い時�
 constexpr int kFontHeight = 10;  // MMD の字（ＭＳ Ｐゴシック・高さ 12）より一回り小さく（11-04 マスター）
 constexpr int kMinHeight = 110;
 constexpr int kCaptionHeight = 16;
-// 部品の番号（mmdkimodo/panel.py と同じ）
+// 部品の番号（mmd_ainakawari/panel.py と同じ）
 constexpr int kEngine = 101;
 constexpr int kRange = 102;
 constexpr int kPrompt = 103;
@@ -38,7 +38,7 @@ constexpr int kStatus = 107;
 constexpr int kSamples = 108;          // 「サンプル」。押すとプロンプトの一覧が出る（英語が苦手な人向け。11-05 マスター）
 constexpr UINT kFirstSample = 1000;    // 一覧の項目の番号の始まり
 constexpr UINT kLayoutMessage = WM_APP + 1;
-// Python が部品の押せる・押せないを頼む（wparam = 部品の番号・lparam = 押せるなら 1）。mmdkimodo/panel.py の ENABLE_MESSAGE。
+// Python が部品の押せる・押せないを頼む（wparam = 部品の番号・lparam = 押せるなら 1）。mmd_ainakawari/panel.py の ENABLE_MESSAGE。
 // EnableWindow を外から呼ぶと、相手が答えるまで待って期限を付けられないので、ここで呼ぶ（11-05 Codex のレビュー）
 constexpr UINT kEnableMessage = WM_APP + 2;
 constexpr UINT_PTR kLayoutTimer = 1;  // カメラ用のモードにすると下の段が右に伸びるので、時々測り直す
@@ -84,14 +84,14 @@ BOOL CALLBACK find_fold(HWND child, LPARAM param) {
 }
 }  // namespace
 
-HWND KimodoPanel::add(const wchar_t* cls, const wchar_t* text, DWORD style, int id, DWORD ex_style) {
+HWND NakawariPanel::add(const wchar_t* cls, const wchar_t* text, DWORD style, int id, DWORD ex_style) {
     const HWND control = CreateWindowExW(ex_style, cls, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 10, 10, panel_,
                                          reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), instance(), nullptr);
     if (control && font_) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font_), FALSE);
     return control;
 }
 
-bool KimodoPanel::create(HWND mmd, std::function<void(int)> on_command, std::wstring samples) {
+bool NakawariPanel::create(HWND mmd, std::function<void(int)> on_command, std::wstring samples) {
     mmd_ = mmd;
     on_command_ = std::move(on_command);
     samples_ = std::move(samples);
@@ -120,7 +120,7 @@ bool KimodoPanel::create(HWND mmd, std::function<void(int)> on_command, std::wst
     SendMessageW(engine, CB_SETCURSEL, 0, 0);
     // 範囲は字で出すだけ（Python が「選んだキー 90〜120F」などを書く）。前はチェックで切り替えていた（11-05 マスター「チェックも無しで」）
     add(L"STATIC", L"", SS_OWNERDRAW, kRange);
-    // プロンプトは 1 行。区間は「run / 45: stop」のように「 / 」でつなぐ（窓の方では行に分かれる。mmdkimodo/panel.py）。
+    // プロンプトは 1 行。区間は「run / 45: stop」のように「 / 」でつなぐ（窓の方では行に分かれる。mmd_ainakawari/panel.py）。
     // MMD の入力欄と同じく、細い枠の平らな欄（立体の枠 WS_EX_CLIENTEDGE だと MMD の中で浮いた）
     add(L"EDIT", L"", WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL, kPrompt);
     // ボタンは MMD のボタン（再生・登録など。ＭＳ Ｐゴシック 12）と同じ字にする（11-05 マスター）。字体は MMD のを借りる（消さない）
@@ -129,13 +129,13 @@ bool KimodoPanel::create(HWND mmd, std::function<void(int)> on_command, std::wst
         const HWND button = add(L"BUTTON", b.first, BS_PUSHBUTTON | WS_TABSTOP, b.second);
         if (mmd_font) SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(mmd_font), FALSE);
     }
-    add(L"STATIC", L"MMDKimodo を起動中…", SS_OWNERDRAW, kStatus);
+    add(L"STATIC", L"AIナカワリ を起動中…", SS_OWNERDRAW, kStatus);
     SetTimer(panel_, kLayoutTimer, 500, nullptr);
     request_layout();
     return true;
 }
 
-void KimodoPanel::destroy() {
+void NakawariPanel::destroy() {
     if (panel_) {
         KillTimer(panel_, kLayoutTimer);
         DestroyWindow(panel_);
@@ -146,13 +146,13 @@ void KimodoPanel::destroy() {
     UnregisterClassW(kClass, instance());
 }
 
-void KimodoPanel::request_layout() {
+void NakawariPanel::request_layout() {
     if (panel_) PostMessageW(panel_, kLayoutMessage, 0, 0);
 }
 
 // 「サンプル」: prompt_samples.txt を読んで、種類ごとの子の一覧を「サンプル」の下に出す。選んだら英語の文をプロンプト欄に入れる
 // （欄の中身は Python が 0.5 秒ごとに窓へ写す）。押すたびに読むので、ファイルを書き換えればすぐ反映される
-void KimodoPanel::show_samples() {
+void NakawariPanel::show_samples() {
     std::wstring text;
     FILE* f = nullptr;
     if (!samples_.empty() && _wfopen_s(&f, samples_.c_str(), L"rb") == 0 && f) {
@@ -199,7 +199,7 @@ void KimodoPanel::show_samples() {
     }
 }
 
-bool KimodoPanel::filter(MSG* message) {
+bool NakawariPanel::filter(MSG* message) {
     if (!panel_) return false;
     const HWND prompt = GetDlgItem(panel_, kPrompt);
     const UINT m = message->message;
@@ -237,7 +237,7 @@ bool KimodoPanel::filter(MSG* message) {
 // カメラ・照明・アクセサリのモード（カメラ用）か。3D 画面の下の「カメラ編／モデル編」ボタンは今と逆のモードの名前を出すので、
 // 「モデル編」と出ていればカメラ用のモード（11-04 に測った。モデルの欄で「カメラ・照明・アクセサリ」を選んだ時も同じ）。
 // Kimodo はモデルのモーションを作るので、カメラ用のモードではパネルを出さない（11-05 マスター）
-bool KimodoPanel::camera_mode() const {
+bool NakawariPanel::camera_mode() const {
     wchar_t text[16]{};
     const HWND toggle = GetDlgItem(mmd_, kCameraButton);
     return toggle && GetWindowTextW(toggle, text, 16) && wcscmp(text, kModelModeText) == 0;
@@ -245,7 +245,7 @@ bool KimodoPanel::camera_mode() const {
 
 // 下の段の一番右のパネルの右に、隣のパネルと上端・下端をそろえて置く。
 // 右に kWidth が取れない時も置いて、窓の右端で切れて見えるようにする（MMD のほかのパネルと同じ）。
-void KimodoPanel::layout() {
+void NakawariPanel::layout() {
     Strip strip{mmd_, panel_, -1};
     EnumChildWindows(mmd_, find_fold, reinterpret_cast<LPARAM>(&strip));
     if (strip.top >= 0) {
@@ -280,7 +280,7 @@ void KimodoPanel::layout() {
 
 // 部品を三行に並べる: 1 行目にモード選択と「選んだキー」、2 行目にプロンプト、3 行目にボタン、下に状態の 1 行。
 // 大きさは MMD のパネルに合わせる（ボタン・切り替えは高さ 20px 前後）
-void KimodoPanel::arrange(int width, int height) {
+void NakawariPanel::arrange(int width, int height) {
     const int pad = 6;
     const int top = kCaptionHeight + 4;
     const int inner = width - pad * 2;
@@ -301,7 +301,7 @@ void KimodoPanel::arrange(int width, int height) {
     RedrawWindow(panel_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);   // 子の部品まで描き直す
 }
 
-COLORREF KimodoPanel::color_at(int y) const {
+COLORREF NakawariPanel::color_at(int y) const {
     RECT r;
     GetClientRect(panel_, &r);
     const int height = std::max(1, static_cast<int>(r.bottom));
@@ -310,7 +310,7 @@ COLORREF KimodoPanel::color_at(int y) const {
                kTop[2] + (kBottom[2] - kTop[2]) * y / height);
 }
 
-void KimodoPanel::paint() {
+void NakawariPanel::paint() {
     PAINTSTRUCT ps;
     const HDC dc = BeginPaint(panel_, &ps);
     draw(dc);
@@ -319,7 +319,7 @@ void KimodoPanel::paint() {
 
 // 背景（グラデーション・枠・見出し）を描く。WM_PAINT のほか、Windows 10 風のコンボボックスが自分の後ろの背景を
 // 親に描かせる時（WM_PRINTCLIENT）にも使う
-void KimodoPanel::draw(HDC dc) {
+void NakawariPanel::draw(HDC dc) {
     RECT r;
     GetClientRect(panel_, &r);
     for (int y = 0; y < r.bottom; ++y) {
@@ -339,7 +339,7 @@ void KimodoPanel::draw(HDC dc) {
 
 // 字の部品（範囲・状態の 1 行）は、背景のグラデーションの上に白い字で描く。
 // 字は Python が WM_SETTEXT で書き換える（SS_OWNERDRAW は書き換えで描き直しが来る）
-void KimodoPanel::draw_label(const DRAWITEMSTRUCT* item) {
+void NakawariPanel::draw_label(const DRAWITEMSTRUCT* item) {
     const RECT in_panel = client_rect_of(item->hwndItem, panel_);
     for (int y = item->rcItem.top; y < item->rcItem.bottom; ++y) {
         const RECT line{item->rcItem.left, y, item->rcItem.right, y + 1};
@@ -357,12 +357,12 @@ void KimodoPanel::draw_label(const DRAWITEMSTRUCT* item) {
     if (old) SelectObject(item->hDC, old);
 }
 
-LRESULT CALLBACK KimodoPanel::proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
+LRESULT CALLBACK NakawariPanel::proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
     if (message == WM_NCCREATE) {
         SetWindowLongPtrW(hwnd, GWLP_USERDATA,
                           reinterpret_cast<LONG_PTR>(reinterpret_cast<CREATESTRUCTW*>(lparam)->lpCreateParams));
     }
-    auto* self = reinterpret_cast<KimodoPanel*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    auto* self = reinterpret_cast<NakawariPanel*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (self && self->panel_ == hwnd) {
         switch (message) {
         case WM_PAINT:

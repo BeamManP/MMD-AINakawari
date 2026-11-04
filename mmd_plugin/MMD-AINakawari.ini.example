@@ -1,0 +1,6 @@
+; Put this file next to MMD-AINakawari.dll as MMD-AINakawari.ini (MikuMikuDance\plugin\MMD-AINakawari\MMD-AINakawari.ini).
+; python: Python that runs the AIナカワリ window (pythonw.exe hides the console).
+; home:   AIナカワリ folder (the one that contains the mmd_ainakawari package).
+[MMD-AINakawari]
+python=E:\Projects\mmd-mcp\.venv\Scripts\pythonw.exe
+home=E:\Projects\MMDKimodo

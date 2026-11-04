@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from multiprocessing import AuthenticationError
 from multiprocessing.connection import Client
 
-AUTHKEY = b"MMDKimodo.resident.v1"   # tools/kimodo_gen.py・tools/mb_gen.py と同じ
+AUTHKEY = b"AINakawari.resident.v1"   # tools/kimodo_gen.py・tools/mb_gen.py と同じ
 LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "work")
 CONNECT_TIMEOUT = 5.0     # つないで合言葉を確かめるまで
 REPLY_TIMEOUT = 15 * 60   # 1 回の生成の答えを待つ上限（低負荷の初回の読み取りや長い動きでも数十秒）
@@ -115,7 +115,7 @@ def _start(server, log):
         if conn is not None:
             return conn
         if proc.poll() is not None:
-            # 口をほかの常駐（別のプロセスの MMDKimodo が同時に立ち上げたもの）に取られて終わった時は、そちらを使う
+            # 口をほかの常駐（別のプロセスの AIナカワリ が同時に立ち上げたもの）に取られて終わった時は、そちらを使う
             conn = _connect_waiting(server, deadline)
             if conn is not None:
                 return conn

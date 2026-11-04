@@ -228,7 +228,7 @@ def undo(backup, log=print, link=None):
 
 if __name__ == "__main__":
     import argparse
-    ap = argparse.ArgumentParser(description="MMDKimodo を窓なしで 1 回動かす（確認用）")
+    ap = argparse.ArgumentParser(description="AIナカワリ を窓なしで 1 回動かす（確認用）")
     ap.add_argument("--pmx", help="省くと MMD で選択中のモデル")
     ap.add_argument("--prompt", required=True)
     ap.add_argument("--seed", type=int, default=-1)

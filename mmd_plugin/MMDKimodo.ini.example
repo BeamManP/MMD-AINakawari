@@ -1,6 +1,0 @@
-; Put this file next to MMDKimodo.dll as MMDKimodo.ini (MikuMikuDance\plugin\MMDKimodo\MMDKimodo.ini).
-; python: Python that runs the MMDKimodo window (pythonw.exe hides the console).
-; home:   MMDKimodo folder (the one that contains the mmdkimodo package).
-[MMDKimodo]
-python=E:\Projects\mmd-mcp\.venv\Scripts\pythonw.exe
-home=E:\Projects\MMDKimodo

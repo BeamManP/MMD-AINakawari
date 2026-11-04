@@ -85,7 +85,7 @@ def _skip_when_empty(c):
 
 
 MODEL = "kimodo-soma-rp"
-AUTHKEY = b"MMDKimodo.resident.v1"   # mmdkimodo/resident.py と同じ
+AUTHKEY = b"AINakawari.resident.v1"   # mmd_ainakawari/resident.py と同じ
 TEXT_CACHE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "work", "text_cache")
 IDLE_SECONDS = 30 * 60               # 常駐で、これだけ頼まれなければ終わる
 

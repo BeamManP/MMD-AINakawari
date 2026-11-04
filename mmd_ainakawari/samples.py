@@ -1,6 +1,6 @@
 """プロンプトのサンプルの一覧（prompt_samples.txt）を読む。英語が苦手な人向けに、窓の「サンプルから選ぶ」で出す。
 
-MMD の右下のパネル（mmd_plugin/kimodo_panel.cpp の show_samples）も同じファイルを同じ書き方で読む。
+MMD の右下のパネル（mmd_plugin/nakawari_panel.cpp の show_samples）も同じファイルを同じ書き方で読む。
 書き方: [種類] の行で種類を分け、その下に「動作：英語のプロンプト」を 1 行ずつ。# で始まる行は読み飛ばす。
 """
 import os

@@ -1,9 +1,9 @@
-"""MMDKimodo の窓。MMD のメニュー「MMDKimodo」→「Kimodo の窓を開く」から開く（MMDPlugin のプラグイン mmd_plugin/kimodo_plugin.cpp）。
+"""AIナカワリ の窓。MMD のメニュー「AIナカワリ」→「AIナカワリの窓を開く」から開く（MMDPlugin のプラグイン mmd_plugin/nakawari_plugin.cpp）。
 
 使い方: MMD でモデルを選び、いつもどおりポーズを付けてキーを打つ → ここでプロンプトを入れて「生成」。
 生成は裏で回すので窓は固まらない。「元に戻す」で生成前のモーションに戻せる。
 窓は MMD ごとに 1 つで、その MMD の持ち物（MMD の上に出て、MMD と一緒に隠れる）。× は隠すだけで、MMD のメニューからまた開ける。
-プロセスは 1 つだけ。プラグインは、動いていれば見えない窓（MMDKimodo.Hub）に「この MMD の窓を開いて」と知らせ、
+プロセスは 1 つだけ。プラグインは、動いていれば見えない窓（AINakawari.Hub）に「この MMD の窓を開いて」と知らせ、
 動いていなければ --open <MMD の窓> 付きで起動する。全部の MMD が閉じたら終わる。
 """
 import argparse
@@ -31,12 +31,12 @@ from .message_window import MessageWindow, register_message
 from .mmd_link import MMDLink
 from .widgets import Fold, PromptRows, ScrollFrame
 
-APP_MUTEX = "Local\\MMDKimodo.App.v1"
-HUB_CLASS = "MMDKimodo.Hub"           # プラグインと 2 回目の起動が探す目印（kimodo_plugin.cpp と同じ）
-OPEN_MESSAGE = "MMDKimodo.Open.v1"    # wparam = 開きたい MMD の窓
-ATTACH_MESSAGE = "MMDKimodo.Attach.v1"   # wparam = MMD の窓。窓を隠したまま作る（MMD の右下のパネル用。kimodo_plugin.cpp）
+APP_MUTEX = "Local\\AINakawari.App.v1"
+HUB_CLASS = "AINakawari.Hub"           # プラグインと 2 回目の起動が探す目印（nakawari_plugin.cpp と同じ）
+OPEN_MESSAGE = "AINakawari.Open.v1"    # wparam = 開きたい MMD の窓
+ATTACH_MESSAGE = "AINakawari.Attach.v1"   # wparam = MMD の窓。窓を隠したまま作る（MMD の右下のパネル用。nakawari_plugin.cpp）
 ATTACH_WAIT = 30   # 隠したまま作る時に、起動の途中の MMD の窓が見えるようになるまで待つ秒数
-PANEL_MESSAGE = "MMDKimodo.Panel.v1"     # wparam = MMD の窓・lparam = 押されたパネルのボタン（panel.GENERATE など）
+PANEL_MESSAGE = "AINakawari.Panel.v1"     # wparam = MMD の窓・lparam = 押されたパネルのボタン（panel.GENERATE など）
 _set_window_long = ctypes.windll.user32.SetWindowLongPtrW
 _set_window_long.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
 _set_window_long.restype = ctypes.c_void_p
@@ -104,7 +104,7 @@ class Hub:
         mmd = next((w for w in list_windows() if w.hwnd == hwnd), None)
         if mmd is None:
             if show:
-                messagebox.showerror("MMDKimodo", "開こうとした MMD が見つかりません（閉じられた？）")
+                messagebox.showerror("AIナカワリ", "開こうとした MMD が見つかりません（閉じられた？）")
             elif win32gui.IsWindow(hwnd):
                 self.waiting.setdefault(hwnd, time.monotonic() + ATTACH_WAIT)
         else:
@@ -159,7 +159,7 @@ class App:
         self.mmd = mmd
         self.link = MMDLink(mmd.hwnd)
         root.withdraw()  # 出すのは Hub が決める
-        root.title("MMDKimodo")
+        root.title("AIナカワリ")
         root.minsize(560, 0)   # 高さの下限は _build で決める（上と下の段が必ず見える高さ）
         root.attributes("-topmost", False)
         self.cfg = dict(DEFAULTS)
@@ -271,7 +271,7 @@ class App:
 
         # ログは別の小さな窓（本体の並びを押し出さない）。× は隠すだけ
         self.log_win = tk.Toplevel(self.root)
-        self.log_win.title("MMDKimodo のログ")
+        self.log_win.title("AIナカワリ のログ")
         self.log_win.withdraw()
         self.log_win.protocol("WM_DELETE_WINDOW", self.log_win.withdraw)
         bar = ttk.Scrollbar(self.log_win, orient="vertical")
@@ -405,7 +405,7 @@ class App:
 
     def _perf_changed(self):
         if self._perf_mode() == "fast" and not self.diagnosis.fast_ok:
-            messagebox.showinfo("MMDKimodo", f"この PC では高速モードは使えません（{self.diagnosis.note}）。低負荷モードで作ります",
+            messagebox.showinfo("AIナカワリ", f"この PC では高速モードは使えません（{self.diagnosis.note}）。低負荷モードで作ります",
                                 parent=self.root)
             self.perf.set(dict(PERF_MODES)["low"])
         self.perf_note.set("低負荷モード: 文の読み取りを CPU で行います（VRAM 約 2.5GB・メインメモリ約 15GB。1 文 3 秒ほど。同じ文は 2 回目から速い）"
@@ -437,7 +437,7 @@ class App:
         try:
             groups = samples.load()
         except OSError as e:
-            messagebox.showerror("MMDKimodo", f"サンプルの一覧が読めません: {e}", parent=self.root)
+            messagebox.showerror("AIナカワリ", f"サンプルの一覧が読めません: {e}", parent=self.root)
             return
         if getattr(self, "_sample_menu", None) is not None:   # 前に開いた一覧は消す（開くたびに増えていた。11-05 Codex のレビュー）
             self._sample_menu.destroy()
@@ -504,7 +504,7 @@ class App:
         # 次の予約は先に入れる（途中で例外が出ると、パネルとの同期も表示の更新も止まっていた。11-05 Codex のレビュー）
         self.root.after(500, self._tick)
         scene =win32gui.GetWindowText(self.mmd.hwnd).partition("[")[2].rstrip("]")
-        title = f"MMDKimodo - {os.path.basename(scene)}" if scene else "MMDKimodo"
+        title = f"AIナカワリ - {os.path.basename(scene)}" if scene else "AIナカワリ"
         if self.root.title() != title:
             self.root.title(title)
         self._read_mmd()
@@ -517,7 +517,7 @@ class App:
                 ok, msg = payload
                 self.status.set(msg)
                 if not ok:
-                    messagebox.showerror("MMDKimodo", msg, parent=self.root)
+                    messagebox.showerror("AIナカワリ", msg, parent=self.root)
         up = server_up()
         self.server_dot.configure(text="●" if up else "○", foreground="#2a7" if up else "#a33")
         fast = self._perf_mode() == "fast"
@@ -711,10 +711,10 @@ class App:
         try:
             s = self._settings(fill=fill)
         except (ValueError, RuntimeError) as e:
-            messagebox.showerror("MMDKimodo", str(e), parent=self.root)
+            messagebox.showerror("AIナカワリ", str(e), parent=self.root)
             return
         except tk.TclError:   # 数字の欄（手数・seed・効き）に数字でないものが入っている
-            messagebox.showerror("MMDKimodo", "「詳しい設定」の手数・seed・効きには数字を入れてください", parent=self.root)
+            messagebox.showerror("AIナカワリ", "「詳しい設定」の手数・seed・効きには数字を入れてください", parent=self.root)
             return
         self._write_log("―" * 20)
         self.status.set("生成中…")
@@ -729,14 +729,14 @@ class App:
 
     def _start_server(self):
         if not os.path.exists(SERVER_CMD):
-            messagebox.showerror("MMDKimodo", f"サーバーの起動バッチがありません: {SERVER_CMD}", parent=self.root)
+            messagebox.showerror("AIナカワリ", f"サーバーの起動バッチがありません: {SERVER_CMD}", parent=self.root)
             return
         subprocess.Popen(["cmd.exe", "/c", SERVER_CMD], creationflags=subprocess.CREATE_NEW_CONSOLE)
         self.status.set("サーバーを起動しました（黒い窓）。10〜20 秒で ● になります")
 
 
 def _notify_running(hwnd, message=OPEN_MESSAGE):
-    """もう動いている MMDKimodo に「この MMD の窓を開いて」（隠したまま作って）と知らせる。起動直後で目印がまだ無ければ少し待つ。"""
+    """もう動いている AIナカワリ に「この MMD の窓を開いて」（隠したまま作って）と知らせる。起動直後で目印がまだ無ければ少し待つ。"""
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         hub = win32gui.FindWindowEx(win32con.HWND_MESSAGE, 0, HUB_CLASS, None)
@@ -748,7 +748,7 @@ def _notify_running(hwnd, message=OPEN_MESSAGE):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="MMDKimodo の窓（ふつうは MMD のメニューから開く）")
+    ap = argparse.ArgumentParser(description="AIナカワリ の窓（ふつうは MMD のメニューから開く）")
     ap.add_argument("--open", type=int, help="窓を開く MMD の窓（省くと一番手前の MMD）")
     ap.add_argument("--attach", type=int, help="窓を隠したまま作る MMD の窓（MMD の起動時にプラグインが、右下のパネル用に渡す）")
     args = ap.parse_args()
@@ -757,7 +757,7 @@ def main():
     if not hwnd:
         root = tk.Tk()
         root.withdraw()
-        messagebox.showerror("MMDKimodo", "MMD が起動していません。MMD を起動してから開いてください")
+        messagebox.showerror("AIナカワリ", "MMD が起動していません。MMD を起動してから開いてください")
         root.destroy()
         return
     mutex = win32event.CreateMutex(None, False, APP_MUTEX)  # 終わるまで持っておく
@@ -765,7 +765,7 @@ def main():
         if not _notify_running(hwnd, OPEN_MESSAGE if show else ATTACH_MESSAGE) and show:
             root = tk.Tk()
             root.withdraw()
-            messagebox.showerror("MMDKimodo", "MMDKimodo はもう起動中ですが、知らせる先が見つかりません。少し待ってからもう一度開いてください")
+            messagebox.showerror("AIナカワリ", "AIナカワリ はもう起動中ですが、知らせる先が見つかりません。少し待ってからもう一度開いてください")
             root.destroy()
         return
     root = tk.Tk()
