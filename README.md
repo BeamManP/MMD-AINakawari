@@ -23,9 +23,9 @@ MMD（MikuMikuDance）で打ったキーとキーの間を、AI が中割りし�
 | | 内容 |
 |---|---|
 | **AI 中割り（MotionBricks）** | プロンプト無しで、キーとキーの間（17〜57 フレーム）をつなぐ。キーごとに止まる／勢いのまま通る、手首だけ普通の補間、を選べる |
-| **プロンプトで作る（Kimodo）** | 英語の文で動きを指定して、キーの間を埋める。区間ごとに違う文も書ける（`run / 45: stop` なら 45F から stop）。詳細の窓では「最後のキーの後ろに続きを足す」「キーのポーズを使わずプロンプトだけで作る」もできる |
-| **選んだキーの間だけ作り直す** | タイムラインで選んだキーの最初から最後までを作り直す。範囲の外の動き（補間曲線も）はそのまま残り、範囲の端は外の動きにつながる |
-| **キー以外の手がかり** | 全ての親だけのキーは「腰がそこを通る」目印、足ＩＫ・腕の IK だけのキーは「手足がそこに来る」目印になる |
+| **プロンプトで作る（Kimodo）** | 英語の文で動きを指定して、キーの間を埋める。区間ごとに違う文も書ける（`run / 45: stop` なら 45F から stop。区間の始まりのすぐ後ろにキーがあると、つながりを保つため 1 つ後ろへ自動でずれる）。詳細の窓では「最後のキーの後ろに続きを足す」「キーのポーズを使わずプロンプトだけで作る」もできる |
+| **選んだキーの間だけ作り直す** | タイムラインで選んだキーの最初から最後までを作り直す。範囲の外の動きは補間曲線ごと保ち（ずれは移動 0.05・回転 0.5° まで。曲線で表せない急な所は、範囲の外にもキーが増えることがある）、範囲の端は外の動きにつながる |
+| **キー以外の手がかり**（Kimodo） | 全ての親だけのキーは「腰がそこを通る」目印、足ＩＫ・腕の IK だけのキーは「手足がそこに来る」目印になる（MotionBricks の中割りでは使わない） |
 | **なめらかに止まる** | 最後のキーでぴたっと止まらず、MotionBricks で自然に減速して止まる |
 | **元に戻す** | 生成の前のモーションに 1 回で戻す |
 | **サンプルのプロンプト** | 英語が苦手でも、「前へ歩く：A person walks forward.」のような一覧から選べる（6 種類・43 個） |
@@ -46,17 +46,18 @@ MMD（MikuMikuDance）で打ったキーとキーの間を、AI が中割りし�
 
 ## インストール（開発版）
 
-今は、Kimodo・MotionBricks・窓の 3 つの Python 環境を手で作ります。置き場所は、下の手順の場所（`F:\kimodo`・`F:\motionbricks`）に決め打ちになっています。違う場所に置く時は、`mmd_ainakawari/pipeline.py`（`KIMODO_*`・`SOMA_JSON`）・`mmd_ainakawari/smooth_stop.py`（`MB_*`）・`mmd_ainakawari/app.py`（`SERVER_CMD`）の場所を書き換えてください（設定ファイルにするのは次の作業です）。
+今は、Kimodo・MotionBricks・窓の 3 つの Python 環境を手で作ります。置き場所は、下の手順の場所（`F:\kimodo`・`F:\motionbricks`）に決め打ちになっています。違う場所に置く時は、`mmd_ainakawari/pipeline.py`（`KIMODO_*`・`SOMA_JSON`）・`mmd_ainakawari/smooth_stop.py`（`MB_*`）・`mmd_ainakawari/app.py`（`SERVER_CMD`）と、高速モードを使うなら `tools/start_textencoder.cmd` の中の場所を書き換えてください（設定ファイルにするのは次の作業です）。
 
 ### 1. MMDPlugin を入れる
 [MMDPlugin](https://bowlroll.net/file/121761)（おいがみ さん）の説明書のとおり、`d3d9.dll`・`d3dx9_43.dll`・`MMDPlugin.dll` を MMD のフォルダに置きます。MME も使う時は、MME 一式を `plugin\mme\` に移します。
 
 ### 2. Kimodo を入れる
 1. [Kimodo](https://github.com/nv-tlabs/kimodo) を `F:\kimodo\repo` に clone し、[公式の手順](https://research.nvidia.com/labs/sil/projects/kimodo/docs/getting_started/installation.html)で Python 3.10 の環境を `F:\kimodo\.venv` に作ります
-2. 文の読み取りに使う [Meta-Llama-3-8B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct) は、Hugging Face で利用の申請（Meta のライセンスへの同意）が要ります。申請が通ったら、`huggingface-cli login` でログインしておきます
+2. 文の読み取りに使う [Meta-Llama-3-8B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct) は、Hugging Face で利用の申請（Meta のライセンスへの同意）が要ります。申請が通ったら、Kimodo の環境で `F:\kimodo\.venv\Scripts\hf.exe auth login` を実行してログインしておきます
 3. モデルは、最初に生成した時に `F:\kimodo\hf_cache` に入ります（約 17GB）
-4. 骨格のファイルを書き出します（このリポジトリのフォルダで）:
+4. このリポジトリを clone し、そのフォルダで骨格のファイルを書き出します:
    ```bat
+   mkdir F:\kimodo\tools
    F:\kimodo\.venv\Scripts\python.exe tools\export_skeleton.py F:\kimodo\tools\somaskel30.json
    ```
 5. 高速モード（VRAM 20GB 以上）を使う時は、`tools\start_textencoder.cmd` を `F:\kimodo\` に置きます（詳細の窓の「サーバーを起動」がこれを開きます）
@@ -82,7 +83,7 @@ cmd /c scripts\build_native.cmd
 ```
 
 ### 5. プラグインを MMD に入れる
-1. このリポジトリを clone します
+1. 手順 2 で clone したこのリポジトリのフォルダで作業します
 2. `mmd_plugin\build.cmd` でプラグインをビルドします（MMDPlugin の開発用ファイル `mmdplugin_dev_ver0.41_x64` の中身を `work\mmdplugin\dev` に置くか、その場所を環境変数 `AINAKAWARI_SDK` で渡します）
 3. できた `mmd_plugin\bin\MMD-AINakawari.dll` を、MMD の `plugin\MMD-AINakawari\` に置きます
 4. 同じフォルダに `mmd_plugin\MMD-AINakawari.ini.example` を `MMD-AINakawari.ini` として置き、`python`（手順 4 の `.venv\Scripts\pythonw.exe`）と `home`（このリポジトリのフォルダ）を書きます
@@ -106,7 +107,7 @@ MMD を起動して、メニューバーに「AIナカワリ」、下の段の�
 5. 気に入らなければ「**元に戻す**」か、プロンプトを変えてもう一度「生成」
 
 - パネルの「生成」は、いつも「キーの間を埋める」で作ります。ほかの作り方や seed などの細かい設定は「**詳　細**」の窓で
-- キーを 2 つ以上選んでいない時は、「生成」は押せません
+- 範囲が「選んだキーの間」（既定）の時は、キーを 2 つ以上選ぶまで「生成」は押せません。詳細の窓で範囲を「全部」にすると、パネルも全部のキーで作ります（パネルの字が「全部のキー」になります）
 - プロンプト欄に打っている間は、MMD のショートカットキーは効きません。欄の外（タイムラインなど）を押すか Esc で戻ります
 - カメラ・照明・アクセサリのモードの時は、パネルは出ません
 
@@ -130,11 +131,11 @@ MMD を起動して、メニューバーに「AIナカワリ」、下の段の�
 ### うまく作るコツ
 - プロンプトは英語で、「A person ＋ 動詞」の形が効きます（例: `A person waves with their right hand.`）。日本語はほとんど効きません
 - キーは 20 個くらいまでが目安です。多いとキーに縛られて動きが硬くなります
-- Kimodo は 1 区間 300 フレーム（10 秒）まで。長い時は範囲を分けて作ります
+- Kimodo は 1 区間 300 フレーム（10 秒）まで（範囲の外の勢いをつなぐ数フレームも数えるので、選ぶ範囲はそれより少し短めに）。長い時は範囲を分けて作ります
 - 最初の 1 回は、モデルの読み込みで 40〜60 秒ほど余分にかかります（低負荷モード）。2 回目からは 10〜15 秒前後です
 
 ## 分かっている制限
-- 標準ボーン（センター・上半身・腕・ひじ・足ＩＫなど）があるモデルが前提です。無いモデルはエラーで止まります
+- **PMX のモデルだけ**に対応しています（PMD は非対応）。標準ボーン（センター・上半身・腕・ひじ・足ＩＫなど）があるモデルが前提で、無いモデルはエラーで止まります
 - 指・表情・髪などは作りません（MMD の補間のまま）
 - キーのポーズの差が大きいと、前腕・手首が 1 フレームで大きく回ることがあります（中割りなら「手首は普通の補間」で抑えられます）
 - 物理演算をオフにしたキーは、生成や「元に戻す」でオンに戻ることがあります（未確認）
@@ -142,6 +143,7 @@ MMD を起動して、メニューバーに「AIナカワリ」、下の段の�
 
 ## ライセンスとクレジット
 - このリポジトリのコード: （公開前に決めます）
+- スクリーンショットのモデル: Tda式初音ミクV4X（Tda さん）。初音ミクは クリプトン・フューチャー・メディア株式会社 のキャラクターです
 - [Kimodo](https://github.com/nv-tlabs/kimodo)（NVIDIA）: コードは Apache-2.0、モデルは [NVIDIA Open Model License](https://huggingface.co/nvidia/Kimodo-SOMA-RP-v1.2)
 - [MotionBricks](https://github.com/NVlabs/motionbricks)（NVIDIA）: コードは Apache-2.0、モデルは NVIDIA Open Model Agreement
 - [Meta-Llama-3-8B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct)（Meta）: Meta Llama 3 Community License（Kimodo が文の読み取りに使う）

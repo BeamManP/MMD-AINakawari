@@ -157,7 +157,7 @@ def generate(settings, log=print, link=None, previous=None):
     real = [f for f in job.frames if f not in job.mmd_frames and (f not in job.anchors or f in keyed)]
     if rng:
         lo, hi = (job.anchors[0], job.anchors[-1]) if len(job.anchors) > 1 else (rng[0], rng[1])
-        span = f"{rng[0]}〜{rng[1]}F・{rng[1] - rng[0] + 1} フレーム"
+        shown = f"{rng[0]}〜{rng[1]}F・{rng[1] - rng[0] + 1} フレーム"
         log(f"範囲 {rng[0]}〜{rng[1]}F を作り直します: "
             + (f"始まりと終わり（{lo}F・{hi}F）の姿勢を MMD から取り、外の動きにつなぎます"
                if len(job.anchors) > 1 else f"始まり（{lo}F）の姿勢を MMD から取ってつなぎます（後ろにキーが無いので、終わりは決めません）")
@@ -165,13 +165,13 @@ def generate(settings, log=print, link=None, previous=None):
         if settings.length is not None and not mb:
             log("  範囲を使う時は、長さの欄は使いません（範囲の終わりまで作ります）")
     else:
-        span = f"{job.first}〜{job.first + job.num_frames - 1}F・{job.num_frames} フレーム"
+        shown = f"{job.first}〜{job.first + job.num_frames - 1}F・{job.num_frames} フレーム"
     if not mb:
-        span += f"・テキストの効き {settings.cfg_text}・キーの効き {settings.cfg_key}"
+        shown += f"・テキストの効き {settings.cfg_text}・キーの効き {settings.cfg_key}"
     if settings.use_keys:
-        log(f"体のキー {len(real)} 個: {real}（{span}）")
+        log(f"体のキー {len(real)} 個: {real}（{shown}）")
     else:
-        log(f"完全新規: 体のキーのポーズは使わず、{job.first}F の場所と向きから作ります（{span}）")
+        log(f"完全新規: 体のキーのポーズは使わず、{job.first}F の場所と向きから作ります（{shown}）")
     if settings.use_center:
         log(f"センターの動きを使う: {len(job.root_frames)} フレームで腰の位置と高さを目印にします")
     elif job.root_frames:
