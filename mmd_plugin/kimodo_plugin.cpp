@@ -10,6 +10,7 @@
 #include <share.h>
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 #include <cwchar>
 #include <string>
 
@@ -71,6 +72,72 @@ int help_position(HMENU bar) {
     return -1;
 }
 
+// MMD はショートカットのキーを GetKeyState で「今押されているか」見ている（11-05、プロンプト欄で i を打つと MMD の
+// 「i」が効いた。キーの知らせを WM_NULL にしても、押されている記録は取り出した時に更新されるので止まらない）。
+// なので MMD の実行ファイルが呼ぶ GetKeyState を差し替え、パネルのプロンプト欄にフォーカスがある間は「押されていない」と答える。
+// 欄そのもの（Windows のエディット）は user32 の中で GetKeyState を呼ぶので、差し替えの影響を受けない
+using GetKeyStateFn = SHORT(WINAPI*)(int);
+GetKeyStateFn g_get_key_state = nullptr;   // 本物
+GetKeyStateFn* g_key_state_slot = nullptr; // MMD の呼び先の表の、GetKeyState の欄
+HWND g_prompt = nullptr;
+
+SHORT WINAPI quiet_get_key_state(int key) {
+    if (g_prompt && GetFocus() == g_prompt) return 0;
+    return g_get_key_state(key);
+}
+
+// module が import している dll!name の呼び先の表の欄。無ければ nullptr。
+void** import_slot(HMODULE module, const char* dll, const char* name) {
+    auto* base = reinterpret_cast<BYTE*>(module);
+    const auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
+    const auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+    const IMAGE_DATA_DIRECTORY& dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    if (!dir.VirtualAddress) return nullptr;
+    for (auto* desc = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base + dir.VirtualAddress); desc->Name; ++desc) {
+        if (_stricmp(reinterpret_cast<char*>(base + desc->Name), dll) != 0 || !desc->OriginalFirstThunk) continue;
+        auto* names = reinterpret_cast<IMAGE_THUNK_DATA*>(base + desc->OriginalFirstThunk);
+        auto* slots = reinterpret_cast<IMAGE_THUNK_DATA*>(base + desc->FirstThunk);
+        for (; names->u1.AddressOfData; ++names, ++slots) {
+            if (IMAGE_SNAP_BY_ORDINAL(names->u1.Ordinal)) continue;
+            const auto* by_name = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(base + names->u1.AddressOfData);
+            if (std::strcmp(reinterpret_cast<const char*>(by_name->Name), name) == 0) {
+                return reinterpret_cast<void**>(&slots->u1.Function);
+            }
+        }
+    }
+    return nullptr;
+}
+
+bool write_slot(void** slot, void* value) {
+    DWORD old = 0;
+    if (!VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &old)) return false;
+    *slot = value;
+    VirtualProtect(slot, sizeof(void*), old, &old);
+    return true;
+}
+
+void quiet_keys_in(HWND prompt) {
+    g_prompt = prompt;
+    void** slot = import_slot(GetModuleHandleW(nullptr), "USER32.dll", "GetKeyState");
+    if (!slot || *slot == reinterpret_cast<void*>(quiet_get_key_state)) {
+        log_line("GetKeyState: import not found");
+        return;
+    }
+    g_get_key_state = reinterpret_cast<GetKeyStateFn>(*slot);
+    if (write_slot(slot, reinterpret_cast<void*>(quiet_get_key_state))) {
+        g_key_state_slot = reinterpret_cast<GetKeyStateFn*>(slot);
+        log_line("GetKeyState: replaced");
+    } else {
+        log_line("GetKeyState: VirtualProtect failed %lu", GetLastError());
+    }
+}
+
+void restore_keys() {
+    if (g_key_state_slot) write_slot(reinterpret_cast<void**>(g_key_state_slot), reinterpret_cast<void*>(g_get_key_state));
+    g_key_state_slot = nullptr;
+    g_prompt = nullptr;
+}
+
 class KimodoPlugin;
 KimodoPlugin* g_plugin = nullptr;
 HHOOK g_hook = nullptr;
@@ -115,6 +182,7 @@ public:
         if (!g_hook) show_error(hwnd_, L"メニューの受け口を作れませんでした（エラー " + std::to_wstring(GetLastError()) + L"）。");
         log_line("menu added id=0x%x at %d hook=%p", open_id_, help + 1, static_cast<void*>(g_hook));
         if (panel_.create(hwnd_, [this](int button) { on_panel(button); })) {
+            quiet_keys_in(panel_.prompt());
             attach();
         } else {
             log_line("panel failed %lu", GetLastError());
@@ -128,6 +196,7 @@ public:
 
     void stop() override {
         log_line("stop");
+        restore_keys();
         panel_.destroy();
         if (g_hook) UnhookWindowsHookEx(g_hook);
         g_hook = nullptr;

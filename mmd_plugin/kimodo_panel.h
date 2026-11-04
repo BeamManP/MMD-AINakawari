@@ -22,6 +22,8 @@ public:
     // プロンプト欄宛てのキーはここで処理して WM_NULL にし、MMD のショートカットにさせない。
     // 自分で処理したら true。プロンプト欄の外を押したら、フォーカスを MMD に戻す（MMD が描く画面は押してもフォーカスが動かない）
     bool filter(MSG* message);
+    // プロンプト欄（フォーカスがここにある間は MMD のショートカットを止める。kimodo_plugin.cpp の quiet_get_key_state）
+    HWND prompt() const { return panel_ ? GetDlgItem(panel_, 103) : nullptr; }
 
 private:
     static LRESULT CALLBACK proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
