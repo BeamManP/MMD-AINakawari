@@ -6,6 +6,7 @@
 """
 import json
 import os
+import threading
 import time
 from dataclasses import dataclass
 
@@ -62,6 +63,7 @@ def _same_motion(a, b, tol=1e-3, fixed_pos=(), names=None):
 
 
 LAST_RUN = os.path.join(WORK_DIR, "last_run.json")
+_LAST_RUN_LOCK = threading.Lock()
 
 
 def _last_runs():
@@ -82,9 +84,10 @@ def load_last_run(link):
 
 
 def _save_last_run(link, backup, out):
-    runs = _last_runs()
-    runs[link.key] = {"backup": backup, "output": out}
-    json.dump(runs, open(LAST_RUN, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    with _LAST_RUN_LOCK:   # 窓（MMD ごと）は同じプロセスのスレッドで生成するので、読んで書き戻す間をまとめて守る
+        runs = _last_runs()
+        runs[link.key] = {"backup": backup, "output": out}
+        json.dump(runs, open(LAST_RUN, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
 
 def generate(settings, log=print, link=None, previous=None):
@@ -101,7 +104,9 @@ def generate(settings, log=print, link=None, previous=None):
     if not os.path.exists(pmx):
         raise FileNotFoundError(f"PMX が見つかりません: {pmx}")
     os.makedirs(WORK_DIR, exist_ok=True)
-    stamp = time.strftime("%Y%m%d_%H%M%S")
+    # MMD のプロセス番号も付ける（MMD が 2 つあって同じ秒に生成すると、控えと結果のファイルがぶつかって、
+    # 「元に戻す」がほかの MMD の動きを読むことがあった。11-04 Codex のレビュー）
+    stamp = time.strftime("%Y%m%d_%H%M%S") + "_" + link.key.split("-")[0]
     backup = os.path.join(WORK_DIR, f"original_{stamp}.vmd")
 
     log(f"MMD から「{st['model']}」のモーションを読み込み中…")

@@ -64,7 +64,8 @@ def keep_above_ground(roots, rots, start, end):
 
     MotionBricks は止まる時のかがみ込みなどで、自分の骨格でも足を床に 5cm ほど沈めることがある（11-04、走って止まる所で
     腰が 72cm まで下がり、つま先の付け根が床から −5cm）。持ち上げる量は前後 GROUND_SPREAD フレームの最大を取ってからならすので、
-    どのフレームでも足りない分は必ず持ち上がる。下げることはしない。持ち上げた最大（m）を返す。
+    途中のフレームでは足りない分が必ず持ち上がる。両端（床に着いた文脈とキーの姿勢）は動かさず、端から GROUND_SPREAD フレームは
+    弱めるので、端のすぐ近くで沈んでいる分は残ることがある。下げることはしない。実際に持ち上げた最大（m）を返す。
     """
     parents, neutral, toes, ankles, ankle_above_toe = _soma()
     lift = np.zeros(end - start + 1)
@@ -89,7 +90,7 @@ def keep_above_ground(roots, rots, start, end):
     n = len(smooth)
     ramp = np.minimum(1.0, np.minimum(np.arange(n), np.arange(n)[::-1]) / k)
     roots[start:end + 1, 1] += smooth * ramp
-    return float(lift.max())
+    return float((smooth * ramp).max())
 
 
 def _peak_change(v, start, end, fps):

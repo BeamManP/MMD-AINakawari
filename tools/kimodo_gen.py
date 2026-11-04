@@ -262,8 +262,12 @@ def serve(port, text):
 
     text: テキストの読み取りの置き場所（"cpu" か "api"。上の説明）。{"shutdown": True} を頼まれたら終わる（モードの切り替えで片付ける）。
     """
+    from multiprocessing import AuthenticationError
     from multiprocessing.connection import Listener
 
+    # このファイルが書き換わったら、古いコードのまま作らずに終わる（resident.py が立ち上げ直す）。読み込む前に取る
+    # （読み込みの途中で書き換わった時も気づけるように。11-04 Codex のレビュー）
+    born = os.path.getmtime(__file__)
     if text == "cpu":
         os.environ.update(TEXT_ENCODER_MODE="local", TEXT_ENCODER_DEVICE="cpu")
     elif text == "api":
@@ -285,9 +289,11 @@ def serve(port, text):
                 print("idle exit", flush=True)
                 os._exit(0)
     threading.Thread(target=watch, daemon=True).start()
-    born = os.path.getmtime(__file__)   # このファイルが書き換わったら、古いコードのまま作らずに終わる（resident.py が立ち上げ直す）
     while True:
-        conn = listener.accept()
+        try:
+            conn = listener.accept()
+        except (OSError, EOFError, AuthenticationError):   # 合言葉を確かめる前に切られた・合言葉の違う相手。常駐は続ける
+            continue
         last[0] = time.time() + 24 * 3600   # 作っている間は終わらない
         try:
             req = conn.recv()

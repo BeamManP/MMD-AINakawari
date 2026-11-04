@@ -9,8 +9,6 @@ pipeline.prepare が出すキーの姿勢（Kimodo の形・最初のキーを�
 - 11-04 のテスト（VPD の立ちポーズ 10 個・30F おき）で、MotionBricks は手首をキーの差より大きく回した
   （左手首: キーどうしの差 20° の区間で合計 379°・1 フレームで最大 131°）。wrist_lerp なら手首だけキーの間を球面の補間でつなぐ
 """
-import os
-
 import numpy as np
 
 from . import pipeline, smooth_stop

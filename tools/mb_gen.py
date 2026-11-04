@@ -163,8 +163,11 @@ def run(engine, rigs, req):
 
 def serve(port):
     """エンジンを開いたまま、127.0.0.1:port で依頼を待つ。1 つずつ順に作る。IDLE_SECONDS 頼まれなければ終わる。{"shutdown": True} で終わる。"""
+    from multiprocessing import AuthenticationError
     from multiprocessing.connection import Listener
 
+    # このファイルが書き換わったら、古いコードのまま作らずに終わる（resident.py が立ち上げ直す）。読み込む前に取る
+    born = os.path.getmtime(__file__)
     listener = Listener(("127.0.0.1", port), authkey=AUTHKEY)   # 口がふさがっていれば（もう常駐がいれば）ここで落ちる
     wp.init()
     wp.set_device("cuda:0")
@@ -181,9 +184,11 @@ def serve(port):
     t0 = time.time()
     with MotionBricksSOMAEngine(SOMA_N1_FP32_ONNX_PATH) as engine, wp.ScopedStream(engine.stream):
         print(f"ready port={port} load={time.time() - t0:.1f}s", flush=True)
-        born = os.path.getmtime(__file__)   # このファイルが書き換わったら、古いコードのまま作らずに終わる（resident.py が立ち上げ直す）
         while True:
-            conn = listener.accept()
+            try:
+                conn = listener.accept()
+            except (OSError, EOFError, AuthenticationError):   # 合言葉を確かめる前に切られた・合言葉の違う相手。常駐は続ける
+                continue
             last[0] = time.time() + 24 * 3600   # 作っている間は終わらない
             try:
                 req = conn.recv()

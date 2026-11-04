@@ -141,6 +141,8 @@ def snap_segments(segments, key_frames):
     キーを前の区間の最後のフレームにすれば、前の区間がキーへ向かって作り、次の区間はキーを含む 5 フレームから始まる。
     segments: [(開始, 長さ, プロンプト)]、key_frames: 制約のあるフレーム（同じ座標）。戻り値: (ずらした区間, [(元, 新, キー)])
     """
+    if len(segments) <= 1:
+        return list(segments), []
     starts = [s for s, _, _ in segments]
     end = segments[-1][0] + segments[-1][1]
     moves = []
@@ -320,11 +322,6 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
             job.stop_frames = hold
             pad = max(0, hold[-1] - last)
     job.segments = prompt_segments(prompt, first, num)
-    long = [(s, n) for s, n, _ in job.segments if n > max_frames] if max_frames else []
-    if long:
-        s, n = long[0]
-        raise ValueError(f"{s}F からの区間が {n} フレームあります。Kimodo の 1 区間は {max_frames} フレーム（10 秒）までです。"
-                         f"区間を分けるか、範囲か長さを絞ってください")
     if len(job.segments) > 1 and not use_center:   # センターの動きを使う時は毎フレームが目印なので、ずらせない
         # 止まるための腰の目印（キーの後ろ STOP_HOLD フレーム）は、キーの場所にじっとしているだけで区間のつなぎとぶつからないので数えない
         # （数えると、区間の始めがキーと同じ時に「すぐ後ろに目印が続いて置けない」で止まっていた。11-04 MMD で確認）
@@ -332,6 +329,13 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
         job.segments, job.segment_moves = snap_segments(job.segments, constrained)
     segments = [{"prompt": t, "frames": n} for _, n, t in job.segments]
     segments[-1]["frames"] += pad
+    # 1 区間の上限は、区間をキーの次へずらして、止まるための延長も足した後の長さで見る
+    # （ずらす前に見ていたので、300F で分けて 300F にキーがあると 301 フレームの区間を頼んでいた。11-04 Codex のレビュー）
+    long = [(s, seg["frames"]) for (s, _, _), seg in zip(job.segments, segments) if seg["frames"] > max_frames] if max_frames else []
+    if long:
+        s, n = long[0]
+        raise ValueError(f"{s}F からの区間が {n} フレームあります。Kimodo の 1 区間は {max_frames} フレーム（10 秒）までです。"
+                         f"区間を分けるか、範囲か長さを絞ってください")
     job.request = {"prompt": job.segments[0][2], "num_frames": num + pad, "steps": int(steps), "seed": int(seed),
                    "segments": segments,
                    "post_processing": bool(post_processing), "keys": keys, "root_keys": root_keys,
@@ -385,13 +389,15 @@ def merge(original, generated, job):
     MMD に読み込む前に今のキーを全部消すので（mmd_link.load_motion）、元のキー・体以外の骨・表情（tail）を全部残す。
     生成した骨の、範囲の中（両端も含む）でキーのフレームでないところだけを入れ替える。
     完全新規（キーのポーズを使わない）では、最初のフレームの元のキーも入れ替わる。
+    MMD の補間のまま残すフレーム（job.mmd_frames。中割りで作れなかった間）は書き戻さないので、元のキーも消さない
+    （11-04 Codex のレビュー: 消していたので、残す間にあった足ＩＫだけのキーなどが無くなっていた）。
     """
     # 名前は VMD に入る形（15 バイトで切ったもの）でそろえて比べる。長い名前のボーンで元のキーと生成したキーが二重にならないように
     gen_names = {vmd.vmd_name(k.name) for k in generated.bones}
     keys = set(job.frames)
     lo, hi = job.first, job.first + job.num_frames - 1
     keep = [k for k in original.bones   # 読んだキーの名前はもう VMD の形
-            if not (k.name in gen_names and lo <= k.frame <= hi and k.frame not in keys)]
+            if not (k.name in gen_names and lo <= k.frame <= hi and k.frame not in keys and k.frame not in job.mmd_frames)]
     # キーのフレームで、書き戻す骨にキーが無ければ、元の値（MMD がそのフレームで見せていた値）でキーを足す。
     # 無いままだと、前後の生成したフレームから補間された値が入る（付与の受け渡し元・IK の目標で腕の回転が二重になる）
     orig_tracks = original.tracks()

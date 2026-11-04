@@ -469,22 +469,24 @@ class App:
             selection = self.link.range_selection()
             if not selection or selection[1] >= NO_RANGE:
                 raise ValueError("MMD の範囲選択が入っていません（タイムラインの下の開始〜終了フレーム）")
-        s = runner.Settings(prompt=self.prompt_rows.text(),
-                            steps=int(self.steps.get()), seed=int(self.seed.get()), post_processing=bool(self.post.get()),
-                            range_start=selection[0] if selection else None, range_end=selection[1] if selection else None,
-                            cfg_text=float(self.cfg_text.get()), cfg_key=float(self.cfg_key.get()),
-                            length=length, use_keys=nakawari or mode != "fresh",
-                            use_center=bool(self.use_center.get()) and not nakawari,
-                            stop_at_last_key=mode != "fresh" and bool(self.stop.get()),
-                            smooth_stop=bool(self.smooth.get()) and smooth_stop.available(),
-                            engine="motionbricks" if nakawari else "kimodo",
-                            key_stop=bool(self.key_stop.get()), wrist_lerp=bool(self.wrist_lerp.get()),
-                            perf_mode=self._perf_mode())
-        self.cfg.update(tab=tab, mode=mode, range_mode=self.range_mode.get(), length=self.length.get(), prompt=s.prompt,
-                        steps=s.steps, seed=s.seed, post_processing=s.post_processing,
-                        cfg_text=s.cfg_text, cfg_key=s.cfg_key, use_center=bool(self.use_center.get()),
-                        stop_at_last_key=bool(self.stop.get()), smooth_stop=bool(self.smooth.get()),
-                        key_stop=s.key_stop, wrist_lerp=s.wrist_lerp, perf_mode=s.perf_mode)
+        common = dict(range_start=selection[0] if selection else None, range_end=selection[1] if selection else None,
+                      key_stop=bool(self.key_stop.get()), wrist_lerp=bool(self.wrist_lerp.get()), perf_mode=self._perf_mode())
+        self.cfg.update(tab=tab, range_mode=self.range_mode.get(), key_stop=common["key_stop"], wrist_lerp=common["wrist_lerp"],
+                        perf_mode=common["perf_mode"])
+        if nakawari:
+            # 中割りは、隠れている「プロンプトで作る」の欄を読まない（入力の途中や誤りで中割りが止まっていた。11-04 Codex のレビュー）
+            s = runner.Settings(prompt="", engine="motionbricks", **common)
+        else:
+            s = runner.Settings(prompt=self.prompt_rows.text(),
+                                steps=int(self.steps.get()), seed=int(self.seed.get()), post_processing=bool(self.post.get()),
+                                cfg_text=float(self.cfg_text.get()), cfg_key=float(self.cfg_key.get()),
+                                length=length, use_keys=mode != "fresh", use_center=bool(self.use_center.get()),
+                                stop_at_last_key=mode != "fresh" and bool(self.stop.get()),
+                                smooth_stop=bool(self.smooth.get()) and smooth_stop.available(), engine="kimodo", **common)
+            self.cfg.update(mode=mode, length=self.length.get(), prompt=s.prompt, steps=s.steps, seed=s.seed,
+                            post_processing=s.post_processing, cfg_text=s.cfg_text, cfg_key=s.cfg_key,
+                            use_center=bool(self.use_center.get()), stop_at_last_key=bool(self.stop.get()),
+                            smooth_stop=bool(self.smooth.get()))
         os.makedirs(runner.WORK_DIR, exist_ok=True)
         json.dump(self.cfg, open(SETTINGS_PATH, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         return s
@@ -511,6 +513,9 @@ class App:
             s = self._settings()
         except (ValueError, RuntimeError) as e:
             messagebox.showerror("MMDKimodo", str(e), parent=self.root)
+            return
+        except tk.TclError:   # 数字の欄（手数・seed・効き）に数字でないものが入っている
+            messagebox.showerror("MMDKimodo", "「詳しい設定」の手数・seed・効きには数字を入れてください", parent=self.root)
             return
         self._write_log("―" * 20)
         self.status.set("生成中…")

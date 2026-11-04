@@ -26,12 +26,19 @@ MAX_KEYS = 2_000_000
 
 
 def _chain(read_entry, head):
-    """先頭の番号から「次」をたどった (番号, 中身) の一覧。"""
-    out, i = [], head
+    """先頭の番号から「次」をたどった中身の一覧。
+
+    同じ番号に戻る・番号が負・MAX_KEYS を超える時は、メモリが読み方と違う（MMD の版違い・編集の途中）ので止める。
+    そのまま返すと、壊れた控えで「元に戻す」をすることになる（11-04 Codex のレビュー: ループで 200 万件を正常として返していた）。
+    """
+    out, seen, i = [], set(), head
     while True:
+        if i < 0 or i in seen or len(out) >= MAX_KEYS:
+            raise RuntimeError("MMD のキーの並びを読めませんでした（つながりが壊れています）。MMD の操作が終わってからもう一度押してください")
+        seen.add(i)
         e = read_entry(i)
         out.append(e)
-        if e[2] == 0 or len(out) > MAX_KEYS:
+        if e[2] == 0:
             return out
         i = e[2]
 
@@ -161,7 +168,7 @@ def read_pmx_names(path):
     r = _Reader(open(path, "rb").read())
     if r.take(4) != b"PMX ":
         raise ValueError(f"PMX ではありません: {path}")
-    version, = r.unpack("<f")
+    r.take(4)   # 版（2.0・2.1）。表情の項目の大きさは 2.1 の種類まで下の item で扱う
     r.take(1)
     enc, uv, vs, ts, ms, bs, mos, rs = r.unpack("<8B")
     r.encoding = "utf-16-le" if enc == 0 else "utf-8"

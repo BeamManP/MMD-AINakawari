@@ -58,7 +58,10 @@ class PromptRows(ttk.Frame):
         frames = [f for f, _ in segments]
         if len(set(frames)) != len(frames):
             raise ValueError("同じフレームから始まる区間が 2 つあります")
-        lines = [first["text"].get().strip()] + [f"{f}: {t}" for f, t in sorted(segments)]
+        head = first["text"].get().strip()
+        # 最初の行が空で区間がほかにある時は「0:」（空の区間）と書く。ただの空行だと pipeline も load も読み飛ばして、
+        # 2 行目の区間が範囲の始まりからになっていた（11-04 Codex のレビュー。空のプロンプトはキーだけで作る）
+        lines = [head if head or not segments else "0:"] + [f"{f}: {t}" for f, t in sorted(segments)]
         return "\n".join(lines)
 
     def _add(self, frame, text):
