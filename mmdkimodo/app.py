@@ -454,8 +454,12 @@ class App:
             keys = self.link.selected_key_frames() if model else []
             picked = (f"選んだキーの間（{keys[0]}〜{keys[-1]}F）" if len(keys) > 1 else
                       f"選んだキーの間（{keys[0]}F だけ。2 つ以上選んでください）" if keys else "選んだキーの間（キーを選んでいません）")
+            # MMD の右下のパネルは狭いので短く
+            self.range_short = (f"選んだキー {keys[0]}〜{keys[-1]}F" if len(keys) > 1 else
+                                f"選んだキー（{keys[0]}F だけ）" if keys else "選んだキー（未選択）")
         except Exception:   # 選び替えの途中などで鎖が読めない時は、次の読み取りで直る
             picked = "選んだキーの間（読み取れません）"
+            self.range_short = "選んだキー（読めません）"
         updates = [(self.model_text, text),
                    (self.split_text, f"＋ 今のフレーム（{frame}F）で区切る" if frame is not None else "＋ 今のフレームで区切る"),
                    (self.range_text, picked)]
@@ -565,7 +569,7 @@ class App:
                     lambda v: (self.range_mode.set("keys" if v else "all"), self._mode_changed()),
                     lambda v: p.set_checked(panel.RANGE, v))
             shown = {
-                panel.RANGE: self.range_text.get(),
+                panel.RANGE: getattr(self, "range_short", "選んだキー"),
                 panel.STATUS: self.status.get(),
             }
             for item, text in shown.items():

@@ -1,21 +1,25 @@
 #include "kimodo_panel.h"
 
 #include <algorithm>
+#include <cwchar>
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 
 namespace {
 constexpr wchar_t kClass[] = L"MMDKimodo.Panel";   // Python（mmdkimodo/panel.py）はこの名前でパネルを探す
 constexpr wchar_t kCaption[] = L"Kimodo操作";
-constexpr int kCameraButton = 536;   // 3D 画面の下の帯の「カメラ編／モデル編」。下の段の操作パネルはこの下にある
-// 下の段のパネルの上端は「カメラ編」の下端から 26px 下（11-03 モデル用のモードで 807 → 833 を実測）。
-// カメラ用のモードではその間（y 808 前後）にも部品があるので、部品の上端からは決めない
-constexpr int kStripGap = 26;
-constexpr int kMinWidth = 420;   // これより狭いと部品が並ばないので隠す
-constexpr int kMaxWidth = 820;
-constexpr int kMinHeight = 130;
-constexpr int kCaptionHeight = 18;
-constexpr int kButtonsWidth = 110;
+constexpr int kCameraButton = 536;   // 3D 画面の下の帯の「カメラ編／モデル編」。字体を借りる
+// 下の段のパネルの上端は、各パネルの見出しの「－」ボタン（14×14）の 2px 上（11-04 カメラ用のモードで 834 → 832、下端は 986）。
+// 前は「カメラ編」の下端＋26px で決めていたが、カメラ用のモードではカメラ編が 3D 画面の下（606）に上がるので、
+// パネルが 170px 上から始まって窓の下まで伸びていた（11-04 マスター「クソデカサイズ」）
+constexpr wchar_t kFoldText[] = L"－";
+constexpr int kFoldSize = 14;
+constexpr int kFoldGap = 2;
+constexpr int kWidth = 440;      // MMD のパネル 2〜3 枚分（360 だと範囲・状態の字が切れた）
+constexpr int kFontHeight = 10;  // MMD の字（ＭＳ Ｐゴシック・高さ 12）より一回り小さく（11-04 マスター）
+constexpr int kMinHeight = 120;
+constexpr int kCaptionHeight = 16;
+constexpr int kButtonsWidth = 80;
 // 部品の番号（mmdkimodo/panel.py と同じ）
 constexpr int kEngine = 101;
 constexpr int kRange = 102;
@@ -24,7 +28,6 @@ constexpr int kGenerate = 104;
 constexpr int kUndo = 105;
 constexpr int kDetails = 106;
 constexpr int kStatus = 107;
-constexpr int kPromptLabel = 108;
 constexpr UINT kLayoutMessage = WM_APP + 1;
 constexpr UINT_PTR kLayoutTimer = 1;  // カメラ用のモードにすると下の段が右に伸びるので、時々測り直す
 // 隣のパネルと同じ縦のグラデーション（ボーン操作は 49,49,99 → 22,22,45）で、色だけ青緑にする。
@@ -55,6 +58,18 @@ BOOL CALLBACK measure(HWND child, LPARAM param) {
     if (r.top >= strip->top) strip->right = std::max(strip->right, static_cast<int>(r.right));
     return TRUE;
 }
+
+// 下の段のパネルの見出しの「－」ボタンのうち、一番上のものの上端。無ければ -1。
+BOOL CALLBACK find_fold(HWND child, LPARAM param) {
+    auto* strip = reinterpret_cast<Strip*>(param);
+    if (GetParent(child) != strip->mmd || !IsWindowVisible(child)) return TRUE;
+    const RECT r = client_rect_of(child, strip->mmd);
+    if (r.right - r.left != kFoldSize || r.bottom - r.top != kFoldSize) return TRUE;
+    wchar_t text[4]{};
+    GetWindowTextW(child, text, 4);
+    if (wcscmp(text, kFoldText) == 0 && (strip->top < 0 || r.top < strip->top)) strip->top = r.top;
+    return TRUE;
+}
 }  // namespace
 
 HWND KimodoPanel::add(const wchar_t* cls, const wchar_t* text, DWORD style, int id, DWORD ex_style) {
@@ -74,19 +89,25 @@ bool KimodoPanel::create(HWND mmd, std::function<void(int)> on_command) {
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.lpszClassName = kClass;
     RegisterClassW(&wc);  // MMD 1 つにプラグインは 1 つなので、登録も 1 回
-    panel_ = CreateWindowExW(0, kClass, kCaption, WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN, 0, 0, kMinWidth, 100,
+    panel_ = CreateWindowExW(0, kClass, kCaption, WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN, 0, 0, kWidth, 100,
                              mmd_, nullptr, instance(), this);
     if (!panel_) return false;
-    if (const HWND camera = GetDlgItem(mmd_, kCameraButton)) {
-        font_ = reinterpret_cast<HFONT>(SendMessageW(camera, WM_GETFONT, 0, 0));
-    }
+    // MMD のボタンの字体（ＭＳ Ｐゴシック）を写して、高さだけ一回り小さくする
+    LOGFONTW lf{};
+    const HWND camera = GetDlgItem(mmd_, kCameraButton);
+    const HFONT mmd_font = camera ? reinterpret_cast<HFONT>(SendMessageW(camera, WM_GETFONT, 0, 0)) : nullptr;
+    if (!mmd_font || !GetObjectW(mmd_font, sizeof(lf), &lf)) wcscpy_s(lf.lfFaceName, L"ＭＳ Ｐゴシック");
+    lf.lfHeight = kFontHeight;
+    lf.lfWidth = 0;
+    font_ = CreateFontIndirectW(&lf);
     const HWND engine = add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, kEngine);
-    SendMessageW(engine, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"プロンプトで作る"));
+    // 名前は窓のタブより短く（パネルの切り替えは幅 104px。「プロンプトで作る」だと切れた）
+    SendMessageW(engine, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"プロンプト"));
     SendMessageW(engine, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"中割り"));
     SendMessageW(engine, CB_SETCURSEL, 0, 0);
     add(L"BUTTON", L"選んだキーの間", BS_AUTOCHECKBOX | WS_TABSTOP, kRange);
-    add(L"STATIC", L"プロンプト（英語・行ごとに「45: 動き」でそのフレームから）", SS_OWNERDRAW, kPromptLabel);
-    add(L"EDIT", L"", WS_TABSTOP | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN, kPrompt, WS_EX_CLIENTEDGE);
+    // MMD の入力欄と同じく、細い枠の平らな欄（立体の枠 WS_EX_CLIENTEDGE だと MMD の中で浮いた）
+    add(L"EDIT", L"", WS_TABSTOP | WS_BORDER | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN, kPrompt);
     add(L"BUTTON", L"生成", BS_PUSHBUTTON | WS_TABSTOP, kGenerate);
     add(L"BUTTON", L"元に戻す", BS_PUSHBUTTON | WS_TABSTOP, kUndo);
     add(L"BUTTON", L"詳しく…", BS_PUSHBUTTON | WS_TABSTOP, kDetails);
@@ -104,6 +125,8 @@ void KimodoPanel::destroy() {
     }
     if (label_brush_) DeleteObject(label_brush_);
     label_brush_ = nullptr;
+    if (font_) DeleteObject(font_);
+    font_ = nullptr;
     UnregisterClassW(kClass, instance());
 }
 
@@ -111,27 +134,28 @@ void KimodoPanel::request_layout() {
     if (panel_) PostMessageW(panel_, kLayoutMessage, 0, 0);
 }
 
-// 下の段の一番右のパネルの右に置く。右に kMinWidth が取れなければ隠す。
+// 下の段の一番右のパネルの右に、隣のパネルと上端・下端をそろえて置く。右に kWidth が取れなければ隠す。
 void KimodoPanel::layout() {
-    const HWND camera = GetDlgItem(mmd_, kCameraButton);
-    Strip strip{mmd_, panel_, 0};
-    if (camera && IsWindowVisible(camera)) {
-        strip.top = client_rect_of(camera, mmd_).bottom + kStripGap;
+    Strip strip{mmd_, panel_, -1};
+    EnumChildWindows(mmd_, find_fold, reinterpret_cast<LPARAM>(&strip));
+    if (strip.top >= 0) {
+        strip.top -= kFoldGap;
         EnumChildWindows(mmd_, measure, reinterpret_cast<LPARAM>(&strip));
     }
     RECT client;
     GetClientRect(mmd_, &client);
-    // 隣のパネルは部品の右端から 2px 先まで枠で、黒 1px・灰色の隙間 2px・次のパネルの黒 1px と並ぶ
+    // 隣のパネルは部品の右端から 2px 先まで枠で、黒 1px・灰色の隙間 2px・次のパネルの黒 1px と並ぶ。
+    // 下端も隣と同じく窓の下端の 2px 上まで（黒の枠が 986・窓の下端 989）
     const int x = strip.right + 6;
     const int y = strip.top;
-    const int width = std::min(kMaxWidth, static_cast<int>(client.right) - x - 4);
-    const bool fits = strip.right > 0 && width >= kMinWidth && client.bottom - y >= kMinHeight;
+    const int bottom = static_cast<int>(client.bottom) - 2;
+    const bool fits = strip.top >= 0 && strip.right > 0 && client.right - x >= kWidth && bottom - y >= kMinHeight;
     if (!fits) {
         if (IsWindowVisible(panel_)) ShowWindow(panel_, SW_HIDE);
         placed_ = {};
         return;
     }
-    const RECT want{x, y, x + width, client.bottom};
+    const RECT want{x, y, x + kWidth, bottom};
     if (!EqualRect(&want, &placed_) || !IsWindowVisible(panel_)) {
         SetWindowPos(panel_, HWND_TOP, want.left, want.top, want.right - want.left, want.bottom - want.top,
                      SWP_NOACTIVATE | SWP_SHOWWINDOW);
@@ -141,22 +165,23 @@ void KimodoPanel::layout() {
 }
 
 // 部品を並べる: 左に切り替え・範囲・プロンプト、右にボタン、下に状態の 1 行。
+// 部品を並べる: 左上に切り替えと範囲、左にプロンプト、右にボタン、下に状態の 1 行。
+// 大きさは MMD のパネルに合わせる（ボタン・切り替えは高さ 18〜20px、「生成」は「登録」と同じく 2 段分）
 void KimodoPanel::arrange(int width, int height) {
-    const int pad = 8;
-    const int top = kCaptionHeight + 6;
+    const int pad = 6;
+    const int top = kCaptionHeight + 2;
     const int right = width - pad - kButtonsWidth;   // 右のボタンの列の左端
-    const int status_top = height - 22;
+    const int status_top = height - 18;
     auto place = [this](int id, int x, int y, int w, int h) {
         SetWindowPos(GetDlgItem(panel_, id), nullptr, x, y, std::max(1, w), std::max(1, h), SWP_NOZORDER | SWP_NOACTIVATE);
     };
-    place(kEngine, pad, top, 160, 200);   // 高さは開いた時の一覧の高さ。幅は「プロンプトで作る」が切れない幅（130 だと切れた）
-    place(kRange, pad + 170, top + 2, right - pad - 180, 18);
-    place(kPromptLabel, pad, top + 28, right - pad * 2, 14);
-    place(kPrompt, pad, top + 44, right - pad * 2, status_top - (top + 44) - 4);
-    place(kGenerate, right, top, kButtonsWidth, 44);
-    place(kUndo, right, top + 50, kButtonsWidth, 24);
-    place(kDetails, right, top + 78, kButtonsWidth, 24);
-    place(kStatus, pad, status_top, width - pad * 2, 16);
+    place(kEngine, pad, top, 104, 120);   // 高さは開いた時の一覧の高さ
+    place(kRange, pad + 110, top + 2, right - pad - 116, 16);
+    place(kPrompt, pad, top + 24, right - pad * 2, status_top - (top + 24) - 3);
+    place(kGenerate, right, top, kButtonsWidth, 36);
+    place(kUndo, right, top + 40, kButtonsWidth, 20);
+    place(kDetails, right, top + 64, kButtonsWidth, 20);
+    place(kStatus, pad, status_top, width - pad * 2, 14);
     // 範囲のチェックの字の背景は、その高さのグラデーションの色（隣のパネルの字と同じく背景になじませる）
     if (label_brush_) DeleteObject(label_brush_);
     label_brush_ = CreateSolidBrush(color_at(top + 10));
