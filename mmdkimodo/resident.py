@@ -28,7 +28,7 @@ class Server:
 def _connect(server):
     try:
         return Client(("127.0.0.1", server.port), authkey=AUTHKEY)
-    except (ConnectionRefusedError, FileNotFoundError):
+    except (OSError, EOFError):   # いない・終わる途中（接続を切られた）
         return None
 
 
@@ -60,15 +60,31 @@ def _start(server, log):
 
 
 def call(server, request, log=print):
-    """依頼を送って (結果, 1 行のまとめ) を返す。"""
-    conn = _connect(server) or _start(server, log)
+    """依頼を送って (結果, 1 行のまとめ) を返す。
+
+    常駐は自分の橋渡しのファイルが書き換わっていたら、作らずに stale で答えて終わる。その時は立ち上げ直して頼み直す。
+    """
+    reply = _send(_connect(server) or _start(server, log), server, request)
+    if reply.get("stale"):
+        log(f"  {server.name} の橋渡しが新しくなっていたので、常駐を立ち上げ直します…")
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:   # 古い常駐が口を閉じるまで待つ
+            conn = _connect(server)
+            if conn is None:
+                break
+            conn.close()
+            time.sleep(0.2)
+        reply = _send(_start(server, log), server, request)
+    if not reply["ok"]:
+        raise RuntimeError(f"{server.name} が失敗しました:\n" + reply.get("error", "")[-1500:])
+    return reply["result"], reply.get("line", "")
+
+
+def _send(conn, server, request):
     try:
         conn.send(request)
-        reply = conn.recv()
+        return conn.recv()
     except EOFError:
         raise RuntimeError(f"{server.name} の常駐が途中で終わりました（{os.path.join(LOG_DIR, server.name + '_server.log')}）")
     finally:
         conn.close()
-    if not reply["ok"]:
-        raise RuntimeError(f"{server.name} が失敗しました:\n" + reply["error"][-1500:])
-    return reply["result"], reply.get("line", "")

@@ -254,11 +254,17 @@ def serve(port):
                 print("idle exit", flush=True)
                 os._exit(0)
     threading.Thread(target=watch, daemon=True).start()
+    born = os.path.getmtime(__file__)   # このファイルが書き換わったら、古いコードのまま作らずに終わる（resident.py が立ち上げ直す）
     while True:
         conn = listener.accept()
         last[0] = time.time() + 24 * 3600   # 作っている間は終わらない
         try:
             req = conn.recv()
+            if os.path.getmtime(__file__) != born:
+                conn.send({"ok": False, "stale": True})
+                conn.close()
+                print("stale exit", flush=True)
+                os._exit(0)
             result, line = generate(model, req)
             conn.send({"ok": True, "result": result, "line": line})
             print(line, flush=True)
