@@ -1,6 +1,7 @@
 """MotionBricks の橋渡し（MotionBricks の Python で動かす）。依頼の JSON → 結果の JSON。
 
-    F:\\motionbricks\\.venv\\Scripts\\python.exe tools\\mb_gen.py 依頼.json 結果.json
+    F:\\motionbricks\\.venv\\Scripts\\python.exe tools\\mb_gen.py 依頼.json 結果.json     1 回だけ
+    F:\\motionbricks\\.venv\\Scripts\\python.exe tools\\mb_gen.py --serve 9552         常駐（mmdkimodo/resident.py から頼む）
 
 姿勢は Kimodo と同じ形（SOMA 30 関節・Y が上・+Z が前・メートル。回転は基準の T ポーズで 0 の、親から見た四元数 x,y,z,w）。
 MotionBricks の骨格（77 関節の USD）は基準の回転が 0 でないので、世界の向きを介して付け替える:
@@ -21,8 +22,11 @@ MotionBricks の骨格（77 関節の USD）は基準の回転が 0 でないの
     {"skeleton": …, "jobs": [{"context": …, "targets": …}, …]}  →  {"results": [上の結果, …], "seconds_generate": …}
 """
 import json
+import os
 import sys
+import threading
 import time
+import traceback
 
 import numpy as np
 import warp as wp
@@ -36,6 +40,8 @@ from motionbricks.model.soma.contract import SOMA_N1_FP32_ONNX_PATH
 from motionbricks.model.soma.engine import MotionBricksSOMAEngine
 
 MIN_TOKENS, MAX_TOKENS = 6, 16   # 1 回で 4k-6 フレーム（両端込み）＝ 18〜58
+AUTHKEY = b"MMDKimodo.resident.v1"   # mmdkimodo/resident.py と同じ
+IDLE_SECONDS = 30 * 60               # 常駐で、これだけ頼まれなければ終わる
 
 
 class Rig:
@@ -144,20 +150,68 @@ def generate(engine, rig, job):
             "foot_contacts": contacts.reshape(-1).tolist(), "segments": segments}
 
 
-def main(req_path, res_path):
-    req = json.load(open(req_path, encoding="utf-8"))
-    wp.init()
-    wp.set_device("cuda:0")
-    rig = Rig(req["skeleton"])
+def run(engine, rigs, req):
+    """依頼 → (結果, 1 行のまとめ)。rigs は骨格のファイルごとの Rig の控え。"""
+    rig = rigs.get(req["skeleton"]) or rigs.setdefault(req["skeleton"], Rig(req["skeleton"]))
     jobs = req["jobs"] if "jobs" in req else [req]
     t0 = time.time()
-    with MotionBricksSOMAEngine(SOMA_N1_FP32_ONNX_PATH) as engine, wp.ScopedStream(engine.stream):
-        results = [generate(engine, rig, job) for job in jobs]
+    results = [generate(engine, rig, job) for job in jobs]
     seconds = time.time() - t0
     result = {"results": results, "seconds_generate": seconds} if "jobs" in req else dict(results[0], seconds_generate=seconds)
-    json.dump(result, open(res_path, "w", encoding="utf-8"))
-    print(f"ok jobs={len(results)} frames={[r['num_frames'] for r in results]} seconds={seconds:.2f}")
+    return result, f"ok jobs={len(results)} frames={[r['num_frames'] for r in results]} seconds={seconds:.2f}"
+
+
+def serve(port):
+    """エンジンを開いたまま、127.0.0.1:port で依頼を待つ。1 つずつ順に作る。IDLE_SECONDS 頼まれなければ終わる。"""
+    from multiprocessing.connection import Listener
+
+    listener = Listener(("127.0.0.1", port), authkey=AUTHKEY)   # 口がふさがっていれば（もう常駐がいれば）ここで落ちる
+    wp.init()
+    wp.set_device("cuda:0")
+    rigs = {}
+    last = [time.time()]
+
+    def watch():
+        while True:
+            time.sleep(30)
+            if time.time() - last[0] > IDLE_SECONDS:
+                print("idle exit", flush=True)
+                os._exit(0)
+    threading.Thread(target=watch, daemon=True).start()
+    t0 = time.time()
+    with MotionBricksSOMAEngine(SOMA_N1_FP32_ONNX_PATH) as engine, wp.ScopedStream(engine.stream):
+        print(f"ready port={port} load={time.time() - t0:.1f}s", flush=True)
+        while True:
+            conn = listener.accept()
+            last[0] = time.time() + 24 * 3600   # 作っている間は終わらない
+            try:
+                result, line = run(engine, rigs, conn.recv())
+                conn.send({"ok": True, "result": result, "line": line})
+                print(line, flush=True)
+            except Exception:
+                text = traceback.format_exc()
+                print(text, flush=True)
+                try:
+                    conn.send({"ok": False, "error": text})
+                except OSError:
+                    pass
+            finally:
+                conn.close()
+                last[0] = time.time()
+
+
+def main():
+    if sys.argv[1] == "--serve":
+        serve(int(sys.argv[2]))
+        return
+    req = json.load(open(sys.argv[1], encoding="utf-8"))
+    wp.init()
+    wp.set_device("cuda:0")
+    with MotionBricksSOMAEngine(SOMA_N1_FP32_ONNX_PATH) as engine, wp.ScopedStream(engine.stream):
+        result, line = run(engine, {}, req)
+    json.dump(result, open(sys.argv[2], "w", encoding="utf-8"))
+    print(line)
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    main()

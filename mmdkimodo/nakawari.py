@@ -63,7 +63,7 @@ def generate(job, work_dir, key_stop=False, wrist_lerp=False, log=print):
             targets.append({"poses": target, "frames": gaps[k - 1], "num_poses_to_use": len(target)})
         # 文脈は始めのキーの姿勢で止まっている形（手前は MMD の補間か、範囲の始まり）
         jobs.append({"context": [poses[s]] * 4, "targets": targets})
-    res = smooth_stop._run({"skeleton": pipeline.SOMA_JSON, "jobs": jobs}, work_dir)
+    res = smooth_stop._run({"skeleton": pipeline.SOMA_JSON, "jobs": jobs}, work_dir, log=log)
 
     T = job.num_frames
     J = len(keys[0]["local_rot"]) // 4

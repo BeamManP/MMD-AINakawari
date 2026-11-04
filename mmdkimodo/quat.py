@@ -24,10 +24,18 @@ def normalize(q):
     return q / np.linalg.norm(q)
 
 
+def cross(a, b):
+    """3 次元の外積。np.cross は配列向けの汎用の作りで、3 つの数 1 組だと 10 倍ほど遅い（11-04、書き戻しの計算の 7 割を占めていた）。"""
+    ax, ay, az = a
+    bx, by, bz = b
+    return np.array([ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx])
+
+
 def rotate(q, v):
-    u = q[:3]
-    t = 2.0 * np.cross(u, v)
-    return v + q[3] * t + np.cross(u, t)
+    x, y, z, w = q
+    vx, vy, vz = v
+    tx, ty, tz = 2.0 * (y * vz - z * vy), 2.0 * (z * vx - x * vz), 2.0 * (x * vy - y * vx)
+    return np.array([vx + w * tx + (y * tz - z * ty), vy + w * ty + (z * tx - x * tz), vz + w * tz + (x * ty - y * tx)])
 
 
 def from_axis_angle(axis, angle):

@@ -132,7 +132,7 @@ class MMDSkeleton:
                     angle = np.arccos(np.clip(np.dot(v1, v2), -1, 1))
                     if angle < 1e-6:
                         continue
-                    rot = Q.from_axis_angle(np.cross(v1, v2), min(angle, limit))
+                    rot = Q.from_axis_angle(Q.cross(v1, v2), min(angle, limit))
                     self._ik_r[j] = Q.normalize(Q.mul(self._ik_r[j], rot))
                     if link["limited"]:
                         e = Q.to_euler_xyz(Q.mul(self._anim_r[j], self._ik_r[j]))

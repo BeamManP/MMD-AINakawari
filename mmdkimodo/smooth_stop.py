@@ -15,16 +15,16 @@ MotionBricks は別の Python（3.12・TensorRT）なので、橋渡し（tools/
 """
 import json
 import os
-import subprocess
 
 import numpy as np
 
-from . import pipeline
+from . import pipeline, resident
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MB_PYTHON = r"F:\motionbricks\.venv\Scripts\python.exe"
 MB_DIR = r"F:\motionbricks"
 MB_SCRIPT = os.path.join(ROOT_DIR, "tools", "mb_gen.py")
+MB_PORT = 9552   # 常駐の MotionBricks（tools/mb_gen.py --serve）
 MIN_LEN, MAX_LEN = 17, 57    # MotionBricks の 1 回で作れる、文脈の最後から目標までのフレーム数
 LEN_STEP = 3
 LEN_COST = 0.05              # 長さ 1 フレームあたりの減点（m/s² 相当）。57F と 42F で 0.75 の差
@@ -76,7 +76,7 @@ def apply(job, result, work_dir, log=print):
     key_pose = {"root": key["root"], "local_rot": key["local_rot"]}
     jobs = [{"context": [{"root": roots[t].tolist(), "local_rot": rots[t].reshape(-1).tolist()} for t in range(kf - L - 3, kf - L + 1)],
              "targets": [{"poses": [key_pose], "frames": L, "num_poses_to_use": 1}]} for L in lengths]
-    res = _run({"skeleton": pipeline.SOMA_JSON, "jobs": jobs}, work_dir)
+    res = _run({"skeleton": pipeline.SOMA_JSON, "jobs": jobs}, work_dir, log=log)
 
     best = None
     for L, r in zip(lengths, res["results"]):
@@ -102,16 +102,11 @@ def apply(job, result, work_dir, log=print):
     return out
 
 
-def _run(request, work_dir):
+def _run(request, work_dir, log=print):
+    """常駐の MotionBricks に頼む（いなければ立ち上げる。エンジンの読み込みが 1 回で済む）。依頼と結果は work_dir に残す。"""
     os.makedirs(work_dir, exist_ok=True)
-    req = os.path.join(work_dir, "request.json")
-    res = os.path.join(work_dir, "result.json")
-    if os.path.exists(res):
-        os.remove(res)
-    json.dump(request, open(req, "w", encoding="utf-8"))
+    json.dump(request, open(os.path.join(work_dir, "request.json"), "w", encoding="utf-8"))
     env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
-    proc = subprocess.run([MB_PYTHON, MB_SCRIPT, req, res], capture_output=True, text=True, encoding="utf-8", errors="replace",
-                          env=env, cwd=MB_DIR, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    if proc.returncode != 0 or not os.path.exists(res):
-        raise RuntimeError("MotionBricks が失敗しました:\n" + (proc.stdout + proc.stderr)[-1500:])
-    return json.load(open(res, encoding="utf-8"))
+    result, _line = resident.call(resident.Server("MotionBricks", MB_PORT, MB_PYTHON, MB_SCRIPT, MB_DIR, env), request, log=log)
+    json.dump(result, open(os.path.join(work_dir, "result.json"), "w", encoding="utf-8"))
+    return result

@@ -127,6 +127,7 @@ class Retargeter:
         self.our_iks = [sk.names[i] for i in iks]
         self.neutral_bones = [n for n in NEUTRAL_BONES + ["センター"] if n in sk]
         self.written_bones = set(self.mapped) | set(self.proxies.values()) | set(self.our_iks) | set(self.neutral_bones)
+        self.idle_iks = self._idle_iks()
         # IK がどの手足を動かすか: IK のボーンかその目標の基準の位置が、手首・足首の基準の位置に重なるもの（つま先ＩＫなどは当たらない）
         ends = {"LeftHand": "左手首", "RightHand": "右手首", "LeftFoot": "左足首", "RightFoot": "右足首"}
         self.ik_effector = {}
@@ -136,6 +137,35 @@ class Retargeter:
             joint, d = min(((j, min(np.linalg.norm(p - sk.rest[sk.i(m)]) for p in pts)) for j, m in ends.items()), key=lambda x: x[1])
             if d < 0.3:
                 self.ik_effector[k] = joint
+
+    def _idle_iks(self):
+        """読む・書く骨のどれにも効かない IK（髪・ネクタイ・目線など）。姿勢の計算で解かずに飛ばす。
+
+        IK が動かすのは鎖の骨なので、そこから子と付与の受け取り先（回転・移動）をたどって、影響の届く骨を集める。
+        書き戻す骨・SOMA に当たる骨・足 IK などの目標・左右の足（腰の位置の基準）のどれにも届かなければ、解いても結果は変わらない。
+        11-04 Tda ミクで、書き戻しの計算の 97% が髪（鎖 8 本・50 回）とネクタイの IK を解く時間だった（1 フレーム 1.35 秒 → 0.04 秒）
+        """
+        sk = self.mmd
+        inheritors = [[] for _ in sk.bones]
+        for i, b in enumerate(sk.bones):
+            if b["inherit"] and b["flags"] & 0x300:
+                inheritors[b["inherit"][0]].append(i)
+        needed = {sk.i(n) for n in self.written_bones | set(self.mapped) | {"左足", "右足"} if n in sk}
+        needed |= {sk.bones[sk.i(k)]["ik"]["target_index"] for k in self.our_iks}
+        idle = []
+        for i, b in enumerate(sk.bones):
+            if not b["ik"]:
+                continue
+            reach = set()
+            todo = [l["bone_index"] for l in b["ik"]["links"]]
+            while todo:
+                j = todo.pop()
+                if j not in reach:
+                    reach.add(j)
+                    todo += sk.children[j] + inheritors[j]
+            if not reach & needed:
+                idle.append(sk.names[i])
+        return idle
 
     # ---------------- SOMA の計算 ----------------
 
@@ -214,8 +244,8 @@ class Retargeter:
         f_pos = {n: t for n, (t, q) in fixed.items()}
 
         def fk(world_targets=None):
-            # 対応する骨は、親の実際の向き（間の骨・付与・目線や機構の IK 込み）を見てキーを決める。目標を置く IK は解かない
-            return sk.pose({**f_rot, **rots}, {**f_pos, **pos}, world_targets=world_targets, skip_ik=self.our_iks)
+            # 対応する骨は、親の実際の向き（間の骨・付与・目線や機構の IK 込み）を見てキーを決める。目標を置く IK と効かない IK は解かない
+            return sk.pose({**f_rot, **rots}, {**f_pos, **pos}, world_targets=world_targets, skip_ik=self.our_iks + self.idle_iks)
 
         # センターの移動: 両脚の付け根の真ん中を、SOMA の位置へ合わせる（センターの親の向きで直す）
         legmid_target = conv_p((np.asarray(hips, float) + Q.rotate(Gs[0], self.legmid_offset)) / self.scale)
