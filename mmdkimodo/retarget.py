@@ -35,6 +35,12 @@ DIRECTION_PAIRS = {
     "RightLeg": ("RightShin", "右ひざ"), "RightShin": ("RightFoot", "右足首"), "RightFoot": ("RightToeBase", "右つま先"),
 }
 
+# 基準での向きの差を、上から見た向きだけで測る骨（足の裏が床に着いている基準どうしを合わせる。Retargeter.__init__）
+FLAT_FEET = ("LeftFoot", "RightFoot")
+# Kimodo の床: 足の裏を着けた時の、つま先の付け根（ToeBase）の高さ（m）。Kimodo が自分で着けた足の実測で 2.0cm（11-04・歩き 120 点の中央値）、
+# 公式の後処理も 0.02（postprocess.py の above_ground_offset）
+TOE_GROUND = 0.02
+
 # 書き戻しで 0（回転なし・移動なし）にする中継のボーン。体の動きはセンター・下半身・上半身などに全部載せる
 NEUTRAL_BONES = ["グルーブ", "腰", "左肩P", "右肩P", "左腕捩", "右腕捩", "左手捩", "右手捩"]
 
@@ -83,6 +89,13 @@ class Retargeter:
                 continue
             d_soma = self.neutral[self.sidx[s_child]] - self.neutral[j]
             d_mmd = conv_p(rest[self.mmd.i(m_child)] - rest[self.mmd.i(m)])
+            if s in FLAT_FEET:
+                # 足首→つま先の傾きは、骨の置き場所の違い（MMD のつま先ボーンは床の高さ、SOMA のつま先の付け根は少し上）で、
+                # 基準ではどちらも足の裏が床に着いている。傾きまで合わせると、キーの足が 9° ほどつま先下がりで Kimodo に渡り、
+                # Kimodo の接地の足は MMD でつま先が浮く（11-04、Tda ミクでキーのつま先 0cm・足首 7.2cm、Kimodo の接地はつま先 2.0cm・足首 7.1cm）。
+                # なので上から見た向き（つま先の開き）だけを合わせる
+                d_soma = d_soma * np.array([1.0, 0.0, 1.0])
+                d_mmd = d_mmd * np.array([1.0, 0.0, 1.0])
             self.C[j] = Q.from_to(d_soma, d_mmd)
 
         # 体格: 脚の長さの比（MMD の単位 → SOMA の m）

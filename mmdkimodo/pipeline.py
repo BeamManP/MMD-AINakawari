@@ -16,7 +16,7 @@ import numpy as np
 from . import quat as Q
 from . import resident, vmd
 from .mmd_skel import MMDSkeleton, sample
-from .retarget import Retargeter, conv_p, conv_q
+from .retarget import TOE_GROUND, Retargeter, conv_p, conv_q
 
 KIMODO_PYTHON = r"F:\kimodo\.venv\Scripts\python.exe"
 KIMODO_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "kimodo_gen.py")
@@ -268,7 +268,8 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
     hips0, loc0 = poses[first]
     job.ref_pos = np.array([hips0[0], 0.0, hips0[2]])
     job.ref_yaw = _yaw_of(loc0[0])
-    job.ground_lift = -min(rt.foot_clearance(*poses[f]) for f in (frames or [first]))
+    # 一番低い足の裏が Kimodo の床（つま先の付け根 TOE_GROUND）に来るように上げ下げする
+    job.ground_lift = TOE_GROUND - min(rt.foot_clearance(*poses[f]) for f in (frames or [first]))
 
     to_canon = Q.from_axis_angle([0, 1, 0], -job.ref_yaw)
 
