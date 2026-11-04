@@ -124,3 +124,59 @@ class Fold(ttk.Frame):
             self.body.pack(fill="both", expand=True, pady=(4, 0))
         else:
             self.body.pack_forget()
+
+
+class ScrollFrame(ttk.Frame):
+    """中身が入りきらない時だけ縦のスクロールバーが出る枠。中身は inner に置く。
+
+    tkinter の枠は入りきらない分を下から黙って切るので、窓を低くすると下の部品が消えていた（11-04、576×206 の窓で「生成」が見えなかった）。
+    何もしなければ中身の高さぴったりを求めるので、最初の窓は中身に合う。マウスホイールは、ポインタがこの枠の上にある時だけ効く。
+    """
+
+    _wheel_bound = False
+
+    def __init__(self, parent, padding=(8, 6)):
+        super().__init__(parent)
+        bg = ttk.Style().lookup("TFrame", "background")
+        self.canvas = tk.Canvas(self, highlightthickness=0, borderwidth=0, background=bg)
+        self.bar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self.bar.set)
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.inner = ttk.Frame(self.canvas, padding=padding)
+        self._item = self.canvas.create_window(0, 0, window=self.inner, anchor="nw")
+        self.inner.bind("<Configure>", self._inner_changed)
+        self.canvas.bind("<Configure>", self._canvas_changed)
+        # Windows のホイールの合図は入力中の部品に届くので、全体で受けてポインタの下の ScrollFrame を探す
+        if not ScrollFrame._wheel_bound:
+            self.bind_all("<MouseWheel>", ScrollFrame._wheel, add="+")
+            ScrollFrame._wheel_bound = True
+
+    def _inner_changed(self, _event):
+        # 求める大きさを中身に合わせる（窓を手で縮めていなければ、窓が中身に合う）
+        self.canvas.configure(scrollregion=(0, 0, self.inner.winfo_reqwidth(), self.inner.winfo_reqheight()),
+                              width=self.inner.winfo_reqwidth(), height=self.inner.winfo_reqheight())
+        self._update_bar()
+
+    def _canvas_changed(self, event):
+        self.canvas.itemconfigure(self._item, width=event.width)   # 横は枠いっぱいに広げる
+        self._update_bar()
+
+    def _overflow(self):
+        return self.inner.winfo_reqheight() > self.canvas.winfo_height() + 1
+
+    def _update_bar(self):
+        if self._overflow():
+            if not self.bar.winfo_ismapped():
+                self.bar.pack(side="right", fill="y", before=self.canvas)
+        else:
+            if self.bar.winfo_ismapped():
+                self.bar.pack_forget()
+            self.canvas.yview_moveto(0)
+
+    @staticmethod
+    def _wheel(event):
+        w = event.widget.winfo_containing(event.x_root, event.y_root) if hasattr(event.widget, "winfo_containing") else None
+        while w is not None and not isinstance(w, ScrollFrame):
+            w = w.master
+        if w is not None and w._overflow():
+            w.canvas.yview_scroll(int(-event.delta / 120), "units")

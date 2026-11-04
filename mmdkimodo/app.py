@@ -29,7 +29,7 @@ from mmd_mcp.windows import list_windows
 from . import runner, smooth_stop
 from .message_window import MessageWindow, register_message
 from .mmd_link import MMDLink
-from .widgets import Fold, PromptRows
+from .widgets import Fold, PromptRows, ScrollFrame
 
 APP_MUTEX = "Local\\MMDKimodo.App.v1"
 HUB_CLASS = "MMDKimodo.Hub"           # プラグインと 2 回目の起動が探す目印（kimodo_plugin.cpp と同じ）
@@ -55,7 +55,6 @@ MODE_NOTES = {
 }
 NAKAWARI_NOTE = ("打ったキーとキーの間を、MotionBricks でつなぎます。プロンプトは使いません。\n"
                  "キーの間が 17〜57 フレームの所だけ作り、それより短い・長い所は MMD の補間のまま残します。")
-PARTS = ["体", "左腕", "右腕", "左脚", "右脚"]
 NO_RANGE = 999999   # MMD の範囲選択の終わりの初期値（範囲を入れていない）
 
 def server_up(port=9550):
@@ -128,7 +127,7 @@ class App:
         self.link = MMDLink(mmd.hwnd)
         root.withdraw()  # 出すのは Hub が決める
         root.title("MMDKimodo")
-        root.minsize(560, 0)   # 高さは中身に合わせる（畳んだ欄を開くと伸びる）
+        root.minsize(560, 0)   # 高さの下限は _build で決める（上と下の段が必ず見える高さ）
         root.attributes("-topmost", False)
         self.cfg = dict(DEFAULTS)
         try:
@@ -166,63 +165,83 @@ class App:
     # ---------------- 画面 ----------------
 
     def _build(self):
+        """上（モデル・サーバー）と下（範囲・生成・状態）は固定し、真ん中のタブだけを伸び縮みさせる。
+
+        tkinter は入りきらない分を下から黙って切るので、生成を一番下寄りに積んでいた前の並びでは、窓を低くすると生成が消えていた。
+        タブの中身は ScrollFrame に入れ、入りきらなければスクロールする。タブを切り替えても窓の大きさは変えない。
+        """
         pad = {"padx": 10, "pady": 4}
         f = ttk.Frame(self.root)
         f.pack(fill="both", expand=True)
         f.columnconfigure(0, weight=1)
+        f.rowconfigure(1, weight=1)
 
-        # MMD のモデル欄で選んだモデルに効く
+        # 上: MMD のモデル欄で選んだモデルに効く。テキスト読み取りサーバーの印（Kimodo だけが使う）
         head = ttk.Frame(f)
         head.grid(row=0, column=0, sticky="we", **pad)
         self.model_text = tk.StringVar(value="選択中のモデル：（読み取り中）")
         ttk.Label(head, textvariable=self.model_text).pack(side="left")
+        self.head_server = ttk.Label(head, text="")
+        self.head_server.pack(side="right")
 
-        # やり方ごとのタブ。どちらにも効く範囲・書き戻す部分・生成はタブの外
+        # 真ん中: やり方ごとのタブ
         self.tabs = ttk.Notebook(f)
-        self.tabs.grid(row=1, column=0, sticky="we", padx=10, pady=(2, 4))
-        # ttk のタブは一番背の高いタブに高さを合わせるので、開いていないタブの中身は外しておく（中割りの下が空かないように）
-        self.tab_bodies = []
+        self.tabs.grid(row=1, column=0, sticky="nsew", padx=10, pady=(2, 4))
+        pages = []
         for _, text in TABS:
-            page = ttk.Frame(self.tabs, padding=(8, 6))
+            page = ScrollFrame(self.tabs)
             self.tabs.add(page, text=text)
-            self.tab_bodies.append(ttk.Frame(page))
-        self._build_kimodo(self.tab_bodies[0])
-        self._build_nakawari(self.tab_bodies[1])
-        self.tabs.bind("<<NotebookTabChanged>>", lambda _e: self._tab_changed())
+            pages.append(page.inner)
+        self._build_kimodo(pages[0])
+        self._build_nakawari(pages[1])
         self.tabs.select(1 if self.cfg["tab"] == "nakawari" else 0)
-        self._tab_changed()
 
-        # 範囲・書き戻す部分（仕組みはまだ。置き場所だけ）・生成
-        rf = ttk.Frame(f)
-        rf.grid(row=2, column=0, sticky="we", **pad)
+        # 下: どちらのタブにも効く範囲・生成・状態
+        foot = ttk.Frame(f)
+        foot.grid(row=2, column=0, sticky="we", padx=10, pady=(0, 8))
+        rf = ttk.Frame(foot)
+        rf.pack(fill="x", pady=(0, 4))
         ttk.Label(rf, text="範囲", width=10).pack(side="left")
         self.range_mode = tk.StringVar(value=self.cfg["range_mode"])
         self.range_text = tk.StringVar(value="MMD の範囲選択")
         ttk.Radiobutton(rf, text="全部", value="all", variable=self.range_mode).pack(side="left", padx=(0, 12))
         ttk.Radiobutton(rf, textvariable=self.range_text, value="mmd", variable=self.range_mode).pack(side="left")
-        wf = ttk.Frame(f)
-        wf.grid(row=3, column=0, sticky="we", **pad)
-        ttk.Label(wf, text="書き戻す部分").pack(side="left")
-        for part in PARTS:
-            check = ttk.Checkbutton(wf, text=part, state="disabled")
-            check.state(["selected", "!alternate", "disabled"])
-            check.pack(side="left", padx=(8, 0))
-        ttk.Label(wf, text="（準備中）", foreground="#888").pack(side="left", padx=(8, 0))
-        bf = ttk.Frame(f)
-        bf.grid(row=4, column=0, sticky="we", **pad)
+        bf = ttk.Frame(foot)
+        bf.pack(fill="x")
         self.gen_btn = ttk.Button(bf, text="生成", command=self._generate)
         self.gen_btn.pack(side="left", fill="x", expand=True, ipady=8)
         self.undo_btn = ttk.Button(bf, text="元に戻す", command=self._undo, state="disabled")
         self.undo_btn.pack(side="left", padx=(6, 0), ipady=8)
+        sf = ttk.Frame(foot)
+        sf.pack(fill="x", pady=(4, 0))
+        ttk.Button(sf, text="ログ", width=6, command=self._toggle_log).pack(side="right")
+        # 状態は 1 行（下の段の高さを変えない）。長い失敗の文はログと失敗の窓に全文が出る
         self.status = tk.StringVar(value="MMD でキーを打ってから「生成」を押してください")
-        ttk.Label(f, textvariable=self.status, foreground="#335", wraplength=520).grid(row=5, column=0, sticky="w", **pad)
+        ttk.Label(sf, textvariable=self.status, foreground="#335").pack(side="left", fill="x", expand=True)
 
-        logs = Fold(f, "ログ")
-        logs.grid(row=6, column=0, sticky="nsew", padx=10, pady=(4, 8))
-        self.log = tk.Text(logs.body, height=12, wrap="word", state="disabled", background="#f6f6f6")
+        # ログは別の小さな窓（本体の並びを押し出さない）。× は隠すだけ
+        self.log_win = tk.Toplevel(self.root)
+        self.log_win.title("MMDKimodo のログ")
+        self.log_win.withdraw()
+        self.log_win.protocol("WM_DELETE_WINDOW", self.log_win.withdraw)
+        bar = ttk.Scrollbar(self.log_win, orient="vertical")
+        bar.pack(side="right", fill="y")
+        self.log = tk.Text(self.log_win, width=90, height=24, wrap="word", state="disabled", background="#f6f6f6",
+                           yscrollcommand=bar.set)
         self.log.pack(fill="both", expand=True)
-        f.rowconfigure(6, weight=1)
+        bar.configure(command=self.log.yview)
         self._mode_changed()
+
+        # 窓の高さの下限: 上と下の段と、タブの見出し＋中身 3 行ほど。これより低くできないので、生成と状態は必ず見える
+        self.root.update_idletasks()
+        self.root.minsize(560, head.winfo_reqheight() + foot.winfo_reqheight() + 150)
+
+    def _toggle_log(self):
+        if self.log_win.winfo_viewable():
+            self.log_win.withdraw()
+        else:
+            self.log_win.deiconify()
+            self.log_win.lift()
 
     def _build_kimodo(self, t):
         """「プロンプトで作る」タブ（Kimodo）。"""
@@ -312,14 +331,6 @@ class App:
         if not smooth_stop.available():
             ttk.Label(t, text=f"MotionBricks が入っていません（{smooth_stop.MB_PYTHON}）", foreground="#a33").pack(anchor="w", pady=(10, 0))
 
-    def _tab_changed(self):
-        current = self.tabs.index("current")
-        for i, body in enumerate(self.tab_bodies):
-            if i == current:
-                body.pack(fill="both", expand=True)
-            else:
-                body.pack_forget()
-
     def _mode_changed(self):
         mode = self.mode.get()
         self.mode_note.set(MODE_NOTES[mode])
@@ -398,6 +409,7 @@ class App:
                     messagebox.showerror("MMDKimodo", msg, parent=self.root)
         up = server_up()
         self.server_dot.configure(text="●" if up else "○", foreground="#2a7" if up else "#a33")
+        self.head_server.configure(text="● サーバー" if up else "○ サーバー停止中", foreground="#2a7" if up else "#a33")
         self.server_label.configure(text="テキスト読み取りサーバー起動中" if up else "テキスト読み取りサーバー停止中（無いと毎回 Llama を読み込むので遅い）")
         self.server_btn.configure(state="disabled" if up else "normal")
         self.gen_btn.configure(state="disabled" if self.busy else "normal")
