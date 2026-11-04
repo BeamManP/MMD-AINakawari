@@ -337,6 +337,8 @@ class App:
         self.server_label.pack(side="left", padx=(6, 0))
         self.server_btn = ttk.Button(sf, text="サーバーを起動", command=self._start_server)
         self.server_btn.pack(side="right")
+        sf.configure(height=self.server_btn.winfo_reqheight())   # 低負荷でボタンを隠しても、行の高さ（窓の高さ）を変えない
+        sf.pack_propagate(False)
 
     def _build_nakawari(self, t):
         """「中割り」タブ（MotionBricks）。"""
@@ -447,6 +449,10 @@ class App:
                                    foreground="#2a7" if up else "#a33")
         self.server_label.configure(text="テキスト読み取りサーバー起動中" if up else "テキスト読み取りサーバー停止中（高速モードで要ります）")
         self.server_btn.configure(state="disabled" if up else "normal")
+        if fast and not self.server_btn.winfo_manager():   # 低負荷モードはサーバーを使わないので、起動ボタンを隠す
+            self.server_btn.pack(side="right")
+        elif not fast and self.server_btn.winfo_manager():
+            self.server_btn.pack_forget()
         # 高速モードのプロンプトで作るは 9550 が要る。押してからエラーにせず、押せなくして下の 1 行で知らせる（中割りは使わない）
         need_server = fast and not up and not self.busy and TABS[self.tabs.index("current")][0] == "kimodo"
         if need_server and self._status_before is None:
