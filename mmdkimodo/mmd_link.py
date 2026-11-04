@@ -11,6 +11,8 @@ from mmd_mcp.bone_selection import select_bone
 from mmd_mcp.ui_state import UIReader, get_ui_state
 from mmd_mcp.windows import list_windows
 
+from . import mmd_memory, vmd
+
 # MMD の中のモデルのデータでの、読み込んだファイルの場所（UTF-16・256 文字）。
 # MMDPlugin のヘッダ（MMDModelData::file_path・9.31 の解析）の位置で、9.32 でもそのまま読めた（11-03）。
 MODEL_FILE_PATH = 9544
@@ -88,6 +90,24 @@ class MMDLink:
         if not (start and end and start.strip().isdigit() and end.strip().isdigit()):
             return None
         return int(start), int(end)
+
+    def read_motion(self, path):
+        """選択中のモデルのモーションを MMD のメモリから読み、VMD にして path に書く（「元に戻す」の控え）。読んだ vmd.Motion を返す。
+
+        中身は MMD の書き出しと同じ（11-04、体のキー 2317・表情 69・表示/IK を突き合わせて一致。補間の各行の末尾の詰め物だけ違う）。
+        書き出しのダイアログ（2.3 秒）と違って 0.06 秒で、0F にキーが無くてもフレームが詰まらない。
+        """
+        model = self.selected_model()
+        if model is None:
+            raise RuntimeError("MMD でモデルを選んでください")
+        morphs, iks = mmd_memory.read_pmx_names(model["path"])
+        reader = mmd_memory.MotionReader(self.hwnd)
+        try:
+            motion = reader.read(morphs, iks)
+        finally:
+            reader.close()
+        vmd.write(path, motion)
+        return motion
 
     def export_motion(self, path):
         """選択中のモデルのモーションを丸ごと書き出す。MMD は選択したキーだけを書き出す（何も選んでいないと断る）ので、先に全部選ぶ。"""

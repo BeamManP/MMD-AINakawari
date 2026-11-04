@@ -1,6 +1,6 @@
 """「生成」1 回分の流れと「元に戻す」。窓（app.py）と確認用のコマンドの両方から呼ぶ。
 
-1. MMD から選択中のモデルのモーションを丸ごと書き出す（これが「元に戻す」用の控えにもなる）
+1. MMD のメモリから選択中のモデルのモーションを丸ごと読み、VMD の控えにする（「元に戻す」用。mmd_memory.py）
 2. 体の骨のキーを読んで Kimodo に渡し、間のフレームを作る
 3. 元のモーションに間のフレームを差し込み、0F で MMD に読み込ませる
 """
@@ -37,23 +37,6 @@ class Settings:
     engine: str = "kimodo"          # "motionbricks" ならキーの間を MotionBricks だけで埋める（中割り・プロンプト無し。nakawari.py）
     key_stop: bool = False          # 中割りで、キーごとに止まる（オフなら次のキーへの速さで通る）
     wrist_lerp: bool = False        # 中割りで、手首だけキーの間を補間でつなぐ（MotionBricks は手首を回しすぎることがある）
-
-
-def _check_frame_base(link, motion, log):
-    """MMD の書き出しは最初のキーを 0F に詰める。0F にキーが無いとフレームがずれるので、センター（無ければ全ての親）の値で確かめる。"""
-    tracks = motion.tracks()
-    for bone in ("センター", pipeline.ROOT_BONE):
-        probe = next((k for k in tracks.get(bone, []) if np.abs(k.pos).max() > 0.05), None)
-        if probe is not None:
-            break
-    if probe is None:
-        log("（センターも全ての親も動いていないので、フレームのずれの照合は飛ばしました）")
-        return
-    live = np.array(link.bone_value(bone, probe.frame))
-    if np.abs(live - probe.pos).max() > 0.02:
-        raise RuntimeError(
-            f"MMD の {probe.frame}F の{bone} {tuple(live)} が、書き出したモーションの値 {tuple(probe.pos.round(2))} と合いません。\n"
-            "0F にキーが無いと、MMD の書き出しでフレームが詰まってずれます。0F にキーを打ってからもう一度押してください")
 
 
 def _same_motion(a, b, tol=1e-3, fixed_pos=(), names=None):
@@ -120,9 +103,8 @@ def generate(settings, log=print, link=None, previous=None):
     stamp = time.strftime("%Y%m%d_%H%M%S")
     backup = os.path.join(WORK_DIR, f"original_{stamp}.vmd")
 
-    log(f"MMD から「{st['model']}」のモーションを書き出し中…")
-    link.export_motion(backup)
-    original = vmd.read(backup)
+    log(f"MMD から「{st['model']}」のモーションを読み込み中…")
+    original = link.read_motion(backup)
     log(f"  キー {len(original.bones)} 個")
     skel = MMDSkeleton(pmx)
     fixed_pos = {vmd.vmd_name(b["name"]) for b in skel.bones if not b["flags"] & 0x0004}
@@ -135,7 +117,6 @@ def generate(settings, log=print, link=None, previous=None):
         log(f"  前回の生成結果のままなので、前回の元のキーから作り直します（{backup}）")
     else:
         log(f"  控え: {backup}")
-    _check_frame_base(link, original, log)
 
     rng = (settings.range_start, settings.range_end) if settings.range_start is not None else None
     mb = settings.engine == "motionbricks"
