@@ -15,7 +15,7 @@ import numpy as np
 
 from . import quat as Q
 from . import resident, vmd
-from .mmd_skel import MMDSkeleton, sample, split_interp
+from .mmd_skel import MMDSkeleton, sample, split_errors, split_interp
 from .retarget import TOE_GROUND, Retargeter, conv_p, conv_q
 
 KIMODO_PYTHON = r"F:\kimodo\.venv\Scripts\python.exe"
@@ -32,6 +32,7 @@ SOMA_JSON = r"F:\kimodo\tools\somaskel30.json"
 MAX_FRAMES = 300  # Kimodo の 1 区間は 10 秒（30fps）まで（公式の limitations.md）。区間を分ければ全体はこれより長くてよい
 STOP_HOLD = 10    # 「最後のキーで止まる」で、キーの後ろに腰を止めておくフレーム数
 RANGE_CONTEXT = 3  # 範囲を作り直す時に、範囲の端の外側から使う姿勢のフレーム数（外の動きの勢いをつなぐ。MotionBricks の文脈は 4 姿勢）
+SPLIT_TOLERANCE = 0.05   # 曲線を分けた時のずれ（重み 0〜1）の上限。超える部分は元の値のキーで埋める（ふつうの曲線は 95% が 0.023 以下。11-04）
 PARALLEL_SECONDS = 10   # 書き戻しの計算の残りがこれ以上かかりそうなら、子プロセスに分けて並べる
 ROOT_BONE = "全ての親"
 IGNORED_ROOTS = ("操作中心",)
@@ -449,6 +450,9 @@ def merge(original, generated, job):
     have = {(k.name, k.frame) for k in original.bones}
     filled = []
     new_interp = {}   # 元のキー（id）→ 足したキーの後ろの部分の曲線
+    generated_at = {}
+    for k in generated.bones:
+        generated_at.setdefault(k.name, set()).add(k.frame)
     for name in {k.name for k in generated.bones}:   # 書く時は元の名前から 15 バイトで切る（切った名前を書くと文字化けする）
         vn = vmd.vmd_name(name)
         track = orig_tracks.get(vn, [])
@@ -462,12 +466,23 @@ def merge(original, generated, job):
             inside = [f for f in added if p.frame < f < n.frame]
             if not inside:
                 continue
-            pieces = split_interp(n.interp, [(f - p.frame) / (n.frame - p.frame) for f in inside])
+            us = [(f - p.frame) / (n.frame - p.frame) for f in inside]
+            pieces = split_interp(n.interp, us)
             by_frame = dict(zip(inside, pieces))
             for key in filled:
                 if key.name == name and key.frame in by_frame:
                     key.interp = by_frame[key.frame]
             new_interp[id(n)] = pieces[-1]
+            # 分けた曲線で元の形を表せない部分（ずれ SPLIT_TOLERANCE 超え）は、MMD の補間のまま残るフレームに元の値のキーを打つ
+            # （その区間だけキーが増えるが、動きは元のまま）
+            bounds = [p.frame] + inside + [n.frame]
+            for i, err in enumerate(split_errors(n.interp, us, pieces)):
+                if err <= SPLIT_TOLERANCE:
+                    continue
+                for f in range(bounds[i] + 1, bounds[i + 1]):
+                    if f not in generated_at[name] and (vn, f) not in have:
+                        t, q = sample(orig_tracks, vn, f)
+                        filled.append(vmd.BoneKey(name, f, t, q))
     keep = [replace(k, interp=new_interp[id(k)]) if id(k) in new_interp else k for k in keep]
     return vmd.Motion(model_name=original.model_name, bones=keep + filled + generated.bones, tail=original.tail)
 

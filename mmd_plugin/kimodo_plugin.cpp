@@ -126,6 +126,11 @@ void quiet_keys_in(HWND prompt) {
     g_get_key_state = reinterpret_cast<GetKeyStateFn>(*slot);
     if (write_slot(slot, reinterpret_cast<void*>(quiet_get_key_state))) {
         g_key_state_slot = reinterpret_cast<GetKeyStateFn*>(slot);
+        // この DLL を MMD が終わるまで外さない。戻すのに失敗した時（や戻す前に外された時）に、MMD の呼び先が
+        // 外した後の場所を指して落ちないように（11-05 Codex のレビュー）
+        HMODULE self = nullptr;
+        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
+                           reinterpret_cast<LPCWSTR>(&quiet_get_key_state), &self);
         log_line("GetKeyState: replaced");
     } else {
         log_line("GetKeyState: VirtualProtect failed %lu", GetLastError());
@@ -133,9 +138,12 @@ void quiet_keys_in(HWND prompt) {
 }
 
 void restore_keys() {
-    if (g_key_state_slot) write_slot(reinterpret_cast<void**>(g_key_state_slot), reinterpret_cast<void*>(g_get_key_state));
-    g_key_state_slot = nullptr;
-    g_prompt = nullptr;
+    g_prompt = nullptr;   // 戻せなくても、これで差し替えた方は本物と同じ答えを返す
+    if (g_key_state_slot && write_slot(reinterpret_cast<void**>(g_key_state_slot), reinterpret_cast<void*>(g_get_key_state))) {
+        g_key_state_slot = nullptr;
+    } else if (g_key_state_slot) {
+        log_line("GetKeyState: restore failed %lu", GetLastError());
+    }
 }
 
 class KimodoPlugin;

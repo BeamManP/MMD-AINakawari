@@ -11,7 +11,7 @@ extern "C" IMAGE_DOS_HEADER __ImageBase;
 
 namespace {
 constexpr wchar_t kClass[] = L"MMDKimodo.Panel";   // Python（mmdkimodo/panel.py）はこの名前でパネルを探す
-constexpr wchar_t kCaption[] = L"Kimodo操作";
+constexpr wchar_t kCaption[] = L"AIナカワリ簡易操作";
 constexpr int kCameraButton = 536;   // 3D 画面の下の帯の「カメラ編／モデル編」。字体を借りる・今のモードを見る
 constexpr wchar_t kModelModeText[] = L"モデル編";   // カメラ用のモードの時の、このボタンの字
 // 下の段のパネルの上端は、各パネルの見出しの「－」ボタン（14×14）の 2px 上（11-04 カメラ用のモードで 834 → 832、下端は 986）。
@@ -38,6 +38,9 @@ constexpr int kStatus = 107;
 constexpr int kSamples = 108;          // 「サンプル」。押すとプロンプトの一覧が出る（英語が苦手な人向け。11-05 マスター）
 constexpr UINT kFirstSample = 1000;    // 一覧の項目の番号の始まり
 constexpr UINT kLayoutMessage = WM_APP + 1;
+// Python が部品の押せる・押せないを頼む（wparam = 部品の番号・lparam = 押せるなら 1）。mmdkimodo/panel.py の ENABLE_MESSAGE。
+// EnableWindow を外から呼ぶと、相手が答えるまで待って期限を付けられないので、ここで呼ぶ（11-05 Codex のレビュー）
+constexpr UINT kEnableMessage = WM_APP + 2;
 constexpr UINT_PTR kLayoutTimer = 1;  // カメラ用のモードにすると下の段が右に伸びるので、時々測り直す
 // 隣のパネルと同じ縦のグラデーション（ボーン操作は 49,49,99 → 22,22,45）で、色だけ青緑にする。
 constexpr int kTop[3] = {49, 99, 99};
@@ -111,9 +114,9 @@ bool KimodoPanel::create(HWND mmd, std::function<void(int)> on_command, std::wst
     lf.lfWidth = 0;
     font_ = CreateFontIndirectW(&lf);
     const HWND engine = add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, kEngine);
-    // 名前は窓のタブより短く（パネルの切り替えは幅 104px。「プロンプトで作る」だと切れた）
-    SendMessageW(engine, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"プロンプト"));
-    SendMessageW(engine, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"中割り"));
+    // 中の動きを作るモデルの名前（11-05 マスター）。0 が窓の「プロンプトで作る」、1 が「中割り」のタブ
+    SendMessageW(engine, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Kimodo"));
+    SendMessageW(engine, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"MotionBricks"));
     SendMessageW(engine, CB_SETCURSEL, 0, 0);
     // 範囲は字で出すだけ（Python が「選んだキー 90〜120F」などを書く）。前はチェックで切り替えていた（11-05 マスター「チェックも無しで」）
     add(L"STATIC", L"", SS_OWNERDRAW, kRange);
@@ -372,6 +375,9 @@ LRESULT CALLBACK KimodoPanel::proc(HWND hwnd, UINT message, WPARAM wparam, LPARA
             return 0;
         case WM_TIMER:
             if (wparam == kLayoutTimer) self->layout();
+            return 0;
+        case kEnableMessage:
+            if (const HWND item = GetDlgItem(hwnd, static_cast<int>(wparam))) EnableWindow(item, lparam != 0);
             return 0;
         case kLayoutMessage:
             self->layout();

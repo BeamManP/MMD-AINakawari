@@ -18,6 +18,7 @@ ENGINE, RANGE, PROMPT, GENERATE, UNDO, DETAILS, STATUS, SAMPLES = 101, 102, 103,
 WM_GETTEXT, WM_SETTEXT, WM_GETTEXTLENGTH = 0x000D, 0x000C, 0x000E
 CB_GETCURSEL, CB_SETCURSEL = 0x0147, 0x014E
 SMTO_ABORTIFHUNG = 0x0002
+ENABLE_MESSAGE = 0x8000 + 2   # WM_APP + 2。パネルに部品の押せる・押せないを頼む（kimodo_panel.cpp の kEnableMessage）
 TIMEOUT_MS = 200
 
 _user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -58,9 +59,10 @@ class Panel:
     def _item(self, item):
         return win32gui.GetDlgItem(self.hwnd, item)
 
-    def _call(self, item, message, wparam=0, lparam=0):
+    def _call(self, item, message, wparam=0, lparam=0, to=None):
         result = ctypes.c_size_t()
-        if not _send(self._item(item), message, wparam, lparam, SMTO_ABORTIFHUNG, TIMEOUT_MS, ctypes.byref(result)):
+        target = self._item(item) if to is None else to
+        if not _send(target, message, wparam, lparam, SMTO_ABORTIFHUNG, TIMEOUT_MS, ctypes.byref(result)):
             raise Busy()
         return result.value
 
@@ -81,4 +83,5 @@ class Panel:
         self._call(item, CB_SETCURSEL, index)
 
     def enable(self, item, on):
-        win32gui.EnableWindow(self._item(item), bool(on))
+        # EnableWindow を直接呼ぶと、MMD が答えるまで待って期限を付けられないので、パネルに頼む（11-05 Codex のレビュー）
+        self._call(item, ENABLE_MESSAGE, item, 1 if on else 0, to=self.hwnd)

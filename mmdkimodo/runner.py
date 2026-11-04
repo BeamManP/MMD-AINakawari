@@ -84,10 +84,10 @@ def load_last_run(link):
     return r if r and os.path.exists(r.get("backup", "")) and os.path.exists(r.get("output", "")) else None
 
 
-def _save_last_run(link, backup, out):
+def _save_last_run(link, backup, out, rng):
     with _LAST_RUN_LOCK:   # 窓（MMD ごと）は同じプロセスのスレッドで生成するので、読んで書き戻す間をまとめて守る
         runs = _last_runs()
-        runs[link.key] = {"backup": backup, "output": out}
+        runs[link.key] = {"backup": backup, "output": out, "range": list(rng) if rng else None}
         # 書き終わってから置き換える（途中で止まっても前のものが残る）。一時ファイルは保存ごとに別の名前
         # （窓と確認用のスクリプトのように別のプロセスが同時に保存すると、同じ名前では片方の置き換えが失敗した。11-04 Codex のレビュー）
         tmp = f"{LAST_RUN}.{os.getpid()}.{threading.get_ident()}.tmp"
@@ -122,15 +122,18 @@ def generate(settings, log=print, link=None, previous=None):
     fixed_pos = {vmd.vmd_name(b["name"]) for b in skel.bones if not b["flags"] & 0x0004}
     # 照合は書き戻す骨だけ（それ以外は元のキーをそのまま通しているので、比べても意味が無い）
     written = {vmd.vmd_name(n) for n in pipeline.body_bone_names(skel, pipeline.Retargeter(skel, pipeline.SOMA_JSON))}
-    if previous and os.path.exists(previous.get("output", "")) and _same_motion(original, vmd.read(previous["output"]),
-                                                                                fixed_pos=fixed_pos, names=written):
+    rng = (settings.range_start, settings.range_end) if settings.range_start is not None else None
+    # 前回の元のキーから作り直すのは、前回と同じ範囲の時だけ。違う範囲で戻すと、前回作った範囲の結果が消えていた
+    # （範囲 A を作った後に範囲 B を作ると、B の外の A が元に戻った。11-05 Codex のレビュー）
+    same_range = previous is not None and previous.get("range") == (list(rng) if rng else None)
+    if same_range and os.path.exists(previous.get("output", "")) and _same_motion(original, vmd.read(previous["output"]),
+                                                                                 fixed_pos=fixed_pos, names=written):
         backup = previous["backup"]
         original = vmd.read(backup)
         log(f"  前回の生成結果のままなので、前回の元のキーから作り直します（{backup}）")
     else:
         log(f"  控え: {backup}")
 
-    rng = (settings.range_start, settings.range_end) if settings.range_start is not None else None
     mb = settings.engine == "motionbricks"
     job = pipeline.prepare(pmx, original, "inbetween" if mb else settings.prompt, settings.steps, settings.seed,
                            settings.post_processing, frame_range=rng, cfg=(settings.cfg_text, settings.cfg_key),
@@ -210,8 +213,8 @@ def generate(settings, log=print, link=None, previous=None):
     root_err = result.get("root_key_error_m") or []
     extra = f"・全ての親のキーとの腰のずれ最大 {max(root_err) * 100:.0f}cm" if root_err else ""
     log(f"できました（{time.time() - t0:.0f} 秒・生成 {result.get('seconds_generate', 0):.1f} 秒・キーとのずれ最大 {max(err) * 100:.1f}cm{extra}）")
-    _save_last_run(link, backup, out)
-    return {"backup": backup, "output": out, "job": job}
+    _save_last_run(link, backup, out, rng)
+    return {"backup": backup, "output": out, "job": job, "range": list(rng) if rng else None}
 
 
 def undo(backup, log=print, link=None):

@@ -118,7 +118,7 @@ class Hub:
 
     def forget(self, app):
         self.apps.pop(app.mmd.hwnd, None)
-        if not self.apps:
+        if not self.apps and not self.waiting:   # 起動の途中の MMD を待っている間は終わらない（11-05 Codex のレビュー）
             self._finish()
 
     def _finish(self):
@@ -439,7 +439,9 @@ class App:
         except OSError as e:
             messagebox.showerror("MMDKimodo", f"サンプルの一覧が読めません: {e}", parent=self.root)
             return
-        menu = tk.Menu(self.root, tearoff=0)
+        if getattr(self, "_sample_menu", None) is not None:   # 前に開いた一覧は消す（開くたびに増えていた。11-05 Codex のレビュー）
+            self._sample_menu.destroy()
+        menu = self._sample_menu = tk.Menu(self.root, tearoff=0)
         for name, items in groups:
             sub = tk.Menu(menu, tearoff=0) if name else menu
             for label, prompt in items:
@@ -499,7 +501,9 @@ class App:
         if not win32gui.IsWindow(self.mmd.hwnd):  # MMD が閉じたら、その MMD の分は一緒に終わる
             self.close()
             return
-        scene = win32gui.GetWindowText(self.mmd.hwnd).partition("[")[2].rstrip("]")
+        # 次の予約は先に入れる（途中で例外が出ると、パネルとの同期も表示の更新も止まっていた。11-05 Codex のレビュー）
+        self.root.after(500, self._tick)
+        scene =win32gui.GetWindowText(self.mmd.hwnd).partition("[")[2].rstrip("]")
         title = f"MMDKimodo - {os.path.basename(scene)}" if scene else "MMDKimodo"
         if self.root.title() != title:
             self.root.title(title)
@@ -532,7 +536,9 @@ class App:
         keys = self.selected_keys
         if not self.diagnosis.usable:
             block = self.diagnosis.note
-        elif self.range_mode.get() == "keys" and keys is not None and len(keys) < 2 and not self.busy:
+        elif self.range_mode.get() == "keys" and keys is None and not self.busy:   # 読めない時も止める（11-05 Codex のレビュー）
+            block = "選んだキーを読めません（MMD の操作の途中？）"
+        elif self.range_mode.get() == "keys" and len(keys) < 2 and not self.busy:
             block = "範囲の最初と最後のキーを選んでください"   # パネルの 1 行に収まる長さ
         elif fast and not up and not self.busy and TABS[self.tabs.index("current")][0] == "kimodo":
             block = "テキスト読み取りサーバーを起動してください（「サーバーを起動」か、右上で低負荷モードに）"
@@ -547,50 +553,53 @@ class App:
         self.gen_btn.configure(state="disabled" if self.busy or block else "normal")
         self.undo_btn.configure(state="normal" if (self.last_backup and not self.busy) else "disabled")
         self._sync_panel()
-        self.root.after(500, self._tick)
 
     # ---------------- MMD の右下のパネル ----------------
 
     def _sync_panel(self):
-        """パネルと窓の設定をそろえる。入力（プロンプト・中割りか・範囲）は変わった方からもう一方へ、
-        表示（状態の 1 行・範囲の字・ボタンの押せる押せない）は窓からパネルへ。"""
+        """パネルと窓の設定をそろえる。入力（プロンプト・Kimodo か MotionBricks か）は変わった方からもう一方へ、
+        表示（状態の 1 行・範囲の字・ボタンの押せる押せない）は窓からパネルへ。そろえられたら True（パネルが無い時も）。"""
         p = self.panel
         before = p.hwnd
         if not p.find():
-            return
+            return True   # パネルが無い（隠れているのとは別。プラグインが古い等）。そろえる物が無い
         if p.hwnd != before:   # 新しいパネル（MMD を起動し直した等）。中身を全部写し直す
             self._seen = {}
-        try:
-            def two_way(key, panel_value, window_value, to_window, to_panel):
-                if ("panel", key) not in self._seen:   # 最初（パネルを作り直した時も）は窓の設定をパネルへ
-                    to_panel(window_value)
-                    panel_value = read_panel[key]()
-                elif panel_value != self._seen.get(("panel", key)):   # パネルで変えた
-                    if panel_value != window_value:
-                        to_window(panel_value)
-                        window_value = read_window[key]()
-                elif window_value != self._seen.get(("window", key)):   # 窓で変えた
-                    to_panel(window_value)
-                    panel_value = read_panel[key]()
-                self._seen[("panel", key)], self._seen[("window", key)] = panel_value, window_value
+        seen = self._seen
 
-            read_panel = {
-                "prompt": lambda: panel.lines_of(p.text(panel.PROMPT)),
-                "engine": lambda: p.selection(panel.ENGINE),
-            }
-            read_window = {
-                "prompt": self.prompt_rows.text,
-                "engine": lambda: self.tabs.index("current"),
-            }
+        def window_prompt():
             try:
-                window_prompt = self.prompt_rows.text()
-            except ValueError:   # 窓で区間のフレームを打っている途中。そろえるのは次に
-                window_prompt = None
-            if window_prompt is not None:
-                two_way("prompt", read_panel["prompt"](), window_prompt,
-                        lambda v: self.prompt_rows.load(v), lambda v: p.set_text(panel.PROMPT, panel.one_line(v)))
-            two_way("engine", read_panel["engine"](), read_window["engine"](),
-                    lambda v: self.tabs.select(1 if v == 1 else 0), lambda v: p.select(panel.ENGINE, v))
+                return self.prompt_rows.text()
+            except ValueError:   # 区間のフレームが数字でない・重なる（打っている途中か、パネルで重ねて書いた）
+                return None
+
+        try:
+            # プロンプト: パネルで変えた → 窓へ（窓の区間がおかしい時も、パネルで直せば写るように）。窓で変えた → パネルへ。
+            # パネルへ書いた時は、読み返した値でなく書いた値を覚える（書いた直後に打った分を、次に「パネルで変えた」と分かるように。
+            # 読み返した値を覚えると、その分は窓に写らないままだった。11-05 Codex のレビュー）
+            got = panel.lines_of(p.text(panel.PROMPT))
+            mine = window_prompt()
+            if ("panel", "prompt") not in seen:   # 最初（パネルを作り直した時も）は窓の設定をパネルへ
+                if mine is not None:
+                    p.set_text(panel.PROMPT, panel.one_line(mine))
+                    got = mine
+            elif got != seen[("panel", "prompt")]:
+                if got != mine:
+                    self.prompt_rows.load(got)
+                    mine = window_prompt()
+            elif mine is not None and mine != seen.get(("window", "prompt")):
+                p.set_text(panel.PROMPT, panel.one_line(mine))
+                got = mine
+            seen[("panel", "prompt")], seen[("window", "prompt")] = got, mine
+            # Kimodo か MotionBricks か（窓のタブ）
+            got, mine = p.selection(panel.ENGINE), self.tabs.index("current")
+            if ("panel", "engine") not in seen or (got == seen[("panel", "engine")] and mine != seen[("window", "engine")]):
+                p.select(panel.ENGINE, mine)
+                got = mine
+            elif got != seen[("panel", "engine")] and got != mine:
+                self.tabs.select(1 if got == 1 else 0)
+                mine = self.tabs.index("current")
+            seen[("panel", "engine")], seen[("window", "engine")] = got, mine
             # 範囲はパネルでは切り替えない（11-05 マスター。チェックを外した）。窓の設定と、選んでいるキーを字で出す
             keys = self.selected_keys
             if self.range_mode.get() != "keys":
@@ -617,12 +626,15 @@ class App:
                 if self._seen.get(("enabled", item)) != on:
                     p.enable(item, on)
                     self._seen[("enabled", item)] = on
-        except panel.Busy:   # MMD が忙しい。次にまた
-            pass
+        except (panel.Busy, win32gui.error):   # MMD が忙しい・パネルがちょうど消えた。次にまた
+            return False
+        return True
 
     def panel_pressed(self, button):
         """パネルの「生成」「元に戻す」。押す前に、パネルで打った途中のプロンプトなどを窓に写す。"""
-        self._sync_panel()
+        if not self._sync_panel():   # 写せないまま進むと、窓に残った古いプロンプトで作っていた（11-05 Codex のレビュー）
+            self.status.set("MMD が忙しくてパネルを読めませんでした。もう一度押してください")
+            return
         if button == panel.GENERATE and str(self.gen_btn.cget("state")) == "normal":
             self._generate(fill=True)
         elif button == panel.UNDO and str(self.undo_btn.cget("state")) == "normal":
