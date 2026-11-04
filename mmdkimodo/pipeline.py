@@ -24,7 +24,7 @@ KIMODO_DIR = r"F:\kimodo"
 TEXT_SERVER_PORT = 9550   # Kimodo のテキスト読み取りサーバー（高速モードで使う）
 # 動作モード → (常駐の Kimodo の口, テキストの読み取りの置き場所, 名前)。tools/kimodo_gen.py の説明・mmdkimodo/gpu.py
 PERF_MODES = {
-    "low": (9553, "cpu", "Kimodo（低負荷）"),   # テキストの読み取りは CPU・メインメモリ約 15GB・VRAM 約 1.3GB
+    "low": (9553, "cpu", "Kimodo（低負荷）"),   # テキストの読み取りは CPU・メインメモリ約 15GB・VRAM 約 1.5GB（＋MotionBricks 1.0GB。README の「動作モード」）
     "fast": (9551, "api", "Kimodo（高速）"),    # テキストの読み取りはサーバー（VRAM 約 16.8GB）
 }
 KIMODO_HF_CACHE = r"F:\kimodo\hf_cache"

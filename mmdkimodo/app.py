@@ -144,7 +144,7 @@ class App:
             self.cfg.update(tab="nakawari", mode="fill")
         self.q = queue.Queue()
         self.busy = False
-        self._status_before = None   # サーバー待ちの知らせを出す前の 1 行（出していない時は None）
+        self._status_before = None   # 生成できない知らせ（GPU が無い・サーバー待ち）を出す前の 1 行（出していない時は None）
         self._model_ticks = 1   # MMD の読み取り（モデル・今のフレーム・範囲選択）は 2 回に 1 回（1 秒ごと）。最初はすぐ読む
         self.last_run = runner.load_last_run(self.link)   # この MMD での前回の生成（作り直しと「元に戻す」に使う）。窓を開き直しても残る
         self.last_backup = self.last_run["backup"] if self.last_run else None
@@ -324,8 +324,12 @@ class App:
         ttk.Checkbutton(d, text="センターの動きを使う", variable=self.use_center).grid(row=2, column=2, columnspan=2, sticky="w", **g)
         # GPU 診断と動作モードの説明。テキスト読み取りサーバーは高速モードの Kimodo だけが使うので、このタブの中に置く
         d = self.diagnosis
-        tk.Label(t, text=f"{d.summary()} → {d.note}" if d.gpu else d.note, foreground="#556",
-                 background=ttk.Style().lookup("TFrame", "background"), wraplength=500, anchor="w", justify="left").pack(fill="x", pady=(8, 0))
+        bg = ttk.Style().lookup("TFrame", "background")
+        if d.gpu:   # GPU の情報と判定は行を分ける（1 行にすると判定の途中で折り返していた）
+            tk.Label(t, text=d.summary(), foreground="#556", background=bg, anchor="w").pack(fill="x", pady=(8, 0))
+        # 低負荷モードでも足りない・GPU が無い時は赤で目立たせる（普段の説明と同じ灰色だと読み飛ばす）
+        tk.Label(t, text=("→ " if d.gpu else "") + d.note, foreground="#556" if d.low_ok else "#c22", background=bg,
+                 wraplength=500, anchor="w", justify="left").pack(fill="x", pady=(0 if d.gpu else 8, 0))
         self.perf_note = tk.StringVar()
         tk.Label(t, textvariable=self.perf_note, foreground="#556", background=ttk.Style().lookup("TFrame", "background"),
                  wraplength=500, anchor="w", justify="left").pack(fill="x")
@@ -362,7 +366,7 @@ class App:
             messagebox.showinfo("MMDKimodo", f"この PC では高速モードは使えません（{self.diagnosis.note}）。低負荷モードで作ります",
                                 parent=self.root)
             self.perf.set(dict(PERF_MODES)["low"])
-        self.perf_note.set("低負荷モード: 文の読み取りを CPU で行います（VRAM 約 1.3GB・メインメモリ約 15GB。1 文 3 秒ほど。同じ文は 2 回目から速い）"
+        self.perf_note.set("低負荷モード: 文の読み取りを CPU で行います（VRAM 約 2.5GB・メインメモリ約 15GB。1 文 3 秒ほど。同じ文は 2 回目から速い）"
                            if self._perf_mode() == "low" else
                            "高速モード: 文の読み取りを GPU のサーバーで行います（VRAM 約 18GB。下の「サーバーを起動」が必要）")
 
@@ -453,15 +457,20 @@ class App:
             self.server_btn.pack(side="right")
         elif not fast and self.server_btn.winfo_manager():
             self.server_btn.pack_forget()
-        # 高速モードのプロンプトで作るは 9550 が要る。押してからエラーにせず、押せなくして下の 1 行で知らせる（中割りは使わない）
-        need_server = fast and not up and not self.busy and TABS[self.tabs.index("current")][0] == "kimodo"
-        if need_server and self._status_before is None:
+        # 生成できない時は、押してからエラーにせず、押せなくして下の 1 行で知らせる。
+        # GPU が無い時はどちらのタブも（MotionBricks も GPU が要る）。高速モードのプロンプトで作るは 9550 も要る（中割りは使わない）
+        block = None
+        if not self.diagnosis.usable:
+            block = self.diagnosis.note
+        elif fast and not up and not self.busy and TABS[self.tabs.index("current")][0] == "kimodo":
+            block = "テキスト読み取りサーバーを起動してください（「サーバーを起動」か、右上で低負荷モードに）"
+        if block and self._status_before is None:
             self._status_before = self.status.get()
-            self.status.set("テキスト読み取りサーバーを起動してください（「サーバーを起動」か、右上で低負荷モードに）")
-        elif not need_server and self._status_before is not None:
+            self.status.set(block)
+        elif not block and self._status_before is not None:
             self.status.set(self._status_before)
             self._status_before = None
-        self.gen_btn.configure(state="disabled" if self.busy or need_server else "normal")
+        self.gen_btn.configure(state="disabled" if self.busy or block else "normal")
         self.undo_btn.configure(state="normal" if (self.last_backup and not self.busy) else "disabled")
         self.root.after(500, self._tick)
 

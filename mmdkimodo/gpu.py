@@ -28,6 +28,11 @@ class Diagnosis:
     low_ok: bool        # 低負荷モードが使える
     note: str           # 窓に出す一言
 
+    @property
+    def usable(self):
+        """生成できる見込みがある。GPU が無い・無効にされている時だけ False（調べられない時は試せる。足りないかもしれない時も試せる）。"""
+        return bool(self.gpu) or self.low_ok
+
     def summary(self):
         if not self.gpu:
             return self.note
