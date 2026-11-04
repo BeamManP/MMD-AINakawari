@@ -144,6 +144,7 @@ class App:
             self.cfg.update(tab="nakawari", mode="fill")
         self.q = queue.Queue()
         self.busy = False
+        self._status_before = None   # サーバー待ちの知らせを出す前の 1 行（出していない時は None）
         self._model_ticks = 1   # MMD の読み取り（モデル・今のフレーム・範囲選択）は 2 回に 1 回（1 秒ごと）。最初はすぐ読む
         self.last_run = runner.load_last_run(self.link)   # この MMD での前回の生成（作り直しと「元に戻す」に使う）。窓を開き直しても残る
         self.last_backup = self.last_run["backup"] if self.last_run else None
@@ -446,7 +447,15 @@ class App:
                                    foreground="#2a7" if up else "#a33")
         self.server_label.configure(text="テキスト読み取りサーバー起動中" if up else "テキスト読み取りサーバー停止中（高速モードで要ります）")
         self.server_btn.configure(state="disabled" if up else "normal")
-        self.gen_btn.configure(state="disabled" if self.busy else "normal")
+        # 高速モードのプロンプトで作るは 9550 が要る。押してからエラーにせず、押せなくして下の 1 行で知らせる（中割りは使わない）
+        need_server = fast and not up and not self.busy and TABS[self.tabs.index("current")][0] == "kimodo"
+        if need_server and self._status_before is None:
+            self._status_before = self.status.get()
+            self.status.set("テキスト読み取りサーバーを起動してください（「サーバーを起動」か、右上で低負荷モードに）")
+        elif not need_server and self._status_before is not None:
+            self.status.set(self._status_before)
+            self._status_before = None
+        self.gen_btn.configure(state="disabled" if self.busy or need_server else "normal")
         self.undo_btn.configure(state="normal" if (self.last_backup and not self.busy) else "disabled")
         self.root.after(500, self._tick)
 
