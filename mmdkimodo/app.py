@@ -26,7 +26,7 @@ import winerror
 
 from mmd_mcp.windows import list_windows
 
-from . import gpu, panel, runner, smooth_stop
+from . import gpu, panel, runner, samples, smooth_stop
 from .message_window import MessageWindow, register_message
 from .mmd_link import MMDLink
 from .widgets import Fold, PromptRows, ScrollFrame
@@ -335,7 +335,13 @@ class App:
         self.prompt_rows.pack(fill="x", pady=(4, 0))
         self.prompt_rows.load(self.cfg["prompt"])
         self.split_text = tk.StringVar(value="＋ 今のフレームで区切る")
-        ttk.Button(t, textvariable=self.split_text, command=self._split_here).pack(anchor="w", pady=(4, 0))
+        prompt_bar = ttk.Frame(t)
+        prompt_bar.pack(anchor="w", pady=(4, 0))
+        ttk.Button(prompt_bar, textvariable=self.split_text, command=self._split_here).pack(side="left")
+        # 英語が苦手な人向けに「動作：英語」の一覧から選ぶ（MMD の右下のパネルと同じ一覧。11-05 マスター）
+        sample_button = ttk.Button(prompt_bar, text="サンプルから選ぶ ▼")
+        sample_button.configure(command=lambda: self._show_samples(sample_button))
+        sample_button.pack(side="left", padx=(8, 0))
 
         details = Fold(t, "詳しい設定")
         details.pack(fill="x", pady=(8, 0))
@@ -424,6 +430,23 @@ class App:
     def _stop_changed(self):
         usable = self.mode.get() != "fresh" and self.stop.get() and smooth_stop.available()
         self.smooth_check.configure(state="normal" if usable else "disabled")
+
+    def _show_samples(self, button):
+        """「サンプルから選ぶ」: 種類ごとの「動作：英語」の一覧を出し、選んだ英語の文を最後に打っていた行に入れる。
+        一覧は押すたびに読む（prompt_samples.txt を書き換えればすぐ反映される）。"""
+        try:
+            groups = samples.load()
+        except OSError as e:
+            messagebox.showerror("MMDKimodo", f"サンプルの一覧が読めません: {e}", parent=self.root)
+            return
+        menu = tk.Menu(self.root, tearoff=0)
+        for name, items in groups:
+            sub = tk.Menu(menu, tearoff=0) if name else menu
+            for label, prompt in items:
+                sub.add_command(label=f"{label}：{prompt}", command=lambda p=prompt: self.prompt_rows.set_current(p))
+            if name:
+                menu.add_cascade(label=name, menu=sub)
+        menu.tk_popup(button.winfo_rootx(), button.winfo_rooty() + button.winfo_height())
 
     def _split_here(self):
         """MMD で今いるフレームから新しい区間にする。"""

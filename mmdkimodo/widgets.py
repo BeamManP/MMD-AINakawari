@@ -38,6 +38,11 @@ class PromptRows(ttk.Frame):
             self._add(None, "")
         self._regrid()
 
+    def set_current(self, text):
+        """最後に打っていた行の文を text にする（まだどの行も触っていない・その行を消した時は「始め」の行）。サンプル用。"""
+        row = getattr(self, "current", None)
+        (row if row in self.rows else self.rows[0])["text"].set(text)
+
     def add_at(self, frame):
         """frame から新しい区間の行を足す。同じフレームの行があれば False。"""
         if any(r["frame"] is not None and r["frame"].get().strip() == str(frame) for r in self.rows):
@@ -81,6 +86,7 @@ class PromptRows(ttk.Frame):
             frame_entry.bind("<Return>", lambda _: self._regrid())
         entry = ttk.Entry(self, textvariable=text_var)
         row = {"frame": frame_var, "text": text_var, "widgets": head + [entry]}
+        entry.bind("<FocusIn>", lambda _: setattr(self, "current", row))   # サンプルを入れる先（最後に打っていた行）
         if frame is not None:
             remove = ttk.Button(self, text="×", width=3, command=lambda: self._remove(row))
             row["widgets"].append(remove)
