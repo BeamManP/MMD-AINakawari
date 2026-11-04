@@ -624,18 +624,24 @@ class App:
         """パネルの「生成」「元に戻す」。押す前に、パネルで打った途中のプロンプトなどを窓に写す。"""
         self._sync_panel()
         if button == panel.GENERATE and str(self.gen_btn.cget("state")) == "normal":
-            self._generate()
+            self._generate(fill=True)
         elif button == panel.UNDO and str(self.undo_btn.cget("state")) == "normal":
             self._undo()
 
     # ---------------- 操作 ----------------
 
-    def _settings(self):
+    def _settings(self, fill=False):
+        """窓の設定から runner.Settings を作り、設定を保存する。
+
+        fill: MMD の右下のパネルから。やりたいことは窓の選び方にかかわらず「キーの間を埋める」（11-05 マスター。
+        パネルにはやりたいことが出ないので、窓で「プロンプトだけで作る」にしたのを忘れて、キーを通らないのに戸惑わないように）。
+        窓の選び方（やりたいこと・長さ）は保存し直さない。seed・効き・止まり方などは窓の値を使う。
+        """
         def opt_int(s):
             s = s.strip()
             return int(s) if s else None
         tab = TABS[self.tabs.index("current")][0]
-        mode = self.mode.get()
+        mode = "fill" if fill else self.mode.get()
         nakawari = tab == "nakawari"
         in_range = self.range_mode.get() == "keys"   # 範囲を使う時は範囲の終わりまで作るので、長さは使わない
         length = opt_int(self.length.get()) if mode != "fill" and not nakawari and not in_range else None
@@ -664,7 +670,7 @@ class App:
                                 length=length, use_keys=mode != "fresh", use_center=bool(self.use_center.get()),
                                 stop_at_last_key=mode != "fresh" and bool(self.stop.get()),
                                 smooth_stop=bool(self.smooth.get()) and smooth_stop.available(), engine="kimodo", **common)
-            self.cfg.update(mode=mode, length=self.length.get(), prompt=s.prompt, steps=s.steps, seed=s.seed,
+            self.cfg.update(mode=self.mode.get(), length=self.length.get(), prompt=s.prompt, steps=s.steps, seed=s.seed,
                             post_processing=s.post_processing, cfg_text=s.cfg_text, cfg_key=s.cfg_key,
                             use_center=bool(self.use_center.get()), stop_at_last_key=bool(self.stop.get()),
                             smooth_stop=bool(self.smooth.get()))
@@ -689,9 +695,9 @@ class App:
                 self.q.put(("done", (False, f"失敗: {e}")))
         threading.Thread(target=work, daemon=True).start()
 
-    def _generate(self):
+    def _generate(self, fill=False):
         try:
-            s = self._settings()
+            s = self._settings(fill=fill)
         except (ValueError, RuntimeError) as e:
             messagebox.showerror("MMDKimodo", str(e), parent=self.root)
             return
