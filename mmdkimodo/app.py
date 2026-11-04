@@ -58,7 +58,6 @@ MODE_NOTES = {
 }
 NAKAWARI_NOTE = ("打ったキーとキーの間を、MotionBricks でつなぎます。プロンプトは使いません。\n"
                  "キーの間が 17〜57 フレームの所だけ作り、それより短い・長い所は MMD の補間のまま残します。")
-NO_RANGE = 999999   # MMD の範囲選択の終わりの初期値（範囲を入れていない）
 
 def server_up(port=9550):
     try:
@@ -216,10 +215,11 @@ class App:
         rf = ttk.Frame(foot)
         rf.pack(fill="x", pady=(0, 4))
         ttk.Label(rf, text="範囲", width=10).pack(side="left")
-        self.range_mode = tk.StringVar(value=self.cfg["range_mode"])
-        self.range_text = tk.StringVar(value="MMD の範囲選択")
+        # 前の保存の "mmd"（MMD の範囲選択の欄を読んでいた形）は、選んだキーの間に置き換える
+        self.range_mode = tk.StringVar(value="keys" if self.cfg["range_mode"] in ("keys", "mmd") else "all")
+        self.range_text = tk.StringVar(value="選んだキーの間")
         ttk.Radiobutton(rf, text="全部", value="all", variable=self.range_mode, command=self._mode_changed).pack(side="left", padx=(0, 12))
-        ttk.Radiobutton(rf, textvariable=self.range_text, value="mmd", variable=self.range_mode,
+        ttk.Radiobutton(rf, textvariable=self.range_text, value="keys", variable=self.range_mode,
                         command=self._mode_changed).pack(side="left")
         bf = ttk.Frame(foot)
         bf.pack(fill="x")
@@ -374,7 +374,7 @@ class App:
     def _mode_changed(self):
         mode = self.mode.get()
         self.mode_note.set(MODE_NOTES[mode])
-        if self.range_mode.get() == "mmd":
+        if self.range_mode.get() == "keys":
             self.length_entry.configure(state="disabled")
             self.length_note.set("F（範囲の終わりまで）")
         elif mode == "fill":
@@ -404,23 +404,27 @@ class App:
             self.status.set(f"{frame}F から始まる区間はもうあります")
 
     def _read_mmd(self):
-        """MMD の選択中のモデル・今のフレーム・範囲選択を読んで表示する（1 秒ごと）。生成中は MMD を操作しているので読みに行かない。"""
+        """MMD の選択中のモデル・今のフレーム・選んだキーを読んで表示する（1 秒ごと）。生成中は MMD を操作しているので読みに行かない。"""
         self._model_ticks += 1
         if self.busy or self._model_ticks % 2:
             return
-        frame = selection = None
+        frame = model = None
         try:
             model = self.link.selected_model()
             frame = self.link.current_frame()
-            selection = self.link.range_selection()
         except Exception as e:  # 読めない理由をそのまま出す（MMD の版が違う・選び替えの途中など）
             text = f"選択中のモデル：（読み取れません: {e}）"
         else:
             text = f"選択中のモデル：{model['name']}" if model else "選択中のモデル：（なし。MMD のモデル欄でモデルを選んでください）"
+        try:
+            keys = self.link.selected_key_frames() if model else []
+            picked = (f"選んだキーの間（{keys[0]}〜{keys[-1]}F）" if len(keys) > 1 else
+                      f"選んだキーの間（{keys[0]}F だけ。2 つ以上選んでください）" if keys else "選んだキーの間（キーを選んでいません）")
+        except Exception:   # 選び替えの途中などで鎖が読めない時は、次の読み取りで直る
+            picked = "選んだキーの間（読み取れません）"
         updates = [(self.model_text, text),
                    (self.split_text, f"＋ 今のフレーム（{frame}F）で区切る" if frame is not None else "＋ 今のフレームで区切る"),
-                   (self.range_text, f"MMD の範囲選択（{selection[0]}〜{selection[1]}F）"
-                    if selection and selection[1] < NO_RANGE else "MMD の範囲選択（未設定）")]
+                   (self.range_text, picked)]
         for var, value in updates:
             if var.get() != value:
                 var.set(value)
@@ -487,17 +491,19 @@ class App:
         tab = TABS[self.tabs.index("current")][0]
         mode = self.mode.get()
         nakawari = tab == "nakawari"
-        in_range = self.range_mode.get() == "mmd"   # 範囲を使う時は範囲の終わりまで作るので、長さは使わない
+        in_range = self.range_mode.get() == "keys"   # 範囲を使う時は範囲の終わりまで作るので、長さは使わない
         length = opt_int(self.length.get()) if mode != "fill" and not nakawari and not in_range else None
         if nakawari and not smooth_stop.available():
             raise ValueError(f"中割りには MotionBricks が要ります（{smooth_stop.MB_PYTHON} がありません）")
         if not nakawari and mode != "fill" and length is None and not in_range:
             raise ValueError("「続きを足す」「プロンプトだけで作る」では長さを入れてください")
         selection = None
-        if self.range_mode.get() == "mmd":
-            selection = self.link.range_selection()
-            if not selection or selection[1] >= NO_RANGE:
-                raise ValueError("MMD の範囲選択が入っていません（タイムラインの下の開始〜終了フレーム）")
+        if in_range:
+            # 選んだキーの最初から最後までを作り直す（どのボーンのキーでも。範囲の中のキーは選んでいなくても通る）
+            keys = self.link.selected_key_frames()
+            if len(keys) < 2:
+                raise ValueError("MMD のタイムラインで、作り直す範囲の最初と最後のキーを選んでください（2 つ以上のフレーム）")
+            selection = (keys[0], keys[-1])
         common = dict(range_start=selection[0] if selection else None, range_end=selection[1] if selection else None,
                       key_stop=bool(self.key_stop.get()), wrist_lerp=bool(self.wrist_lerp.get()), perf_mode=self._perf_mode())
         self.cfg.update(tab=tab, range_mode=self.range_mode.get(), key_stop=common["key_stop"], wrist_lerp=common["wrist_lerp"],

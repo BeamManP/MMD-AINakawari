@@ -85,6 +85,33 @@ class MotionReader:
         raw = self.m.read(data, count * bone_state.BONE_STRIDE)
         return [raw[i * bone_state.BONE_STRIDE:i * bone_state.BONE_STRIDE + 20].split(b"\0", 1)[0] for i in range(count)]
 
+    def selected_frames(self):
+        """タイムラインで選んでいるボーンのキーのフレーム（昇順・重なりなし）。どのボーンのキーでも数える。
+
+        キーの最後の 4 バイトが選択の印（11-04、90・120F のキーを選んで 734 個中 110 個が 1）。
+        窓が 1 秒ごとに読むので、1024 件ずつまとめて読む（1 件ずつだとキーの多いモーションで窓が重くなる）。
+        """
+        m = self.m
+        model = self._model()
+        count = m.integer(model + bone_state.BONE_COUNT)
+        at = m.pointer(model + BONE_KEYFRAMES)
+        block, cache = 1024, {}
+
+        def entry(i):
+            c = i // block
+            if c not in cache:
+                try:
+                    cache[c] = m.read(at + c * block * BONE_KEY_SIZE, block * BONE_KEY_SIZE)
+                except RuntimeError:   # まとめ読みが配列の確保の終わりをはみ出した。そこは 1 件ずつ読む
+                    cache[c] = None
+            if cache[c] is None:
+                data, off = m.read(at + i * BONE_KEY_SIZE, BONE_KEY_SIZE), 0
+            else:
+                data, off = cache[c], (i % block) * BONE_KEY_SIZE
+            return struct.unpack_from("<3i", data, off) + struct.unpack_from("<i", data, off + 56)
+
+        return sorted({e[0] for i in range(count) for e in _chain(entry, i) if e[3]})
+
     def read(self, morph_names, ik_names):
         """選択中のモデルのモーション。morph_names・ik_names は PMX の並び（read_pmx_names）。"""
         m = self.m

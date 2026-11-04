@@ -138,8 +138,9 @@ def generate(settings, log=print, link=None, previous=None):
                            stop_at_last_key=settings.stop_at_last_key and not mb,
                            max_frames=None if mb else pipeline.MAX_FRAMES,   # 中割りはキーの間ごとに作るので上限なし
                            context_keys=not mb)   # 中割りは範囲の手前の動きを MotionBricks の文脈にする
-    outer = job.anchors + sorted(job.mmd_frames) if rng else []
-    real = [f for f in job.frames if f not in outer]   # マスターが打った体のキー（範囲の端と外側の文脈を除く）
+    # マスターが打った体のキー（外側の文脈と、キーの無いフレームに置いた範囲の端を除く。選んだキーの間なら端も本物のキー）
+    keyed = set(original.key_frames())
+    real = [f for f in job.frames if f not in job.mmd_frames and (f not in job.anchors or f in keyed)]
     if rng:
         lo, hi = (job.anchors[0], job.anchors[-1]) if len(job.anchors) > 1 else (rng[0], rng[1])
         span = f"{rng[0]}〜{rng[1]}F・{rng[1] - rng[0] + 1} フレーム"

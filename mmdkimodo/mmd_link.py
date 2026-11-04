@@ -84,13 +84,17 @@ class MMDLink:
         text = UIReader(self.hwnd).edit(417)
         return int(text) if text and text.strip().isdigit() else None
 
-    def range_selection(self):
-        """MMD の範囲選択の欄（タイムラインの下の開始〜終了フレーム）。MMD の初期値は 0〜999999。読めなければ None。"""
-        reader = UIReader(self.hwnd)
-        start, end = reader.edit(425), reader.edit(426)
-        if not (start and end and start.strip().isdigit() and end.strip().isdigit()):
-            return None
-        return int(start), int(end)
+    def selected_key_frames(self):
+        """タイムラインで選んでいるボーンのキーのフレーム（昇順）。選んでいなければ空。
+
+        「選んだキーの間」の範囲に使う。前は MMD の範囲選択の欄（タイムラインの下の開始〜終了フレーム）を読んでいたが、
+        場所が分かりにくく、キーを選ぶ方が MMD の操作として自然なので替えた（11-04 マスター）。
+        """
+        reader = mmd_memory.MotionReader(self.hwnd)
+        try:
+            return reader.selected_frames()
+        finally:
+            reader.close()
 
     def read_motion(self, path):
         """選択中のモデルのモーションを MMD のメモリから読み、VMD にして path に書く（「元に戻す」の控え）。読んだ vmd.Motion を返す。
