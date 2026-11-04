@@ -18,6 +18,10 @@ public:
     void destroy();
     // MMD の窓の大きさが変わった時に呼ぶ。MMD が自分の部品を並べ直した後で位置を直す。
     void request_layout();
+    // MMD が取り出したメッセージを、MMD が見る前に見る（プラグインの WH_GETMESSAGE の受け口から）。
+    // プロンプト欄宛てのキーはここで処理して WM_NULL にし、MMD のショートカットにさせない。
+    // 自分で処理したら true。プロンプト欄の外を押したら、フォーカスを MMD に戻す（MMD が描く画面は押してもフォーカスが動かない）
+    bool filter(MSG* message);
 
 private:
     static LRESULT CALLBACK proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);

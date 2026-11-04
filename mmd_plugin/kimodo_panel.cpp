@@ -140,6 +140,41 @@ void KimodoPanel::request_layout() {
     if (panel_) PostMessageW(panel_, kLayoutMessage, 0, 0);
 }
 
+bool KimodoPanel::filter(MSG* message) {
+    if (!panel_) return false;
+    const HWND prompt = GetDlgItem(panel_, kPrompt);
+    const UINT m = message->message;
+    if (m == WM_LBUTTONDOWN || m == WM_RBUTTONDOWN || m == WM_MBUTTONDOWN || m == WM_NCLBUTTONDOWN) {
+        // プロンプト欄の外を押したら、フォーカスを MMD に戻す（押した先が入力欄などなら、その部品が自分でフォーカスを取る）
+        if (message->hwnd != prompt && GetFocus() == prompt) SetFocus(mmd_);
+        return false;
+    }
+    if (message->hwnd != prompt) return false;
+    if (m == WM_KEYDOWN && message->wParam == VK_RETURN) {   // Enter で生成
+        message->message = WM_NULL;
+        SendMessageW(panel_, WM_COMMAND, MAKEWPARAM(kGenerate, BN_CLICKED), reinterpret_cast<LPARAM>(GetDlgItem(panel_, kGenerate)));
+        return true;
+    }
+    if (m == WM_KEYDOWN && message->wParam == VK_ESCAPE) {   // Esc でフォーカスを外す
+        message->message = WM_NULL;
+        SetFocus(mmd_);
+        return true;
+    }
+    if (m == WM_CHAR && (message->wParam == L'\r' || message->wParam == 27)) {   // Enter・Esc の文字は捨てる（欄で鳴らさない）
+        message->message = WM_NULL;
+        return true;
+    }
+    if ((m >= WM_KEYFIRST && m <= WM_KEYLAST) || (m >= WM_IME_STARTCOMPOSITION && m <= WM_IME_KEYLAST)) {
+        // MMD はキーの知らせをメッセージの取り出しの所でまとめて見てショートカットにする（キーの表は無い。11-05 調べ）。
+        // なので欄への届けはここで済ませ、MMD には何も無い知らせとして返す
+        TranslateMessage(message);
+        DispatchMessageW(message);
+        message->message = WM_NULL;
+        return true;
+    }
+    return false;
+}
+
 // 下の段の一番右のパネルの右に、隣のパネルと上端・下端をそろえて置く。
 // 右に kWidth が取れない時も置いて、窓の右端で切れて見えるようにする（MMD のほかのパネルと同じ）。
 void KimodoPanel::layout() {
@@ -290,6 +325,11 @@ LRESULT CALLBACK KimodoPanel::proc(HWND hwnd, UINT message, WPARAM wparam, LPARA
             if (HIWORD(wparam) == BN_CLICKED && (LOWORD(wparam) == kGenerate || LOWORD(wparam) == kUndo
                                                  || LOWORD(wparam) == kDetails) && self->on_command_) {
                 self->on_command_(LOWORD(wparam));
+            }
+            // ボタン・チェック・モード選択を使ったら、フォーカスを MMD に戻す（ボタンに残るとスペースキーで押され、MMD のショートカットも
+            // ボタン宛てになる）
+            if ((HIWORD(wparam) == BN_CLICKED && LOWORD(wparam) != kPrompt) || (LOWORD(wparam) == kEngine && HIWORD(wparam) == CBN_CLOSEUP)) {
+                SetFocus(self->mmd_);
             }
             return 0;
         default:

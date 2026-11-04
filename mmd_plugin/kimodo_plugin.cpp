@@ -139,7 +139,9 @@ public:
     }
 
     // 取り出された（PM_REMOVE）メッセージを見る。自分の項目の WM_COMMAND なら開き、MMD には渡さない。
+    // パネルのプロンプト欄宛てのキーも、パネルで処理して MMD には渡さない（KimodoPanel::filter）。
     void on_message(MSG* message) {
+        if (panel_.filter(message)) return;
         if (message->message != WM_COMMAND || message->hwnd != hwnd_ || HIWORD(message->wParam) != 0
             || open_id_ < 0 || LOWORD(message->wParam) != static_cast<WORD>(open_id_)) return;
         message->message = WM_NULL;
