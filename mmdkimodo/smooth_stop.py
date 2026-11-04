@@ -160,7 +160,7 @@ def _run(request, work_dir, log=print):
     """常駐の MotionBricks に頼む（いなければ立ち上げる。エンジンの読み込みが 1 回で済む）。依頼と結果は work_dir に残す。"""
     os.makedirs(work_dir, exist_ok=True)
     json.dump(request, open(os.path.join(work_dir, "request.json"), "w", encoding="utf-8"))
-    env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+    env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8", CUDA_DEVICE_ORDER="PCI_BUS_ID")   # gpu.py の診断と同じ GPU
     result, _line = resident.call(resident.Server("MotionBricks", MB_PORT, MB_PYTHON, MB_SCRIPT, MB_DIR, env), request, log=log)
     json.dump(result, open(os.path.join(work_dir, "result.json"), "w", encoding="utf-8"))
     return result

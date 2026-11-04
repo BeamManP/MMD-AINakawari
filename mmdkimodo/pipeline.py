@@ -8,6 +8,7 @@
 import json
 import os
 import socket
+import threading
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -353,8 +354,12 @@ def _port_open(port):
 
 def kimodo_server(mode):
     port, text, name = PERF_MODES[mode]
-    env = dict(os.environ, HF_HUB_CACHE=KIMODO_HF_CACHE, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+    # GPU の番号は nvidia-smi と同じ並びに（gpu.py の診断と同じ GPU を cuda:0 にする）
+    env = dict(os.environ, HF_HUB_CACHE=KIMODO_HF_CACHE, PYTHONUTF8="1", PYTHONIOENCODING="utf-8", CUDA_DEVICE_ORDER="PCI_BUS_ID")
     return resident.Server(name, port, KIMODO_PYTHON, KIMODO_SCRIPT, KIMODO_DIR, env, args=(text,))
+
+
+_KIMODO_LOCK = threading.Lock()
 
 
 def run_kimodo(job, work_dir, on_line=None, mode="low"):
@@ -369,18 +374,21 @@ def run_kimodo(job, work_dir, on_line=None, mode="low"):
     log = on_line or (lambda _l: None)
     if mode == "fast" and not _port_open(TEXT_SERVER_PORT):
         raise RuntimeError("高速モードはテキスト読み取りサーバーが要ります。「サーバーを起動」を押すか、低負荷モードにしてください")
-    for other in PERF_MODES:
-        if other != mode and resident.shutdown(kimodo_server(other)):
-            log(f"  {PERF_MODES[other][2]} の常駐を片付けました（メモリを空けるため）")
-    os.makedirs(work_dir, exist_ok=True)
-    res = os.path.join(work_dir, "result.json")
-    if os.path.exists(res):
-        os.remove(res)
-    json.dump(job.request, open(os.path.join(work_dir, "request.json"), "w", encoding="utf-8"))
-    result, line = resident.call(kimodo_server(mode), job.request, log=log)
-    log(line)
-    json.dump(result, open(res, "w", encoding="utf-8"))
-    return result
+    # 片付けから頼み終わるまでを 1 つずつにする。MMD ごとの窓が違うモードで同時に頼むと、片付けと立ち上げが交互に入って
+    # 両方の常駐が残っていた（11-04 Codex のレビュー）。常駐はどのみち 1 つずつ作るので、待つ時間は変わらない
+    with _KIMODO_LOCK:
+        for other in PERF_MODES:
+            if other != mode and resident.shutdown(kimodo_server(other)):
+                log(f"  {PERF_MODES[other][2]} の常駐を片付けました（メモリを空けるため）")
+        os.makedirs(work_dir, exist_ok=True)
+        res = os.path.join(work_dir, "result.json")
+        if os.path.exists(res):
+            os.remove(res)
+        json.dump(job.request, open(os.path.join(work_dir, "request.json"), "w", encoding="utf-8"))
+        result, line = resident.call(kimodo_server(mode), job.request, log=log)
+        log(line)
+        json.dump(result, open(res, "w", encoding="utf-8"))
+        return result
 
 
 def merge(original, generated, job):

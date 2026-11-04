@@ -79,7 +79,8 @@ def load_last_run(link):
 
     MMD ごと（プロセス番号と起動時刻）に分けて残す。MMD を開き直したら引き継がない（別の場面に古い控えを読み込ませないため）。
     """
-    r = _last_runs().get(link.key)
+    with _LAST_RUN_LOCK:   # 書いている途中を読んで「前回なし」にしないように
+        r = _last_runs().get(link.key)
     return r if r and os.path.exists(r.get("backup", "")) and os.path.exists(r.get("output", "")) else None
 
 
@@ -87,7 +88,10 @@ def _save_last_run(link, backup, out):
     with _LAST_RUN_LOCK:   # 窓（MMD ごと）は同じプロセスのスレッドで生成するので、読んで書き戻す間をまとめて守る
         runs = _last_runs()
         runs[link.key] = {"backup": backup, "output": out}
-        json.dump(runs, open(LAST_RUN, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        tmp = LAST_RUN + ".tmp"   # 書き終わってから置き換える（途中で止まっても前のものが残る）
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(runs, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, LAST_RUN)
 
 
 def generate(settings, log=print, link=None, previous=None):

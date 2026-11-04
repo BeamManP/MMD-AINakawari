@@ -43,25 +43,42 @@ def _log_path(server):
     return os.path.join(LOG_DIR, f"{server.name}_server.log")
 
 
-def _connect(server):
-    """つながった Connection か、いなければ None。合言葉が違う相手はエラー、答えが来なければ _Busy。"""
+def _connect(server, timeout=CONNECT_TIMEOUT):
+    """つながった Connection か、いなければ None。合言葉が違う相手はエラー、timeout 秒で答えが来なければ _Busy。
+
+    Client には期限が無いので別のスレッドでつなぎ、時間切れならあきらめた印を付ける。あきらめた接続が後でつながったら、
+    そのスレッドが閉じる（置き去りの接続が常駐の受け取りをふさいで、本物の依頼が待たされないように。11-04 Codex のレビュー）。
+    """
     box = {}
+    lock = threading.Lock()
 
     def go():
         try:
-            box["conn"] = Client(("127.0.0.1", server.port), authkey=AUTHKEY)
+            result = Client(("127.0.0.1", server.port), authkey=AUTHKEY)
         except (OSError, EOFError):   # いない・終わる途中（接続を切られた）
-            box["conn"] = None
+            result = None
         except AuthenticationError as e:
-            box["error"] = e
-    t = threading.Thread(target=go, daemon=True)
-    t.start()
-    t.join(CONNECT_TIMEOUT)
-    if t.is_alive():
-        raise _Busy()
-    if "error" in box:
+            result = e
+        with lock:
+            if box.get("abandoned"):
+                if hasattr(result, "close"):
+                    result.close()
+            else:
+                box["result"] = result
+    threading.Thread(target=go, daemon=True).start()
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with lock:
+            if "result" in box:
+                break
+        time.sleep(0.05)
+    with lock:
+        if "result" not in box:
+            box["abandoned"] = True
+            raise _Busy()
+    if isinstance(box["result"], AuthenticationError):
         raise _foreign(server)
-    return box["conn"]
+    return box["result"]
 
 
 def _foreign(server):
@@ -70,13 +87,11 @@ def _foreign(server):
 
 
 def _connect_waiting(server, deadline):
-    """_connect と同じ。ただし読み込み中（_Busy）なら deadline まで待つ。過ぎたらほかのプログラムとしてエラー。"""
-    while True:
-        try:
-            return _connect(server)
-        except _Busy:
-            if time.monotonic() > deadline:
-                raise _foreign(server)
+    """_connect と同じ。ただし読み込み中なら、1 本の接続で deadline まで待つ。過ぎたらほかのプログラムとしてエラー。"""
+    try:
+        return _connect(server, timeout=max(CONNECT_TIMEOUT, deadline - time.monotonic()))
+    except _Busy:
+        raise _foreign(server)
 
 
 def _log_tail(path, lines=15):

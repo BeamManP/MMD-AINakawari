@@ -444,7 +444,7 @@ class App:
         fast = self._perf_mode() == "fast"
         self.head_server.configure(text=("● サーバー" if up else "○ サーバー停止中") if fast else "",
                                    foreground="#2a7" if up else "#a33")
-        self.server_label.configure(text="テキスト読み取りサーバー起動中" if up else "テキスト読み取りサーバー停止中（無いと毎回 Llama を読み込むので遅い）")
+        self.server_label.configure(text="テキスト読み取りサーバー起動中" if up else "テキスト読み取りサーバー停止中（高速モードで要ります）")
         self.server_btn.configure(state="disabled" if up else "normal")
         self.gen_btn.configure(state="disabled" if self.busy else "normal")
         self.undo_btn.configure(state="normal" if (self.last_backup and not self.busy) else "disabled")

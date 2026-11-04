@@ -4,6 +4,7 @@
 目安の数字は 11-04 に RTX 3090・メインメモリ 64GB で測った値から（README の「動作モード」）。
 """
 import ctypes
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -48,28 +49,48 @@ def _ram():
     return st.ullTotalPhys / 2**30, st.ullAvailPhys / 2**30
 
 
+class _Unknown(Exception):
+    """GPU を調べられなかった（nvidia-smi が答えない・失敗した・出力を読めない）。理由を持つ。"""
+
+
 def _gpu():
-    """(名前, VRAM の合計 GB, 空き GB)。NVIDIA の GPU が無ければ None。一番 VRAM の大きいものを使う（Kimodo は cuda:0 を使う）。"""
+    """使う GPU の (名前, VRAM の合計 GB, 空き GB)。nvidia-smi が無ければ None。
+
+    Kimodo・MotionBricks は cuda:0 を使う。cuda:0 は CUDA_VISIBLE_DEVICES の最初の GPU（無ければ 0 番）で、
+    常駐には CUDA_DEVICE_ORDER=PCI_BUS_ID を渡して nvidia-smi と同じ並びにしている（pipeline.kimodo_server・smooth_stop）。
+    前は nvidia-smi の 0 番を決め打ちで見ていて、GPU が複数ある PC では診断と実際に使う GPU が食い違いえた（11-04 Codex のレビュー）。
+    """
     exe = shutil.which("nvidia-smi")
     if not exe:
         return None
-    out = subprocess.run([exe, "--query-gpu=index,name,memory.total,memory.used", "--format=csv,noheader,nounits"],
-                         capture_output=True, text=True, timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    try:
+        out = subprocess.run([exe, "--query-gpu=index,uuid,name,memory.total,memory.used", "--format=csv,noheader,nounits"],
+                             capture_output=True, text=True, timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise _Unknown(f"nvidia-smi が答えません（{type(e).__name__}）")
     if out.returncode != 0:
-        return None
+        raise _Unknown(f"nvidia-smi が失敗しました（{(out.stderr or out.stdout).strip()[:80]}）")
     rows = []
-    for line in out.stdout.strip().splitlines():
-        index, name, total, used = [x.strip() for x in line.split(",")]
-        rows.append((int(index), name, float(total) / 1024, (float(total) - float(used)) / 1024))
-    if not rows:
-        return None
-    first = min(rows)   # Kimodo・MotionBricks は cuda:0（番号 0）を使う
-    return first[1], first[2], first[3]
+    try:
+        for line in out.stdout.strip().splitlines():
+            index, uuid, name, total, used = [x.strip() for x in line.split(",")]
+            rows.append((index, uuid, name, float(total) / 1024, (float(total) - float(used)) / 1024))
+    except ValueError:
+        raise _Unknown(f"nvidia-smi の出力を読めません（{out.stdout.strip()[:80]}）")
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+    want = visible.split(",")[0].strip() if visible is not None else "0"
+    for index, uuid, name, total, free in rows:
+        if want == index or (want and uuid.startswith(want)):
+            return name, total, free
+    raise _Unknown(f"使う GPU（CUDA_VISIBLE_DEVICES={visible!r}）が見つかりません" if visible is not None else "GPU の一覧が空です")
 
 
 def diagnose():
     ram, ram_free = _ram()
-    g = _gpu()
+    try:
+        g = _gpu()
+    except _Unknown as e:   # 調べられない時も窓は開く。高速は選べず、低負荷で試せる
+        return Diagnosis("", 0.0, 0.0, ram, ram_free, False, True, f"GPU を調べられませんでした（{e}）。低負荷モードで試せます")
     if g is None:
         return Diagnosis("", 0.0, 0.0, ram, ram_free, False, False,
                          "NVIDIA の GPU が見つかりません（Kimodo・MotionBricks は NVIDIA の GPU が要ります）")

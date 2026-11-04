@@ -13,7 +13,7 @@
 Llama 約 16GB を GPU に読み込むので、8GB の GPU では落ちる）:
   cpu: 低負荷モード。Llama はメインメモリ（約 15GB）。VRAM は Kimodo 本体の 1.3GB だけ。1 文の読み取りに 3 秒ほど（11-04・i7-12700F）
   api: 高速モード。テキスト読み取りサーバー（127.0.0.1:9550・VRAM 約 16.8GB）に頼む
-どちらも読み取り結果を work/text_cache にためて使い回す（公式デモの CachedTextEncoder。同じ文は 2 回目から読み取らない）。
+どちらも読み取り結果を work/text_cache/<cpu|api> にためて使い回す（公式デモの CachedTextEncoder。同じ文は 2 回目から読み取らない）。
 """
 import json
 import os
@@ -99,11 +99,12 @@ def load(name=MODEL):
     return model
 
 
-def cache_text(model):
-    """読み取り結果を TEXT_CACHE にためて使い回す（公式デモの CachedTextEncoder）。
+def cache_text(model, text):
+    """読み取り結果を TEXT_CACHE/<text> にためて使い回す（公式デモの CachedTextEncoder）。
 
     kimodo.demo から読み込むとデモの画面一式まで読み込むので、embedding_cache.py だけを直接読む。
-    キャッシュは読み取りの部品の種類ごとに分かれる（CPU の LLM2VecEncoder とサーバーの TextEncoderAPI は別）。
+    置き場所はモードごとに分ける。中身の鍵は読み取りの部品ごとに分かれるが、目次（index.json）は 1 つのフォルダに 1 つで、
+    プロセスをまたぐ守りが無いので、低負荷と高速の常駐が同時に書くと壊れうる（11-04 Codex のレビュー）。
     """
     import importlib.util
 
@@ -113,7 +114,7 @@ def cache_text(model):
     spec = importlib.util.spec_from_file_location("kimodo_embedding_cache", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    model.text_encoder = module.CachedTextEncoder(model.text_encoder, model_name=MODEL, base_dir=TEXT_CACHE)
+    model.text_encoder = module.CachedTextEncoder(model.text_encoder, model_name=MODEL, base_dir=os.path.join(TEXT_CACHE, text))
 
 
 def generate(model, req, t_load=0.0):
@@ -278,7 +279,7 @@ def serve(port, text):
     listener = Listener(("127.0.0.1", port), authkey=AUTHKEY)   # 口がふさがっていれば（もう常駐がいれば）ここで落ちる
     t0 = time.time()
     model = load()
-    cache_text(model)
+    cache_text(model, text)
     print(f"ready port={port} load={time.time() - t0:.1f}s", flush=True)
     last = [time.time()]
 
