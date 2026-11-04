@@ -19,6 +19,8 @@ import os
 import numpy as np
 
 from . import pipeline, resident
+from . import quat as Q
+from .retarget import TOE_GROUND
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MB_PYTHON = r"F:\motionbricks\.venv\Scripts\python.exe"
@@ -39,6 +41,55 @@ def _speeds(roots, fps):
     """腰の地面での速さ（m/s）を 3 フレームでならしたもの。"""
     v = np.r_[0.0, np.linalg.norm(np.diff(roots[:, [0, 2]], axis=0), axis=1) * fps]
     return np.convolve(v, np.ones(3) / 3, mode="same")
+
+
+_SOMA = None
+GROUND_SPREAD = 4   # 持ち上げる量を前後これだけのフレームに広げてからならす（急に持ち上がらないように）
+
+
+def _soma():
+    global _SOMA
+    if _SOMA is None:
+        soma = json.load(open(pipeline.SOMA_JSON, encoding="utf-8"))
+        names = soma["names"]
+        neutral = np.array(soma["neutral_joints"])
+        toes = [names.index(n) for n in ("LeftToeBase", "RightToeBase")]
+        ankles = [names.index(n) for n in ("LeftFoot", "RightFoot")]
+        _SOMA = (soma["parents"], neutral, toes, ankles, float(neutral[ankles[0], 1] - neutral[toes[0], 1]))
+    return _SOMA
+
+
+def keep_above_ground(roots, rots, start, end):
+    """roots[start:end+1] の腰を、足（つま先の付け根・足首）が Kimodo の床より下に入らない高さまで持ち上げる（roots を直接書き換える）。
+
+    MotionBricks は止まる時のかがみ込みなどで、自分の骨格でも足を床に 5cm ほど沈めることがある（11-04、走って止まる所で
+    腰が 72cm まで下がり、つま先の付け根が床から −5cm）。持ち上げる量は前後 GROUND_SPREAD フレームの最大を取ってからならすので、
+    どのフレームでも足りない分は必ず持ち上がる。下げることはしない。持ち上げた最大（m）を返す。
+    """
+    parents, neutral, toes, ankles, ankle_above_toe = _soma()
+    lift = np.zeros(end - start + 1)
+    for i, t in enumerate(range(start, end + 1)):
+        P = np.zeros((len(parents), 3))
+        G = [None] * len(parents)
+        for j, p in enumerate(parents):
+            if p < 0:
+                G[j], P[j] = rots[t, j], roots[t]
+            else:
+                G[j] = Q.mul(G[p], rots[t, j])
+                P[j] = P[p] + Q.rotate(G[p], neutral[j] - neutral[p])
+        clearance = min(P[toes, 1].min() - TOE_GROUND, P[ankles, 1].min() - TOE_GROUND - ankle_above_toe)
+        lift[i] = max(0.0, -clearance)
+    if not lift.any():
+        return 0.0
+    k = GROUND_SPREAD
+    wide = np.array([lift[max(0, i - k):i + k + 1].max() for i in range(len(lift))])
+    smooth = np.array([wide[max(0, i - k):i + k + 1].mean() for i in range(len(wide))])
+    # 両端（文脈の姿勢とキーの姿勢。どちらも床に着いていて、キーは書き戻さない）は動かさず、そこから k フレームかけて効かせる。
+    # 端まで持ち上げると、書き戻さないキーのフレームとの間で腰が 1 フレームに 6〜7cm 上下した（11-04）
+    n = len(smooth)
+    ramp = np.minimum(1.0, np.minimum(np.arange(n), np.arange(n)[::-1]) / k)
+    roots[start:end + 1, 1] += smooth * ramp
+    return float(lift.max())
 
 
 def _peak_change(v, start, end, fps):
@@ -92,9 +143,11 @@ def apply(job, result, work_dir, log=print):
             best = (score, L, acc, dec, sr, np.concatenate([rots[:a], mb_rots, rots[kf + 1:]]))
     _, L, acc, dec, sr, so = best
     a = kf - L
+    sunk = keep_above_ground(sr, so, a, kf)
     base_acc, base_dec = _peak_change(v, a - 3, kf, fps)
     log(f"  止まり方を MotionBricks で作り直しました: {a + job.first}〜{stop}F（{L} フレーム・候補 {len(lengths)} 通りから）・"
-        f"一番強い減速 {base_dec:.1f} → {dec:.1f} m/s²・加速 {base_acc:.1f} → {acc:.1f} m/s²（{res['seconds_generate']:.1f} 秒）")
+        f"一番強い減速 {base_dec:.1f} → {dec:.1f} m/s²・加速 {base_acc:.1f} → {acc:.1f} m/s²（{res['seconds_generate']:.1f} 秒）"
+        + (f"・床に沈んだ足を最大 {sunk * 100:.1f}cm 持ち上げ" if sunk else ""))
     out = dict(result)
     out["root"] = sr.reshape(-1).tolist()
     out["local_rot"] = so.reshape(-1).tolist()

@@ -323,7 +323,9 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
         raise ValueError(f"{s}F からの区間が {n} フレームあります。Kimodo の 1 区間は {max_frames} フレーム（10 秒）までです。"
                          f"区間を分けるか、範囲か長さを絞ってください")
     if len(job.segments) > 1 and not use_center:   # センターの動きを使う時は毎フレームが目印なので、ずらせない
-        constrained = sorted({f for f in frames + root_frames + list(limb_keys) + job.stop_frames})
+        # 止まるための腰の目印（キーの後ろ STOP_HOLD フレーム）は、キーの場所にじっとしているだけで区間のつなぎとぶつからないので数えない
+        # （数えると、区間の始めがキーと同じ時に「すぐ後ろに目印が続いて置けない」で止まっていた。11-04 MMD で確認）
+        constrained = sorted({f for f in frames + root_frames + list(limb_keys)})
         job.segments, job.segment_moves = snap_segments(job.segments, constrained)
     segments = [{"prompt": t, "frames": n} for _, n, t in job.segments]
     segments[-1]["frames"] += pad

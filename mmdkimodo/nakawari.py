@@ -71,12 +71,14 @@ def generate(job, work_dir, key_stop=False, wrist_lerp=False, log=print):
     rot = np.tile(np.array([0.0, 0.0, 0.0, 1.0]), (T, J, 1))
     covered = np.zeros(T, bool)
     names = None
+    sunk = 0.0
     for (s, e), r in zip(runs, res["results"]):
         n = r["num_frames"]
         a = frames[s]
         root[a:a + n] = np.array(r["root"]).reshape(n, 3)
         rot[a:a + n] = np.array(r["local_rot"]).reshape(n, J, 4)
         covered[a:a + n] = True
+        sunk = max(sunk, smooth_stop.keep_above_ground(root, rot, a, a + n - 1))
         names = r["names"]
     if wrist_lerp:
         for jn in WRISTS:
@@ -91,6 +93,7 @@ def generate(job, work_dir, key_stop=False, wrist_lerp=False, log=print):
     err = [float(np.linalg.norm(root[f] - np.asarray(p["root"]))) for f, p in zip(frames, poses) if covered[f]]
     done = sum(gaps[k] for s, e in runs for k in range(s, e))
     log(f"  MotionBricks で {len(runs)} 回・{done} フレームを作りました（{res['seconds_generate']:.1f} 秒・"
-        f"{'キーごとに止まる' if key_stop else 'キーを通る'}・手首は{'補間' if wrist_lerp else ' MotionBricks のまま'}）")
+        f"{'キーごとに止まる' if key_stop else 'キーを通る'}・手首は{'補間' if wrist_lerp else ' MotionBricks のまま'}）"
+        + (f"・床に沈んだ足を最大 {sunk * 100:.1f}cm 持ち上げ" if sunk else ""))
     return {"fps": 30.0, "num_frames": T, "names": names, "root": root.reshape(-1).tolist(),
             "local_rot": rot.reshape(-1).tolist(), "key_max_error_m": err, "seconds_generate": res["seconds_generate"]}
