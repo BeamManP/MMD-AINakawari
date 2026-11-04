@@ -1,6 +1,8 @@
 // MMDKimodo の MMDPlugin 用プラグイン。MMD のメニューバー（ヘルプの右）に「MMDKimodo」を足し、
 // 「Kimodo の窓を開く」で Python の窓（mmdkimodo.app）を開く。
 // 窓がもう動いていれば「この MMD の窓を開いて」と知らせ、動いていなければ Python を起動する。
+// 下の段の右の空き地には「Kimodo操作」パネル（kimodo_panel.cpp）を置く。パネルの中身は Python の窓が読み書きするので、
+// MMD の起動時に Python の窓を隠したまま立ち上げておく（--attach）。
 // Python の場所は、この DLL の横の MMDKimodo.ini に書く。
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -11,6 +13,7 @@
 #include <cwchar>
 #include <string>
 
+#include "kimodo_panel.h"
 #include "mmd_plugin.h"
 
 #ifndef _WIN64
@@ -24,6 +27,11 @@ constexpr wchar_t kTitle[] = L"MMDKimodo";
 constexpr wchar_t kOpenLabel[] = L"Kimodo の窓を開く";
 constexpr wchar_t kHubClass[] = L"MMDKimodo.Hub";       // 動いている Python の窓の目印（app.py と同じ）
 constexpr wchar_t kOpenMessage[] = L"MMDKimodo.Open.v1";
+constexpr wchar_t kAttachMessage[] = L"MMDKimodo.Attach.v1";   // この MMD の窓を隠したまま作って（パネル用）
+constexpr wchar_t kPanelMessage[] = L"MMDKimodo.Panel.v1";     // パネルのボタンが押された（lparam はボタンの番号）
+constexpr wchar_t kPanelClass[] = L"MMDKimodo.Panel";          // kimodo_panel.cpp のパネル
+constexpr int kDetailsButton = 106;                            // kimodo_panel.cpp の「詳しく…」
+constexpr int kStatusLabel = 107;                              // kimodo_panel.cpp の状態の 1 行
 
 std::wstring module_dir() {
     wchar_t path[MAX_PATH]{};
@@ -106,10 +114,21 @@ public:
                                    GetWindowThreadProcessId(hwnd_, nullptr));
         if (!g_hook) show_error(hwnd_, L"メニューの受け口を作れませんでした（エラー " + std::to_wstring(GetLastError()) + L"）。");
         log_line("menu added id=0x%x at %d hook=%p", open_id_, help + 1, static_cast<void*>(g_hook));
+        if (panel_.create(hwnd_, [this](int button) { on_panel(button); })) {
+            attach();
+        } else {
+            log_line("panel failed %lu", GetLastError());
+        }
+    }
+
+    // MMD の窓の大きさが変わったら、パネルの位置を直す（Send で来るので MMDPlugin の受け口に届く）。
+    void WndProc(CWPSTRUCT* param) override {
+        if (param && param->hwnd == hwnd_ && param->message == WM_SIZE) panel_.request_layout();
     }
 
     void stop() override {
         log_line("stop");
+        panel_.destroy();
         if (g_hook) UnhookWindowsHookEx(g_hook);
         g_hook = nullptr;
         g_plugin = nullptr;
@@ -128,33 +147,65 @@ public:
     }
 
 private:
+    static HWND hub() { return FindWindowExW(HWND_MESSAGE, nullptr, kHubClass, nullptr); }
+
     void open_window() {
         log_line("open_window");
-        if (const HWND hub = FindWindowExW(HWND_MESSAGE, nullptr, kHubClass, nullptr)) {
-            PostMessageW(hub, RegisterWindowMessageW(kOpenMessage), reinterpret_cast<WPARAM>(hwnd_), 0);
+        if (const HWND h = hub()) {
+            PostMessageW(h, RegisterWindowMessageW(kOpenMessage), reinterpret_cast<WPARAM>(hwnd_), 0);
             return;
         }
-        launch();
+        launch(L"--open", true);
     }
 
-    // Python の窓を起動する。どの MMD から開いたかを --open で渡す。
-    void launch() {
+    // パネル用に、この MMD の窓を隠したまま作ってもらう。Python が動いていなければ起動する（失敗は記録だけ。メニューからも開ける）
+    void attach() {
+        log_line("attach");
+        if (const HWND h = hub()) {
+            PostMessageW(h, RegisterWindowMessageW(kAttachMessage), reinterpret_cast<WPARAM>(hwnd_), 0);
+            return;
+        }
+        launch(L"--attach", false);
+    }
+
+    // パネルのボタン。中身（プロンプト・範囲）は Python がパネルから読むので、番号だけ知らせる
+    void on_panel(int button) {
+        log_line("panel button %d", button);
+        if (button == kDetailsButton) {
+            open_window();
+            return;
+        }
+        if (const HWND h = hub()) {
+            PostMessageW(h, RegisterWindowMessageW(kPanelMessage), reinterpret_cast<WPARAM>(hwnd_), button);
+            return;
+        }
+        // Python が終わっていた。立ち上げ直して、もう一度押してもらう
+        attach();
+        if (const HWND panel = FindWindowExW(hwnd_, nullptr, kPanelClass, nullptr)) {
+            SetDlgItemTextW(panel, kStatusLabel, L"MMDKimodo を起動しています。少ししてからもう一度押してください");
+        }
+    }
+
+    // Python の窓を起動する。どの MMD かを --open（窓を出す）か --attach（隠したまま）で渡す。
+    void launch(const wchar_t* how, bool show_errors) {
         const std::wstring ini = module_dir() + L"\\MMDKimodo.ini";
         wchar_t python[MAX_PATH]{}, home[MAX_PATH]{};
         GetPrivateProfileStringW(L"MMDKimodo", L"python", L"", python, MAX_PATH, ini.c_str());
         GetPrivateProfileStringW(L"MMDKimodo", L"home", L"", home, MAX_PATH, ini.c_str());
         if (!*python || !*home) {
-            show_error(hwnd_, L"MMDKimodo.ini に python と home を書いてください:\n" + ini);
+            log_line("launch: python/home missing");
+            if (show_errors) show_error(hwnd_, L"MMDKimodo.ini に python と home を書いてください:\n" + ini);
             return;
         }
-        wchar_t args[64]{};
-        swprintf_s(args, L" -m mmdkimodo.app --open %llu", static_cast<unsigned long long>(reinterpret_cast<UINT_PTR>(hwnd_)));
+        wchar_t args[96]{};
+        swprintf_s(args, L" -m mmdkimodo.app %s %llu", how, static_cast<unsigned long long>(reinterpret_cast<UINT_PTR>(hwnd_)));
         std::wstring command = L"\"" + std::wstring(python) + L"\"" + args;
         STARTUPINFOW startup{};
         startup.cb = sizeof(startup);
         PROCESS_INFORMATION process{};
         if (!CreateProcessW(python, &command[0], nullptr, nullptr, FALSE, 0, nullptr, home, &startup, &process)) {
-            show_error(hwnd_, L"MMDKimodo を起動できませんでした（エラー " + std::to_wstring(GetLastError()) + L"）:\n"
+            log_line("launch failed %lu", GetLastError());
+            if (show_errors) show_error(hwnd_, L"MMDKimodo を起動できませんでした（エラー " + std::to_wstring(GetLastError()) + L"）:\n"
                               + python + L"\n作業フォルダ: " + home);
             return;
         }
@@ -164,6 +215,7 @@ private:
 
     HWND hwnd_ = nullptr;
     int open_id_ = -1;
+    KimodoPanel panel_;
 };
 
 LRESULT CALLBACK get_message_hook(int code, WPARAM wparam, LPARAM lparam) {

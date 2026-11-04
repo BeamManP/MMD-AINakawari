@@ -26,7 +26,7 @@ import winerror
 
 from mmd_mcp.windows import list_windows
 
-from . import gpu, runner, smooth_stop
+from . import gpu, panel, runner, smooth_stop
 from .message_window import MessageWindow, register_message
 from .mmd_link import MMDLink
 from .widgets import Fold, PromptRows, ScrollFrame
@@ -34,6 +34,9 @@ from .widgets import Fold, PromptRows, ScrollFrame
 APP_MUTEX = "Local\\MMDKimodo.App.v1"
 HUB_CLASS = "MMDKimodo.Hub"           # プラグインと 2 回目の起動が探す目印（kimodo_plugin.cpp と同じ）
 OPEN_MESSAGE = "MMDKimodo.Open.v1"    # wparam = 開きたい MMD の窓
+ATTACH_MESSAGE = "MMDKimodo.Attach.v1"   # wparam = MMD の窓。窓を隠したまま作る（MMD の右下のパネル用。kimodo_plugin.cpp）
+ATTACH_WAIT = 30   # 隠したまま作る時に、起動の途中の MMD の窓が見えるようになるまで待つ秒数
+PANEL_MESSAGE = "MMDKimodo.Panel.v1"     # wparam = MMD の窓・lparam = 押されたパネルのボタン（panel.GENERATE など）
 _set_window_long = ctypes.windll.user32.SetWindowLongPtrW
 _set_window_long.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
 _set_window_long.restype = ctypes.c_void_p
@@ -81,22 +84,36 @@ class Hub:
     def __init__(self, root):
         self.root = root
         self.apps = {}   # MMD の窓 → App
+        self.waiting = {}   # 隠したまま作るのを待っている MMD の窓 → 待つ期限（見えるようになったら作る）
         self.alive = True
         self.requests = queue.Queue()
-        self.listener = MessageWindow(HUB_CLASS, {OPEN_MESSAGE: lambda w, _l: self.requests.put(int(w))})
+        self.listener = MessageWindow(HUB_CLASS, {
+            OPEN_MESSAGE: lambda w, _l: self.requests.put(("open", int(w), 0)),
+            ATTACH_MESSAGE: lambda w, _l: self.requests.put(("attach", int(w), 0)),
+            PANEL_MESSAGE: lambda w, l: self.requests.put(("panel", int(w), int(l))),
+        })
         self.listener.start()
         self._poll()
 
-    def open(self, hwnd):
-        """その MMD の窓を出す（まだ無ければ作る）。"""
+    def open(self, hwnd, show=True):
+        """その MMD の窓を出す（まだ無ければ作る）。show=False なら隠したまま作る（MMD の右下のパネルから使う）。
+
+        隠したまま作るのは MMD の起動の途中（プラグインの start）に頼まれるので、MMD の窓がまだ見えておらず、
+        list_windows に出てこない（11-04、それで Python がすぐ終わっていた）。なので見えるまで ATTACH_WAIT 秒待つ。
+        """
         mmd = next((w for w in list_windows() if w.hwnd == hwnd), None)
         if mmd is None:
-            messagebox.showerror("MMDKimodo", "開こうとした MMD が見つかりません（閉じられた？）")
+            if show:
+                messagebox.showerror("MMDKimodo", "開こうとした MMD が見つかりません（閉じられた？）")
+            elif win32gui.IsWindow(hwnd):
+                self.waiting.setdefault(hwnd, time.monotonic() + ATTACH_WAIT)
         else:
+            self.waiting.pop(hwnd, None)
             if hwnd not in self.apps:
                 self.apps[hwnd] = App(tk.Toplevel(self.root), self, mmd)
-            self.apps[hwnd].show()
-        if not self.apps:
+            if show:
+                self.apps[hwnd].show()
+        if not self.apps and not self.waiting:
             self._finish()
 
     def forget(self, app):
@@ -114,7 +131,21 @@ class Hub:
 
     def _poll(self):
         while not self.requests.empty():
-            self.open(self.requests.get())
+            kind, hwnd, button = self.requests.get()
+            if kind == "panel":
+                if hwnd not in self.apps:
+                    self.open(hwnd, show=False)
+                if hwnd in self.apps:
+                    self.apps[hwnd].panel_pressed(button)
+            else:
+                self.open(hwnd, show=kind == "open")
+        for hwnd, deadline in list(self.waiting.items()):   # 起動の途中の MMD が見えるようになったら作る
+            if time.monotonic() > deadline or not win32gui.IsWindow(hwnd):
+                self.waiting.pop(hwnd)
+                if not self.apps and not self.waiting:
+                    self._finish()
+            elif self.alive:
+                self.open(hwnd, show=False)
         if self.alive:
             self.root.after(100, self._poll)
 
@@ -148,6 +179,9 @@ class App:
         self.last_run = runner.load_last_run(self.link)   # この MMD での前回の生成（作り直しと「元に戻す」に使う）。窓を開き直しても残る
         self.last_backup = self.last_run["backup"] if self.last_run else None
         self._build()
+        # MMD の右下のパネル。窓と同じ設定を、変わった方からもう一方へ写す（_sync_panel）
+        self.panel = panel.Panel(mmd.hwnd)
+        self._seen = {}   # 最後に同期した時の値 {("panel"|"window", 項目): 値}
         root.protocol("WM_DELETE_WINDOW", root.withdraw)
         self._tick()
 
@@ -480,7 +514,80 @@ class App:
             self._status_before = None
         self.gen_btn.configure(state="disabled" if self.busy or block else "normal")
         self.undo_btn.configure(state="normal" if (self.last_backup and not self.busy) else "disabled")
+        self._sync_panel()
         self.root.after(500, self._tick)
+
+    # ---------------- MMD の右下のパネル ----------------
+
+    def _sync_panel(self):
+        """パネルと窓の設定をそろえる。入力（プロンプト・中割りか・範囲）は変わった方からもう一方へ、
+        表示（状態の 1 行・範囲の字・ボタンの押せる押せない）は窓からパネルへ。"""
+        p = self.panel
+        before = p.hwnd
+        if not p.find():
+            return
+        if p.hwnd != before:   # 新しいパネル（MMD を起動し直した等）。中身を全部写し直す
+            self._seen = {}
+        try:
+            def two_way(key, panel_value, window_value, to_window, to_panel):
+                if ("panel", key) not in self._seen:   # 最初（パネルを作り直した時も）は窓の設定をパネルへ
+                    to_panel(window_value)
+                    panel_value = read_panel[key]()
+                elif panel_value != self._seen.get(("panel", key)):   # パネルで変えた
+                    if panel_value != window_value:
+                        to_window(panel_value)
+                        window_value = read_window[key]()
+                elif window_value != self._seen.get(("window", key)):   # 窓で変えた
+                    to_panel(window_value)
+                    panel_value = read_panel[key]()
+                self._seen[("panel", key)], self._seen[("window", key)] = panel_value, window_value
+
+            read_panel = {
+                "prompt": lambda: p.text(panel.PROMPT).replace("\r\n", "\n"),
+                "engine": lambda: p.selection(panel.ENGINE),
+                "range": lambda: p.checked(panel.RANGE),
+            }
+            read_window = {
+                "prompt": self.prompt_rows.text,
+                "engine": lambda: self.tabs.index("current"),
+                "range": lambda: self.range_mode.get() == "keys",
+            }
+            try:
+                window_prompt = self.prompt_rows.text()
+            except ValueError:   # 窓で区間のフレームを打っている途中。そろえるのは次に
+                window_prompt = None
+            if window_prompt is not None:
+                two_way("prompt", read_panel["prompt"](), window_prompt,
+                        lambda v: self.prompt_rows.load(v), lambda v: p.set_text(panel.PROMPT, v.replace("\n", "\r\n")))
+            two_way("engine", read_panel["engine"](), read_window["engine"](),
+                    lambda v: self.tabs.select(1 if v == 1 else 0), lambda v: p.select(panel.ENGINE, v))
+            two_way("range", read_panel["range"](), read_window["range"](),
+                    lambda v: (self.range_mode.set("keys" if v else "all"), self._mode_changed()),
+                    lambda v: p.set_checked(panel.RANGE, v))
+            shown = {
+                panel.RANGE: self.range_text.get(),
+                panel.STATUS: self.status.get(),
+            }
+            for item, text in shown.items():
+                if self._seen.get(("text", item)) != text:
+                    p.set_text(item, text)
+                    self._seen[("text", item)] = text
+            states = {panel.GENERATE: str(self.gen_btn.cget("state")) == "normal",
+                      panel.UNDO: str(self.undo_btn.cget("state")) == "normal"}
+            for item, on in states.items():
+                if self._seen.get(("enabled", item)) != on:
+                    p.enable(item, on)
+                    self._seen[("enabled", item)] = on
+        except panel.Busy:   # MMD が忙しい。次にまた
+            pass
+
+    def panel_pressed(self, button):
+        """パネルの「生成」「元に戻す」。押す前に、パネルで打った途中のプロンプトなどを窓に写す。"""
+        self._sync_panel()
+        if button == panel.GENERATE and str(self.gen_btn.cget("state")) == "normal":
+            self._generate()
+        elif button == panel.UNDO and str(self.undo_btn.cget("state")) == "normal":
+            self._undo()
 
     # ---------------- 操作 ----------------
 
@@ -571,13 +678,13 @@ class App:
         self.status.set("サーバーを起動しました（黒い窓）。10〜20 秒で ● になります")
 
 
-def _notify_running(hwnd):
-    """もう動いている MMDKimodo に「この MMD の窓を開いて」と知らせる。起動直後で目印がまだ無ければ少し待つ。"""
+def _notify_running(hwnd, message=OPEN_MESSAGE):
+    """もう動いている MMDKimodo に「この MMD の窓を開いて」（隠したまま作って）と知らせる。起動直後で目印がまだ無ければ少し待つ。"""
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         hub = win32gui.FindWindowEx(win32con.HWND_MESSAGE, 0, HUB_CLASS, None)
         if hub:
-            win32gui.PostMessage(hub, register_message(OPEN_MESSAGE), hwnd, 0)
+            win32gui.PostMessage(hub, register_message(message), hwnd, 0)
             return True
         time.sleep(0.1)
     return False
@@ -586,8 +693,10 @@ def _notify_running(hwnd):
 def main():
     ap = argparse.ArgumentParser(description="MMDKimodo の窓（ふつうは MMD のメニューから開く）")
     ap.add_argument("--open", type=int, help="窓を開く MMD の窓（省くと一番手前の MMD）")
+    ap.add_argument("--attach", type=int, help="窓を隠したまま作る MMD の窓（MMD の起動時にプラグインが、右下のパネル用に渡す）")
     args = ap.parse_args()
-    hwnd = args.open or front_mmd()
+    show = args.attach is None
+    hwnd = args.open or args.attach or front_mmd()
     if not hwnd:
         root = tk.Tk()
         root.withdraw()
@@ -596,7 +705,7 @@ def main():
         return
     mutex = win32event.CreateMutex(None, False, APP_MUTEX)  # 終わるまで持っておく
     if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
-        if not _notify_running(hwnd):
+        if not _notify_running(hwnd, OPEN_MESSAGE if show else ATTACH_MESSAGE) and show:
             root = tk.Tk()
             root.withdraw()
             messagebox.showerror("MMDKimodo", "MMDKimodo はもう起動中ですが、知らせる先が見つかりません。少し待ってからもう一度開いてください")
@@ -606,7 +715,7 @@ def main():
     root.withdraw()  # 親の窓は見せない。MMD ごとの窓（Toplevel）だけ出す
     hub = Hub(root)
     try:
-        hub.open(hwnd)
+        hub.open(hwnd, show=show)
         if hub.alive:
             root.mainloop()
     finally:
