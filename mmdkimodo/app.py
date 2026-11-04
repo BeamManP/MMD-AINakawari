@@ -26,7 +26,7 @@ import winerror
 
 from mmd_mcp.windows import list_windows
 
-from . import runner, smooth_stop
+from . import gpu, runner, smooth_stop
 from .message_window import MessageWindow, register_message
 from .mmd_link import MMDLink
 from .widgets import Fold, PromptRows, ScrollFrame
@@ -44,9 +44,12 @@ DEFAULTS = {
     "prompt": "A person moves naturally between poses.",
     "steps": 100, "seed": -1, "post_processing": True, "cfg_text": 2.0, "cfg_key": 2.0, "use_center": False,
     "stop_at_last_key": True, "smooth_stop": True, "key_stop": False, "wrist_lerp": False,
+    "perf_mode": "low",
 }
 OLD_KEYS = ("use_keys", "range_start", "range_end", "pmx")   # 前の窓の保存にあった項目（読む時に変換して捨てる）
 TABS = [("kimodo", "プロンプトで作る"), ("nakawari", "中割り")]
+# 動作モード（pipeline.PERF_MODES）。既定は低負荷（VRAM 8GB の GPU でも動く）。高速は GPU 診断で使える時だけ
+PERF_MODES = [("low", "低負荷モード"), ("fast", "高速モード")]
 MODES = [("fill", "キーの間を埋める"), ("extend", "続きを足す"), ("fresh", "プロンプトだけで作る")]
 MODE_NOTES = {
     "fill": "打ったキーのポーズを守って、キーとキーの間を作ります（長さは最後のキーまで）",
@@ -181,8 +184,18 @@ class App:
         head.grid(row=0, column=0, sticky="we", **pad)
         self.model_text = tk.StringVar(value="選択中のモデル：（読み取り中）")
         ttk.Label(head, textvariable=self.model_text).pack(side="left")
+        # 動作モード。高速モードの時だけ、テキスト読み取りサーバーの印を横に出す
         self.head_server = ttk.Label(head, text="")
-        self.head_server.pack(side="right")
+        self.head_server.pack(side="right", padx=(6, 0))
+        self.diagnosis = gpu.diagnose()
+        names = dict(PERF_MODES)
+        mode = self.cfg["perf_mode"] if self.cfg["perf_mode"] in names else "low"
+        if mode == "fast" and not self.diagnosis.fast_ok:   # 保存は高速でも、この PC では使えない
+            mode = "low"
+        self.perf = tk.StringVar(value=names[mode])
+        box = ttk.Combobox(head, textvariable=self.perf, values=[n for _, n in PERF_MODES], state="readonly", width=12)
+        box.pack(side="right")
+        box.bind("<<ComboboxSelected>>", lambda _e: self._perf_changed())
 
         # 真ん中: やり方ごとのタブ
         self.tabs = ttk.Notebook(f)
@@ -231,6 +244,7 @@ class App:
         self.log.pack(fill="both", expand=True)
         bar.configure(command=self.log.yview)
         self._mode_changed()
+        self._perf_changed()
 
         # 窓の高さの下限: 上と下の段と、タブの見出し＋中身 3 行ほど。これより低くできないので、生成と状態は必ず見える
         self.root.update_idletasks()
@@ -307,9 +321,15 @@ class App:
         # センターの上下などを毎フレームの腰の目印にする（リズムを残して動きを作る。プロンプトだけで作る時と組み合わせる想定）
         self.use_center = tk.BooleanVar(value=self.cfg["use_center"])
         ttk.Checkbutton(d, text="センターの動きを使う", variable=self.use_center).grid(row=2, column=2, columnspan=2, sticky="w", **g)
-        # テキスト読み取りサーバーは Kimodo だけが使うので、このタブの中に置く
+        # GPU 診断と動作モードの説明。テキスト読み取りサーバーは高速モードの Kimodo だけが使うので、このタブの中に置く
+        d = self.diagnosis
+        tk.Label(t, text=f"{d.summary()} → {d.note}" if d.gpu else d.note, foreground="#556",
+                 background=ttk.Style().lookup("TFrame", "background"), wraplength=500, anchor="w", justify="left").pack(fill="x", pady=(8, 0))
+        self.perf_note = tk.StringVar()
+        tk.Label(t, textvariable=self.perf_note, foreground="#556", background=ttk.Style().lookup("TFrame", "background"),
+                 wraplength=500, anchor="w", justify="left").pack(fill="x")
         sf = ttk.Frame(t)
-        sf.pack(fill="x", pady=(8, 0))
+        sf.pack(fill="x", pady=(4, 0))
         self.server_dot = ttk.Label(sf, text="")
         self.server_dot.pack(side="left")
         self.server_label = ttk.Label(sf, text="", foreground="#556")
@@ -330,6 +350,18 @@ class App:
                         state=state).pack(anchor="w", pady=(4, 0))
         if not smooth_stop.available():
             ttk.Label(t, text=f"MotionBricks が入っていません（{smooth_stop.MB_PYTHON}）", foreground="#a33").pack(anchor="w", pady=(10, 0))
+
+    def _perf_mode(self):
+        return next(k for k, n in PERF_MODES if n == self.perf.get())
+
+    def _perf_changed(self):
+        if self._perf_mode() == "fast" and not self.diagnosis.fast_ok:
+            messagebox.showinfo("MMDKimodo", f"この PC では高速モードは使えません（{self.diagnosis.note}）。低負荷モードで作ります",
+                                parent=self.root)
+            self.perf.set(dict(PERF_MODES)["low"])
+        self.perf_note.set("低負荷モード: 文の読み取りを CPU で行います（VRAM 約 1.3GB・メインメモリ約 15GB。1 文 3 秒ほど。同じ文は 2 回目から速い）"
+                           if self._perf_mode() == "low" else
+                           "高速モード: 文の読み取りを GPU のサーバーで行います（VRAM 約 18GB。下の「サーバーを起動」が必要）")
 
     def _mode_changed(self):
         mode = self.mode.get()
@@ -409,7 +441,9 @@ class App:
                     messagebox.showerror("MMDKimodo", msg, parent=self.root)
         up = server_up()
         self.server_dot.configure(text="●" if up else "○", foreground="#2a7" if up else "#a33")
-        self.head_server.configure(text="● サーバー" if up else "○ サーバー停止中", foreground="#2a7" if up else "#a33")
+        fast = self._perf_mode() == "fast"
+        self.head_server.configure(text=("● サーバー" if up else "○ サーバー停止中") if fast else "",
+                                   foreground="#2a7" if up else "#a33")
         self.server_label.configure(text="テキスト読み取りサーバー起動中" if up else "テキスト読み取りサーバー停止中（無いと毎回 Llama を読み込むので遅い）")
         self.server_btn.configure(state="disabled" if up else "normal")
         self.gen_btn.configure(state="disabled" if self.busy else "normal")
@@ -444,12 +478,13 @@ class App:
                             stop_at_last_key=mode != "fresh" and bool(self.stop.get()),
                             smooth_stop=bool(self.smooth.get()) and smooth_stop.available(),
                             engine="motionbricks" if nakawari else "kimodo",
-                            key_stop=bool(self.key_stop.get()), wrist_lerp=bool(self.wrist_lerp.get()))
+                            key_stop=bool(self.key_stop.get()), wrist_lerp=bool(self.wrist_lerp.get()),
+                            perf_mode=self._perf_mode())
         self.cfg.update(tab=tab, mode=mode, range_mode=self.range_mode.get(), length=self.length.get(), prompt=s.prompt,
                         steps=s.steps, seed=s.seed, post_processing=s.post_processing,
                         cfg_text=s.cfg_text, cfg_key=s.cfg_key, use_center=bool(self.use_center.get()),
                         stop_at_last_key=bool(self.stop.get()), smooth_stop=bool(self.smooth.get()),
-                        key_stop=s.key_stop, wrist_lerp=s.wrist_lerp)
+                        key_stop=s.key_stop, wrist_lerp=s.wrist_lerp, perf_mode=s.perf_mode)
         os.makedirs(runner.WORK_DIR, exist_ok=True)
         json.dump(self.cfg, open(SETTINGS_PATH, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         return s

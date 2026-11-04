@@ -37,6 +37,7 @@ class Settings:
     engine: str = "kimodo"          # "motionbricks" ならキーの間を MotionBricks だけで埋める（中割り・プロンプト無し。nakawari.py）
     key_stop: bool = False          # 中割りで、キーごとに止まる（オフなら次のキーへの速さで通る）
     wrist_lerp: bool = False        # 中割りで、手首だけキーの間を補間でつなぐ（MotionBricks は手首を回しすぎることがある）
+    perf_mode: str = "low"          # 動作モード。"low" はテキストの読み取りを CPU（VRAM 8GB 向け）、"fast" は GPU（pipeline.PERF_MODES）
 
 
 def _same_motion(a, b, tol=1e-3, fixed_pos=(), names=None):
@@ -149,6 +150,9 @@ def generate(settings, log=print, link=None, previous=None):
         for s0, n in short:
             log(f"注意: {s0}F からの区間は {n} フレームしかありません。Kimodo はつなぎに前の区間の 5 フレームを使うので、"
                 f"動きが出きらないことがあります（公式のデモは 1 区間 2 秒以上）")
+        if any("぀" <= ch <= "ヿ" or "一" <= ch <= "鿿" for _, _, t in job.segments for ch in t):
+            log("注意: プロンプトに日本語があります。Kimodo は英語の文で学習しているので、日本語はほとんど効きません"
+                "（例: A person poses cutely, tilting the head.）")
         if len(job.frames) > pipeline.MANY_KEYS:
             log(f"注意: 体のキーが {len(job.frames)} 個あります。Kimodo の推奨は {pipeline.MANY_KEYS} 個未満です"
                 f"（多いとキーに縛られて動きが硬くなることがあります）")
@@ -163,8 +167,8 @@ def generate(settings, log=print, link=None, previous=None):
         result = nakawari.generate(job, os.path.join(WORK_DIR, "motionbricks"), key_stop=settings.key_stop,
                                    wrist_lerp=settings.wrist_lerp, log=log)
     else:
-        log("Kimodo で生成中…")
-        result = pipeline.run_kimodo(job, os.path.join(WORK_DIR, "kimodo"), on_line=lambda l: log("  " + l))
+        log(f"Kimodo で生成中（{'高速' if settings.perf_mode == 'fast' else '低負荷'}モード）…")
+        result = pipeline.run_kimodo(job, os.path.join(WORK_DIR, "kimodo"), on_line=lambda l: log("  " + l), mode=settings.perf_mode)
     if settings.smooth_stop and job.stop_frames:
         log("MotionBricks で止まり方を作り直し中…")
         result = smooth_stop.apply(job, result, os.path.join(WORK_DIR, "motionbricks"), log=log)

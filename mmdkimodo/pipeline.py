@@ -8,7 +8,6 @@
 import json
 import os
 import socket
-import subprocess
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -21,8 +20,12 @@ from .retarget import TOE_GROUND, Retargeter, conv_p, conv_q
 KIMODO_PYTHON = r"F:\kimodo\.venv\Scripts\python.exe"
 KIMODO_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "kimodo_gen.py")
 KIMODO_DIR = r"F:\kimodo"
-KIMODO_PORT = 9551        # 常駐の Kimodo（tools/kimodo_gen.py --serve）
-TEXT_SERVER_PORT = 9550   # Kimodo のテキスト読み取りサーバー
+TEXT_SERVER_PORT = 9550   # Kimodo のテキスト読み取りサーバー（高速モードで使う）
+# 動作モード → (常駐の Kimodo の口, テキストの読み取りの置き場所, 名前)。tools/kimodo_gen.py の説明・mmdkimodo/gpu.py
+PERF_MODES = {
+    "low": (9553, "cpu", "Kimodo（低負荷）"),   # テキストの読み取りは CPU・メインメモリ約 15GB・VRAM 約 1.3GB
+    "fast": (9551, "api", "Kimodo（高速）"),    # テキストの読み取りはサーバー（VRAM 約 16.8GB）
+}
 KIMODO_HF_CACHE = r"F:\kimodo\hf_cache"
 SOMA_JSON = r"F:\kimodo\tools\somaskel30.json"
 MAX_FRAMES = 300  # Kimodo の 1 区間は 10 秒（30fps）まで（公式の limitations.md）。区間を分ければ全体はこれより長くてよい
@@ -344,46 +347,36 @@ def _port_open(port):
         return False
 
 
-def kimodo_server():
+def kimodo_server(mode):
+    port, text, name = PERF_MODES[mode]
     env = dict(os.environ, HF_HUB_CACHE=KIMODO_HF_CACHE, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
-    return resident.Server("Kimodo", KIMODO_PORT, KIMODO_PYTHON, KIMODO_SCRIPT, KIMODO_DIR, env)
+    return resident.Server(name, port, KIMODO_PYTHON, KIMODO_SCRIPT, KIMODO_DIR, env, args=(text,))
 
 
-def run_kimodo(job, work_dir, on_line=None):
-    """Kimodo で作って結果を返す。依頼と結果は work_dir に残す（見返す用）。
+def run_kimodo(job, work_dir, on_line=None, mode="low"):
+    """常駐の Kimodo（tools/kimodo_gen.py --serve）で作って結果を返す。依頼と結果は work_dir に残す（見返す用）。
 
-    テキスト読み取りサーバー（127.0.0.1:9550）が動いていれば、常駐の Kimodo（tools/kimodo_gen.py --serve）に頼む
-    （11-04: 1 回 32 秒のうち 25 秒が torch とモデルの読み込みだった）。止まっていれば常駐させず、毎回 1 回だけの形で回す
-    （常駐が Llama を抱え込むと、あとでサーバーを起動した時に VRAM が足りなくなるため。tools/kimodo_gen.py の説明）。
+    mode: 動作モード（PERF_MODES）。使わない方のモードの常駐がいれば先に終わらせる（低負荷の常駐はメインメモリを約 15GB 使う）。
+    高速モードはテキスト読み取りサーバーが要る。前の「サーバーが無ければ毎回読み込む」形は、Kimodo の既定（auto）で
+    Llama を GPU に読み込むので 8GB の GPU では落ちる。なので使わない（11-04）。
     """
+    if mode not in PERF_MODES:
+        raise ValueError(f"動作モードは {list(PERF_MODES)} のどれかです（{mode}）")
     log = on_line or (lambda _l: None)
+    if mode == "fast" and not _port_open(TEXT_SERVER_PORT):
+        raise RuntimeError("高速モードはテキスト読み取りサーバーが要ります。「サーバーを起動」を押すか、低負荷モードにしてください")
+    for other in PERF_MODES:
+        if other != mode and resident.shutdown(kimodo_server(other)):
+            log(f"  {PERF_MODES[other][2]} の常駐を片付けました（メモリを空けるため）")
     os.makedirs(work_dir, exist_ok=True)
-    req = os.path.join(work_dir, "request.json")
     res = os.path.join(work_dir, "result.json")
     if os.path.exists(res):
         os.remove(res)
-    json.dump(job.request, open(req, "w", encoding="utf-8"))
-    if _port_open(TEXT_SERVER_PORT):
-        result, line = resident.call(kimodo_server(), job.request, log=log)
-        log(line)
-        json.dump(result, open(res, "w", encoding="utf-8"))
-        return result
-    log("テキスト読み取りサーバーが止まっているので、Kimodo を常駐させずに毎回読み込みます（Llama も毎回読むので遅い）")
-    env = kimodo_server().env
-    proc = subprocess.Popen([KIMODO_PYTHON, KIMODO_SCRIPT, req, res], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            env=env, cwd=KIMODO_DIR, text=True, encoding="utf-8", errors="replace",
-                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    lines = []
-    for line in proc.stdout:
-        line = line.rstrip()
-        if line.startswith("ok ") or "Error" in line or "Traceback" in line or line.startswith("  File "):
-            lines.append(line)
-            if on_line:
-                on_line(line)
-    proc.wait()
-    if proc.returncode != 0 or not os.path.exists(res):
-        raise RuntimeError("Kimodo が失敗しました:\n" + "\n".join(lines[-12:]))
-    return json.load(open(res, encoding="utf-8"))
+    json.dump(job.request, open(os.path.join(work_dir, "request.json"), "w", encoding="utf-8"))
+    result, line = resident.call(kimodo_server(mode), job.request, log=log)
+    log(line)
+    json.dump(result, open(res, "w", encoding="utf-8"))
+    return result
 
 
 def merge(original, generated, job):

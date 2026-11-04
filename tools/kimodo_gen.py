@@ -1,16 +1,19 @@
 """Kimodo の橋渡し（Kimodo の Python で動かす）。依頼（プロンプト・コマ数・キー）→ SOMA 30 関節の結果。
 
     F:\\kimodo\\.venv\\Scripts\\python.exe tools\\kimodo_gen.py 依頼.json 結果.json     1 回だけ（毎回モデルを読み込む）
-    F:\\kimodo\\.venv\\Scripts\\python.exe tools\\kimodo_gen.py --serve 9551             常駐（mmdkimodo/resident.py から頼む）
+    F:\\kimodo\\.venv\\Scripts\\python.exe tools\\kimodo_gen.py --serve 9553 cpu         常駐・低負荷（テキストの読み取りは CPU）
+    F:\\kimodo\\.venv\\Scripts\\python.exe tools\\kimodo_gen.py --serve 9551 api         常駐・高速（テキストの読み取りはサーバー）
 
 座標はすべて Kimodo の座標（Y が上・+Z が前・+X が体の左・メートル）。
 回転は標準 T ポーズ基準のローカル回転（四元数 x,y,z,w を関節順に平らに並べる）。
 元は F:\\kimodo\\tools\\unity_gen.py（Unity の KimodoLink 用に書いたもの）。11-04 にここへ移し、常駐できるようにした。
 1 回の生成は 3 秒ほどだが、torch と Kimodo のモデルの読み込みに 25 秒かかっていた。
 
-常駐はテキストの読み取りを API（テキスト読み取りサーバー・127.0.0.1:9550）に決めて読み込む。
-Kimodo の既定（auto）だとサーバーが無い時に Llama（約 16GB）を自分で読み込むので、常駐したまま抱え込むと、
-あとでサーバーを起動した時に VRAM が足りなくなるため。
+常駐はテキストの読み取り（LLM2Vec・Llama-3-8B）の置き場所を決めて読み込む（Kimodo の既定 auto は、サーバーが無い時に
+Llama 約 16GB を GPU に読み込むので、8GB の GPU では落ちる）:
+  cpu: 低負荷モード。Llama はメインメモリ（約 15GB）。VRAM は Kimodo 本体の 1.3GB だけ。1 文の読み取りに 3 秒ほど（11-04・i7-12700F）
+  api: 高速モード。テキスト読み取りサーバー（127.0.0.1:9550・VRAM 約 16.8GB）に頼む
+どちらも読み取り結果を work/text_cache にためて使い回す（公式デモの CachedTextEncoder。同じ文は 2 回目から読み取らない）。
 """
 import json
 import os
@@ -83,6 +86,7 @@ def _skip_when_empty(c):
 
 MODEL = "kimodo-soma-rp"
 AUTHKEY = b"MMDKimodo.resident.v1"   # mmdkimodo/resident.py と同じ
+TEXT_CACHE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "work", "text_cache")
 IDLE_SECONDS = 30 * 60               # 常駐で、これだけ頼まれなければ終わる
 
 
@@ -93,6 +97,23 @@ def load(name=MODEL):
     if model.skeleton.nbjoints != J:
         raise RuntimeError(f"skeleton has {model.skeleton.nbjoints} joints, expected {J}")
     return model
+
+
+def cache_text(model):
+    """読み取り結果を TEXT_CACHE にためて使い回す（公式デモの CachedTextEncoder）。
+
+    kimodo.demo から読み込むとデモの画面一式まで読み込むので、embedding_cache.py だけを直接読む。
+    キャッシュは読み取りの部品の種類ごとに分かれる（CPU の LLM2VecEncoder とサーバーの TextEncoderAPI は別）。
+    """
+    import importlib.util
+
+    import kimodo
+
+    path = os.path.join(os.path.dirname(kimodo.__file__), "demo", "embedding_cache.py")
+    spec = importlib.util.spec_from_file_location("kimodo_embedding_cache", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    model.text_encoder = module.CachedTextEncoder(model.text_encoder, model_name=MODEL, base_dir=TEXT_CACHE)
 
 
 def generate(model, req, t_load=0.0):
@@ -236,14 +257,24 @@ def generate(model, req, t_load=0.0):
     return result, line
 
 
-def serve(port):
-    """モデルを読み込んだまま、127.0.0.1:port で依頼を待つ。1 つずつ順に作る。IDLE_SECONDS 頼まれなければ終わる。"""
+def serve(port, text):
+    """モデルを読み込んだまま、127.0.0.1:port で依頼を待つ。1 つずつ順に作る。IDLE_SECONDS 頼まれなければ終わる。
+
+    text: テキストの読み取りの置き場所（"cpu" か "api"。上の説明）。{"shutdown": True} を頼まれたら終わる（モードの切り替えで片付ける）。
+    """
     from multiprocessing.connection import Listener
 
-    os.environ["TEXT_ENCODER_MODE"] = "api"
+    if text == "cpu":
+        os.environ.update(TEXT_ENCODER_MODE="local", TEXT_ENCODER_DEVICE="cpu")
+    elif text == "api":
+        os.environ["TEXT_ENCODER_MODE"] = "api"
+    else:
+        raise ValueError(f"テキストの読み取りの置き場所は cpu か api です（{text}）")
+    os.environ["LOCAL_CACHE"] = "true"   # 読み込みのたびに Hugging Face へ問い合わせない（モデルは入れてある）
     listener = Listener(("127.0.0.1", port), authkey=AUTHKEY)   # 口がふさがっていれば（もう常駐がいれば）ここで落ちる
     t0 = time.time()
     model = load()
+    cache_text(model)
     print(f"ready port={port} load={time.time() - t0:.1f}s", flush=True)
     last = [time.time()]
 
@@ -260,6 +291,11 @@ def serve(port):
         last[0] = time.time() + 24 * 3600   # 作っている間は終わらない
         try:
             req = conn.recv()
+            if req.get("shutdown"):
+                conn.send({"ok": True, "result": None, "line": "shutdown"})
+                conn.close()
+                print("shutdown", flush=True)
+                os._exit(0)
             if os.path.getmtime(__file__) != born:
                 conn.send({"ok": False, "stale": True})
                 conn.close()
@@ -282,7 +318,7 @@ def serve(port):
 
 def main():
     if sys.argv[1] == "--serve":
-        serve(int(sys.argv[2]))
+        serve(int(sys.argv[2]), sys.argv[3])
         return
     req = json.load(open(sys.argv[1], encoding="utf-8"))
     t0 = time.time()

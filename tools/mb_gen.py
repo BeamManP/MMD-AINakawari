@@ -162,7 +162,7 @@ def run(engine, rigs, req):
 
 
 def serve(port):
-    """エンジンを開いたまま、127.0.0.1:port で依頼を待つ。1 つずつ順に作る。IDLE_SECONDS 頼まれなければ終わる。"""
+    """エンジンを開いたまま、127.0.0.1:port で依頼を待つ。1 つずつ順に作る。IDLE_SECONDS 頼まれなければ終わる。{"shutdown": True} で終わる。"""
     from multiprocessing.connection import Listener
 
     listener = Listener(("127.0.0.1", port), authkey=AUTHKEY)   # 口がふさがっていれば（もう常駐がいれば）ここで落ちる
@@ -187,6 +187,11 @@ def serve(port):
             last[0] = time.time() + 24 * 3600   # 作っている間は終わらない
             try:
                 req = conn.recv()
+                if req.get("shutdown"):   # resident.shutdown（片付け）
+                    conn.send({"ok": True, "result": None, "line": "shutdown"})
+                    conn.close()
+                    print("shutdown", flush=True)
+                    os._exit(0)
                 if os.path.getmtime(__file__) != born:
                     conn.send({"ok": False, "stale": True})
                     conn.close()

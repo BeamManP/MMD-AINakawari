@@ -22,6 +22,7 @@ class Server:
     script: str
     cwd: str
     env: dict
+    args: tuple = ()             # --serve <口> の後ろに付ける引数
     start_timeout: float = 180.0
 
 
@@ -44,7 +45,7 @@ def _start(server, log):
     log_path = os.path.join(LOG_DIR, f"{server.name}_server.log")
     log(f"  {server.name} を常駐させています（初回だけモデルを読み込みます）…")
     out = open(log_path, "w", encoding="utf-8")
-    proc = subprocess.Popen([server.python, server.script, "--serve", str(server.port)], stdout=out, stderr=subprocess.STDOUT,
+    proc = subprocess.Popen([server.python, server.script, "--serve", str(server.port), *server.args], stdout=out, stderr=subprocess.STDOUT,
                             cwd=server.cwd, env=server.env,
                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
     out.close()
@@ -78,6 +79,22 @@ def call(server, request, log=print):
     if not reply["ok"]:
         raise RuntimeError(f"{server.name} が失敗しました:\n" + reply.get("error", "")[-1500:])
     return reply["result"], reply.get("line", "")
+
+
+def shutdown(server):
+    """常駐がいれば終わらせる（モードを切り替えた時に、使わない方のメモリを空ける）。終わらせたら True。"""
+    conn = _connect(server)
+    if conn is None:
+        return False
+    _send(conn, server, {"shutdown": True})
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:   # 口が閉じるまで待つ
+        conn = _connect(server)
+        if conn is None:
+            return True
+        conn.close()
+        time.sleep(0.2)
+    raise RuntimeError(f"{server.name} の常駐が終わりません（{os.path.join(LOG_DIR, server.name + '_server.log')}）")
 
 
 def _send(conn, server, request):
