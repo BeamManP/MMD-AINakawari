@@ -28,6 +28,7 @@ public:
 private:
     static LRESULT CALLBACK proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
     void layout();
+    bool camera_mode() const;
     void arrange(int width, int height);
     void paint();
     void draw(HDC dc);

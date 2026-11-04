@@ -9,7 +9,8 @@ extern "C" IMAGE_DOS_HEADER __ImageBase;
 namespace {
 constexpr wchar_t kClass[] = L"MMDKimodo.Panel";   // Python（mmdkimodo/panel.py）はこの名前でパネルを探す
 constexpr wchar_t kCaption[] = L"Kimodo操作";
-constexpr int kCameraButton = 536;   // 3D 画面の下の帯の「カメラ編／モデル編」。字体を借りる
+constexpr int kCameraButton = 536;   // 3D 画面の下の帯の「カメラ編／モデル編」。字体を借りる・今のモードを見る
+constexpr wchar_t kModelModeText[] = L"モデル編";   // カメラ用のモードの時の、このボタンの字
 // 下の段のパネルの上端は、各パネルの見出しの「－」ボタン（14×14）の 2px 上（11-04 カメラ用のモードで 834 → 832、下端は 986）。
 // 前は「カメラ編」の下端＋26px で決めていたが、カメラ用のモードではカメラ編が 3D 画面の下（606）に上がるので、
 // パネルが 170px 上から始まって窓の下まで伸びていた（11-04 マスター「クソデカサイズ」）
@@ -174,6 +175,15 @@ bool KimodoPanel::filter(MSG* message) {
     return false;
 }
 
+// カメラ・照明・アクセサリのモード（カメラ用）か。3D 画面の下の「カメラ編／モデル編」ボタンは今と逆のモードの名前を出すので、
+// 「モデル編」と出ていればカメラ用のモード（11-04 に測った。モデルの欄で「カメラ・照明・アクセサリ」を選んだ時も同じ）。
+// Kimodo はモデルのモーションを作るので、カメラ用のモードではパネルを出さない（11-05 マスター）
+bool KimodoPanel::camera_mode() const {
+    wchar_t text[16]{};
+    const HWND toggle = GetDlgItem(mmd_, kCameraButton);
+    return toggle && GetWindowTextW(toggle, text, 16) && wcscmp(text, kModelModeText) == 0;
+}
+
 // 下の段の一番右のパネルの右に、隣のパネルと上端・下端をそろえて置く。
 // 右に kWidth が取れない時も置いて、窓の右端で切れて見えるようにする（MMD のほかのパネルと同じ）。
 void KimodoPanel::layout() {
@@ -191,8 +201,12 @@ void KimodoPanel::layout() {
     const int y = strip.top;
     const int bottom = static_cast<int>(client.bottom) - 2;
     const bool fits = strip.top >= 0 && strip.right > 0 && client.right - x >= kMinVisible && bottom - y >= kMinHeight;
-    if (!fits) {
-        if (IsWindowVisible(panel_)) ShowWindow(panel_, SW_HIDE);
+    if (!fits || camera_mode()) {
+        if (IsWindowVisible(panel_)) {
+            // 隠す欄にフォーカスが残ると、MMD のショートカットが止まったままになる（GetKeyState の差し替え）
+            if (IsChild(panel_, GetFocus())) SetFocus(mmd_);
+            ShowWindow(panel_, SW_HIDE);
+        }
         placed_ = {};
         return;
     }
