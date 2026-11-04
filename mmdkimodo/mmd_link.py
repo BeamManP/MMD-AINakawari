@@ -4,6 +4,7 @@ import os
 from mmd_mcp import bone_state
 from mmd_mcp import edit_actions
 from mmd_mcp import file_operations as files
+from mmd_mcp import playback
 from mmd_mcp import scene_controls as scene
 from mmd_mcp import timeline
 from mmd_mcp.bone_controls import get_selected_bone_transform
@@ -124,6 +125,10 @@ class MMDLink:
         MMD の読み込みは足し込み（ファイルにあるキーだけ上書きし、他のキーは残す）なので、先に全部のキーを消す。
         読み込みは今のフレームの分ずれるので frame（ふつう 0）へ移ってから読む。
         """
+        # 再生中は MMD の場面を編集できない（mmd-mcp が断る）。生成した動きを再生して確かめている途中で「元に戻す」や
+        # 「生成」を押すことがあるので、先に止める（11-04 マスター「元に戻すを押すとたまに Stop MMD playback が出る」）
+        if playback.get(self.hwnd)["playing"]:
+            playback.set_playback(False, hwnd=self.hwnd)
         if not self.state()["model_selected"]:
             raise RuntimeError("MMD でカメラ・照明・アクセサリが選ばれています。モデルを選んでからもう一度押してください")
         path = os.path.abspath(path)
