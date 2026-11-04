@@ -123,7 +123,8 @@ def generate(settings, log=print, link=None, previous=None):
     job = pipeline.prepare(pmx, original, "inbetween" if mb else settings.prompt, settings.steps, settings.seed,
                            settings.post_processing, frame_range=rng, cfg=(settings.cfg_text, settings.cfg_key),
                            length=settings.length, use_keys=settings.use_keys, use_center=settings.use_center,
-                           stop_at_last_key=settings.stop_at_last_key and not mb)
+                           stop_at_last_key=settings.stop_at_last_key and not mb,
+                           max_frames=None if mb else pipeline.MAX_FRAMES)   # 中割りはキーの間ごとに作るので上限なし
     span = f"{job.first}〜{job.first + job.num_frames - 1}F・{job.num_frames} フレーム"
     if not mb:
         span += f"・テキストの効き {settings.cfg_text}・キーの効き {settings.cfg_key}"
@@ -143,6 +144,16 @@ def generate(settings, log=print, link=None, previous=None):
         log(f"手足の IK だけのキー {len(job.limb_frames)} 個: {job.limb_frames}（手足の位置だけ合わせ、体は任せる）")
     for old, new, key in job.segment_moves:
         log(f"区間の始め {old}F の直後にキー（{key}F）があるので、区間の始めを {new}F にずらしました（キーで跳ばないように）")
+    if not mb:
+        short = [(s0, n) for s0, n, _ in job.segments if n < pipeline.SHORT_SEGMENT] if len(job.segments) > 1 else []
+        for s0, n in short:
+            log(f"注意: {s0}F からの区間は {n} フレームしかありません。Kimodo はつなぎに前の区間の 5 フレームを使うので、"
+                f"動きが出きらないことがあります（公式のデモは 1 区間 2 秒以上）")
+        if len(job.frames) > pipeline.MANY_KEYS:
+            log(f"注意: 体のキーが {len(job.frames)} 個あります。Kimodo の推奨は {pipeline.MANY_KEYS} 個未満です"
+                f"（多いとキーに縛られて動きが硬くなることがあります）")
+    if not mb and not any(t.strip() for _, _, t in job.segments):
+        log("プロンプトが空なので、キー（と腰・手足の目印）だけを手がかりに作ります（テキストの効きは使いません）")
     if len(job.segments) > 1 and not mb:
         for s, n, text in job.segments:
             log(f"  区間 {s}〜{s + n - 1}F: {text}")

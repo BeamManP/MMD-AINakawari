@@ -25,7 +25,7 @@ KIMODO_PORT = 9551        # 常駐の Kimodo（tools/kimodo_gen.py --serve）
 TEXT_SERVER_PORT = 9550   # Kimodo のテキスト読み取りサーバー
 KIMODO_HF_CACHE = r"F:\kimodo\hf_cache"
 SOMA_JSON = r"F:\kimodo\tools\somaskel30.json"
-MAX_FRAMES = 300  # Kimodo は 10 秒（30fps）までで学習している
+MAX_FRAMES = 300  # Kimodo の 1 区間は 10 秒（30fps）まで（公式の limitations.md）。区間を分ければ全体はこれより長くてよい
 STOP_HOLD = 10    # 「最後のキーで止まる」で、キーの後ろに腰を止めておくフレーム数
 PARALLEL_SECONDS = 10   # 書き戻しの計算の残りがこれ以上かかりそうなら、子プロセスに分けて並べる
 ROOT_BONE = "全ての親"
@@ -124,6 +124,8 @@ def to_root_local(rt, hips, root_rot, root_q, root_p):
 
 MIN_SEGMENT = 8   # Kimodo は区間のつなぎ目に前の区間の最後の 5 フレームを使うので、それより十分長く
 TRANSITION = 5    # Kimodo の num_transition_frames（区間のつなぎ目で、前の区間の最後の何フレームに合わせるか）
+SHORT_SEGMENT = 30   # これより短い区間はログで注意する（公式のデモは 1 区間 2 秒以上。limitations.md）
+MANY_KEYS = 20       # 体のキーがこれより多いとログで注意する（公式の推奨は 1 種類 20 個未満）
 
 
 def snap_segments(segments, key_frames):
@@ -187,8 +189,6 @@ def prompt_segments(prompt, first, num):
     out = []
     for i, (s, text) in enumerate(zip(starts, texts)):
         e = starts[i + 1] if i + 1 < len(starts) else last + 1
-        if not text:
-            raise ValueError(f"{s}F の区間のプロンプトが空です")
         if not first <= s <= last:
             raise ValueError(f"{s}F の区間が生成する範囲（{first}〜{last}F）の外です")
         if e - s < MIN_SEGMENT:
@@ -198,7 +198,7 @@ def prompt_segments(prompt, first, num):
 
 
 def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame_range=None, cfg=(2.0, 2.0),
-            length=None, use_keys=True, use_center=False, stop_at_last_key=False):
+            length=None, use_keys=True, use_center=False, stop_at_last_key=False, max_frames=MAX_FRAMES):
     """cfg: (テキストの効き, キーの効き)。Kimodo の既定は (2, 2)。テキストを上げるとプロンプトの動きが強く出る（回転は 8・1 で振り向くほど）。
 
     length: 作るフレーム数（最初のキーから数える）。None なら最後のキーまで。最後のキーより長くすると、その先は続きを作る。
@@ -238,10 +238,6 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
         num = candidates[-1] - first + 1
         if num < 2:
             raise ValueError("キーが 1 つしかありません。長さ（フレーム）を入れるか、キーをもう 1 つ打ってください")
-    if num > MAX_FRAMES:
-        raise ValueError(f"{num} フレームあります。Kimodo は {MAX_FRAMES} フレーム（10 秒）までです。範囲か長さを絞ってください")
-    if not prompt.strip():
-        raise ValueError("プロンプトが空です（Kimodo はプロンプト必須）")
     last = first + num - 1
     frames = [f for f in pose_frames if f <= last] if use_keys else []
     # 手足の目印: 体のポーズのキーが無いフレームで、手足の IK にキーがあるもの（完全新規でも使う。0F の初期のキーは体にもあるので入らない）
@@ -305,7 +301,9 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
     if stop_at_last_key and frames and not use_center:
         stop_key = frames[-1]
         later = [f for f in root_frames + list(limb_keys) if f > stop_key]
-        hold = list(range(stop_key + 1, min(stop_key + STOP_HOLD, first + MAX_FRAMES - 1) + 1))
+        # 余分に作らせても、最後の区間が 1 区間の上限を超えないように（区間の始まりは後でキーの次へずれることがあるが、遅れるだけなので安全側）
+        cap = prompt_segments(prompt, first, num)[-1][0] + max_frames - 1 if max_frames else stop_key + STOP_HOLD
+        hold = list(range(stop_key + 1, min(stop_key + STOP_HOLD, cap) + 1))
         if not later and hold:
             hips, loc = poses[stop_key]
             h = canon_hips(hips)
@@ -319,6 +317,11 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
             job.stop_frames = hold
             pad = max(0, hold[-1] - last)
     job.segments = prompt_segments(prompt, first, num)
+    long = [(s, n) for s, n, _ in job.segments if n > max_frames] if max_frames else []
+    if long:
+        s, n = long[0]
+        raise ValueError(f"{s}F からの区間が {n} フレームあります。Kimodo の 1 区間は {max_frames} フレーム（10 秒）までです。"
+                         f"区間を分けるか、範囲か長さを絞ってください")
     if len(job.segments) > 1 and not use_center:   # センターの動きを使う時は毎フレームが目印なので、ずらせない
         constrained = sorted({f for f in frames + root_frames + list(limb_keys) + job.stop_frames})
         job.segments, job.segment_moves = snap_segments(job.segments, constrained)
