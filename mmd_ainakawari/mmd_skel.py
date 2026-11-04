@@ -232,27 +232,6 @@ def split_interp(interp, us):
     return out
 
 
-def split_errors(interp, us, pieces, samples=16):
-    """split_interp で分けた部分ごとの、元の曲線とのずれの最大（重み 0〜1 の差。部分ごとの一覧）。
-
-    分けた曲線は制御点が 0〜1 の箱からはみ出すことがあり（交差した急な曲線。127,0,0,127 で範囲の外が 65° ずれた。
-    11-05 Codex のレビュー）、MMD の 0〜127 の整数にも丸まるので、使う前に確かめる。
-    """
-    bounds = [0.0] + list(us) + [1.0]
-    errors = []
-    for i, piece in enumerate(pieces):
-        a, b = bounds[i], bounds[i + 1]
-        worst = 0.0
-        for k in range(1, samples):
-            u = a + (b - a) * k / samples
-            for ch in range(4):
-                wa, wb = bezier_weight(interp, ch, a), bezier_weight(interp, ch, b)
-                got = wa + (wb - wa) * bezier_weight(piece, ch, (u - a) / (b - a)) if b > a else wa
-                worst = max(worst, abs(got - bezier_weight(interp, ch, u)))
-        errors.append(worst)
-    return errors
-
-
 def sample(motion_tracks, name, frame):
     """VMD のトラックの、あるフレームでの (移動, 回転)。キーの間は MMD と同じく補間曲線どおりに補間する。"""
     keys = motion_tracks.get(name)

@@ -538,7 +538,7 @@ class App:
             block = self.diagnosis.note
         elif self.range_mode.get() == "keys" and keys is None and not self.busy:   # 読めない時も止める（11-05 Codex のレビュー）
             block = "選んだキーを読めません（MMD の操作の途中？）"
-        elif self.range_mode.get() == "keys" and len(keys) < 2 and not self.busy:
+        elif self.range_mode.get() == "keys" and keys is not None and len(keys) < 2 and not self.busy:
             block = "範囲の最初と最後のキーを選んでください"   # パネルの 1 行に収まる長さ
         elif fast and not up and not self.busy and TABS[self.tabs.index("current")][0] == "kimodo":
             block = "テキスト読み取りサーバーを起動してください（「サーバーを起動」か、右上で低負荷モードに）"
@@ -577,19 +577,21 @@ class App:
             # プロンプト: パネルで変えた → 窓へ（窓の区間がおかしい時も、パネルで直せば写るように）。窓で変えた → パネルへ。
             # パネルへ書いた時は、読み返した値でなく書いた値を覚える（書いた直後に打った分を、次に「パネルで変えた」と分かるように。
             # 読み返した値を覚えると、その分は窓に写らないままだった。11-05 Codex のレビュー）
+            # 書いた値は、パネルから読んだ時と同じ形にそろえて覚える（空の区間「45: 」はパネルを通ると「45:」になるので、
+            # 窓の形のまま覚えると、次に「パネルで変えた」と思って窓の直しを巻き戻していた。11-05 Codex のレビュー 2 回目）
             got = panel.lines_of(p.text(panel.PROMPT))
             mine = window_prompt()
             if ("panel", "prompt") not in seen:   # 最初（パネルを作り直した時も）は窓の設定をパネルへ
                 if mine is not None:
                     p.set_text(panel.PROMPT, panel.one_line(mine))
-                    got = mine
+                    got = panel.lines_of(panel.one_line(mine))
             elif got != seen[("panel", "prompt")]:
                 if got != mine:
                     self.prompt_rows.load(got)
                     mine = window_prompt()
             elif mine is not None and mine != seen.get(("window", "prompt")):
                 p.set_text(panel.PROMPT, panel.one_line(mine))
-                got = mine
+                got = panel.lines_of(panel.one_line(mine))
             seen[("panel", "prompt")], seen[("window", "prompt")] = got, mine
             # Kimodo か MotionBricks か（窓のタブ）
             got, mine = p.selection(panel.ENGINE), self.tabs.index("current")

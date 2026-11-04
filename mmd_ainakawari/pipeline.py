@@ -15,7 +15,7 @@ import numpy as np
 
 from . import quat as Q
 from . import resident, vmd
-from .mmd_skel import MMDSkeleton, sample, split_errors, split_interp
+from .mmd_skel import MMDSkeleton, sample, split_interp
 from .retarget import TOE_GROUND, Retargeter, conv_p, conv_q
 
 KIMODO_PYTHON = r"F:\kimodo\.venv\Scripts\python.exe"
@@ -32,7 +32,8 @@ SOMA_JSON = r"F:\kimodo\tools\somaskel30.json"
 MAX_FRAMES = 300  # Kimodo の 1 区間は 10 秒（30fps）まで（公式の limitations.md）。区間を分ければ全体はこれより長くてよい
 STOP_HOLD = 10    # 「最後のキーで止まる」で、キーの後ろに腰を止めておくフレーム数
 RANGE_CONTEXT = 3  # 範囲を作り直す時に、範囲の端の外側から使う姿勢のフレーム数（外の動きの勢いをつなぐ。MotionBricks の文脈は 4 姿勢）
-SPLIT_TOLERANCE = 0.05   # 曲線を分けた時のずれ（重み 0〜1）の上限。超える部分は元の値のキーで埋める（ふつうの曲線は 95% が 0.023 以下。11-04）
+SPLIT_MOVE_TOLERANCE = 0.05   # 曲線を分けた後、範囲の外で元と違ってよい移動（MMD の単位）。超える部分は元の値のキーで埋める
+SPLIT_ANGLE_TOLERANCE = 0.5   # 同じく回転（度）
 PARALLEL_SECONDS = 10   # 書き戻しの計算の残りがこれ以上かかりそうなら、子プロセスに分けて並べる
 ROOT_BONE = "全ての親"
 IGNORED_ROOTS = ("操作中心",)
@@ -429,6 +430,16 @@ def run_kimodo(job, work_dir, on_line=None, mode="low"):
         return result
 
 
+def _key_difference(a, b):
+    """2 つの (移動, 回転) が、見て分かるほど違うか（移動 SPLIT_MOVE_TOLERANCE・回転 SPLIT_ANGLE_TOLERANCE 度を超える）。"""
+    (ta, qa), (tb, qb) = a, b
+    if np.abs(ta - tb).max() > SPLIT_MOVE_TOLERANCE:
+        return True
+    qa, qb = qa / np.linalg.norm(qa), qb / np.linalg.norm(qb)
+    half = min(np.linalg.norm(qa - qb), np.linalg.norm(qa + qb)) / 2   # 四元数の差から角度（float32 でも 1 の近くで安定）
+    return np.degrees(4 * np.arcsin(min(1.0, half))) > SPLIT_ANGLE_TOLERANCE
+
+
 def merge(original, generated, job):
     """元のモーション（丸ごと）に、生成した間のフレームを差し込む。
 
@@ -473,16 +484,19 @@ def merge(original, generated, job):
                 if key.name == name and key.frame in by_frame:
                     key.interp = by_frame[key.frame]
             new_interp[id(n)] = pieces[-1]
-            # 分けた曲線で元の形を表せない部分（ずれ SPLIT_TOLERANCE 超え）は、MMD の補間のまま残るフレームに元の値のキーを打つ
-            # （その区間だけキーが増えるが、動きは元のまま）
+            # 分けた曲線で元の形を表せない部分は、MMD の補間のまま残るフレームに元の値のキーを打つ（その区間だけキーが増えるが、動きは元のまま）。
+            # 表せるかは、残るフレームごとに元の値と分けた後の値を比べて決める（曲線の上の決まった 15 点で測っていた時は、
+            # 長い区間の急な所を見逃して範囲の外が 16° ずれた。11-05 Codex のレビュー 2 回目）
             bounds = [p.frame] + inside + [n.frame]
-            for i, err in enumerate(split_errors(n.interp, us, pieces)):
-                if err <= SPLIT_TOLERANCE:
-                    continue
-                for f in range(bounds[i] + 1, bounds[i + 1]):
-                    if f not in generated_at[name] and (vn, f) not in have:
-                        t, q = sample(orig_tracks, vn, f)
-                        filled.append(vmd.BoneKey(name, f, t, q))
+            for i, piece in enumerate(pieces):
+                a, b = bounds[i], bounds[i + 1]
+                left = p if i == 0 else vmd.BoneKey(vn, a, *sample(orig_tracks, vn, a))
+                right = replace(n if i == len(pieces) - 1 else vmd.BoneKey(vn, b, *sample(orig_tracks, vn, b)), interp=piece)
+                trial = {vn: [left, right]}
+                kept = [f for f in range(a + 1, b) if f not in generated_at[name] and (vn, f) not in have]
+                if any(_key_difference(sample(orig_tracks, vn, f), sample(trial, vn, f)) for f in kept):
+                    for f in kept:
+                        filled.append(vmd.BoneKey(name, f, *sample(orig_tracks, vn, f)))
     keep = [replace(k, interp=new_interp[id(k)]) if id(k) in new_interp else k for k in keep]
     return vmd.Motion(model_name=original.model_name, bones=keep + filled + generated.bones, tail=original.tail)
 
