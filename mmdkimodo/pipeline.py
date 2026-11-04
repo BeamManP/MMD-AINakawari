@@ -250,8 +250,10 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
         before = [f for f in range(a - RANGE_CONTEXT, a) if f >= 0]
         after = list(range(b + 1, b + 1 + RANGE_CONTEXT)) if continues else []
         pose_frames = [f for f in pose_frames if a <= f <= b]
-        limb_frames = [f for f in limb_frames if a < f < b]
-        root_all = [f for f in root_all if a < f < b]
+        # 全ての親・手足の IK だけのキーは終わりのフレームも拾う（終わりの姿勢をキーにしない時、75F で原点に戻る
+        # 全ての親のキーが抜けて、戻らない動きになっていた。11-04 マスター）。姿勢のキーにした端は、その姿勢で決まるので外す
+        limb_frames = [f for f in limb_frames if a < f <= b and f not in anchors]
+        root_all = [f for f in root_all if a < f <= b and f not in anchors]
         if not context_keys:   # 文脈は姿勢だけ取る（MotionBricks の手前の文脈・通り抜ける先）
             first, last = a, b
         else:   # 文脈もキーとして渡し、勢いをつなぐ。書き戻すのは範囲の中だけ（mmd_frames）
