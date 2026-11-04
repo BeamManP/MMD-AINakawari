@@ -6,6 +6,7 @@
 MMD が VMD の読み込みなどで忙しい間に窓まで固まらないよう、送る時は期限を付ける（SendMessageTimeout）。
 """
 import ctypes
+import re
 from ctypes import wintypes
 
 import win32gui
@@ -25,6 +26,16 @@ _send = _user32.SendMessageTimeoutW
 _send.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM, wintypes.UINT, wintypes.UINT,
                   ctypes.POINTER(ctypes.c_size_t)]
 _send.restype = wintypes.LPARAM
+
+
+def one_line(prompt):
+    """窓のプロンプト（区間ごとの行）→ パネルの 1 行。区間は「 / 」でつなぐ（例: run / 45: stop）。"""
+    return " / ".join(line.strip() for line in prompt.splitlines())
+
+
+def lines_of(text):
+    """パネルの 1 行 → 窓のプロンプトの形（区間ごとの行）。「/」の前後の空白はあってもなくてもよい。"""
+    return "\n".join(part.strip() for part in re.split(r"\s*/\s*", text))
 
 
 class Busy(Exception):

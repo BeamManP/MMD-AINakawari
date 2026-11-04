@@ -547,7 +547,7 @@ class App:
                 self._seen[("panel", key)], self._seen[("window", key)] = panel_value, window_value
 
             read_panel = {
-                "prompt": lambda: p.text(panel.PROMPT).replace("\r\n", "\n"),
+                "prompt": lambda: panel.lines_of(p.text(panel.PROMPT)),
                 "engine": lambda: p.selection(panel.ENGINE),
                 "range": lambda: p.checked(panel.RANGE),
             }
@@ -562,7 +562,7 @@ class App:
                 window_prompt = None
             if window_prompt is not None:
                 two_way("prompt", read_panel["prompt"](), window_prompt,
-                        lambda v: self.prompt_rows.load(v), lambda v: p.set_text(panel.PROMPT, v.replace("\n", "\r\n")))
+                        lambda v: self.prompt_rows.load(v), lambda v: p.set_text(panel.PROMPT, panel.one_line(v)))
             two_way("engine", read_panel["engine"](), read_window["engine"](),
                     lambda v: self.tabs.select(1 if v == 1 else 0), lambda v: p.select(panel.ENGINE, v))
             two_way("range", read_panel["range"](), read_window["range"](),
