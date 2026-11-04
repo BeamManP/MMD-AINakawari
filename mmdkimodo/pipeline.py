@@ -43,6 +43,7 @@ class Job:
     parent_tracks: dict = field(default_factory=dict) # 書かない親側の骨（足IK親など）のキー（書き戻しで計算に入れる）
     limb_frames: list = field(default_factory=list)   # 手足の IK だけにキーのあるフレーム（手足の目印）
     segments: list = field(default_factory=list)      # 区間ごとのプロンプト [(開始フレーム, 長さ, プロンプト)]
+    segment_moves: list = field(default_factory=list) # 区間の始めをキーの次へずらした [(元の開始, ずらした開始, キー)]（MMD のフレーム）
     hip_targets: dict = field(default_factory=dict)   # センターの動きを使う時の、フレームごとの腰の目印（世界・Kimodo 座標・m）
     ref_pos: np.ndarray = None    # 最初のキーの腰の XZ（Kimodo 座標・m）
     ref_yaw: float = 0.0          # 最初のキーの腰の向き（ラジアン）。Kimodo には +Z 向き・原点で渡す
@@ -122,6 +123,39 @@ def to_root_local(rt, hips, root_rot, root_q, root_p):
 
 
 MIN_SEGMENT = 8   # Kimodo は区間のつなぎ目に前の区間の最後の 5 フレームを使うので、それより十分長く
+TRANSITION = 5    # Kimodo の num_transition_frames（区間のつなぎ目で、前の区間の最後の何フレームに合わせるか）
+
+
+def snap_segments(segments, key_frames):
+    """区間の始めの直後（0〜TRANSITION フレーム後ろ）にキーがあれば、区間の始めをそのキーの次のフレームへずらす。
+
+    Kimodo の multi_prompt は区間を前から 1 つずつ作り、各区間には自分の範囲のキーしか渡さない（kimodo_model.py の crop_move）。
+    次の区間は「前の区間の最後の 5 フレームに合わせる」制約から始まるので、区間の始めにキーがあると、
+    前の区間がキーを知らずに終わった場所から、キーの場所まで 1 フレームで飛ぶ
+    （11-04 試験台: 区間の始め＝キーの 60F で、腰が 1 フレームで 0.9〜2.9m 動いた）。
+    キーを前の区間の最後のフレームにすれば、前の区間がキーへ向かって作り、次の区間はキーを含む 5 フレームから始まる。
+    segments: [(開始, 長さ, プロンプト)]、key_frames: 制約のあるフレーム（同じ座標）。戻り値: (ずらした区間, [(元, 新, キー)])
+    """
+    starts = [s for s, _, _ in segments]
+    end = segments[-1][0] + segments[-1][1]
+    moves = []
+    for i in range(1, len(starts)):
+        near = [k for k in key_frames if starts[i] <= k <= starts[i] + TRANSITION]
+        if near:
+            new = max(near) + 1
+            if any(new <= k <= new + TRANSITION for k in key_frames):
+                raise ValueError(f"{starts[i]}F の区間の始めのすぐ後ろにキーが続いていて、区間の始めを置けません。"
+                                 f"毎フレームにキーがある時は、先に「元に戻す」をしてください")
+            moves.append((starts[i], new, max(near)))
+            starts[i] = new
+    out = []
+    for i, (st, text) in enumerate(zip(starts, [t for _, _, t in segments])):
+        e = starts[i + 1] if i + 1 < len(starts) else end
+        if e - st < MIN_SEGMENT:
+            raise ValueError(f"区間の始めをキーの次へずらしたら、{st}F の区間が {e - st} フレームになりました"
+                             f"（{MIN_SEGMENT} フレーム以上要ります）。区間の始めをキーから離してください")
+        out.append((st, e - st, text))
+    return out, moves
 
 
 def prompt_segments(prompt, first, num):
@@ -284,6 +318,9 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
             job.stop_frames = hold
             pad = max(0, hold[-1] - last)
     job.segments = prompt_segments(prompt, first, num)
+    if len(job.segments) > 1 and not use_center:   # センターの動きを使う時は毎フレームが目印なので、ずらせない
+        constrained = sorted({f for f in frames + root_frames + list(limb_keys) + job.stop_frames})
+        job.segments, job.segment_moves = snap_segments(job.segments, constrained)
     segments = [{"prompt": t, "frames": n} for _, n, t in job.segments]
     segments[-1]["frames"] += pad
     job.request = {"prompt": job.segments[0][2], "num_frames": num + pad, "steps": int(steps), "seed": int(seed),

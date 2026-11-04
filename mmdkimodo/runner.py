@@ -141,6 +141,8 @@ def generate(settings, log=print, link=None, previous=None):
             + (f"（後ろ {outside} フレームは止まるために余分に作るだけで、書き戻さない）" if outside > 0 else ""))
     if job.limb_frames:
         log(f"手足の IK だけのキー {len(job.limb_frames)} 個: {job.limb_frames}（手足の位置だけ合わせ、体は任せる）")
+    for old, new, key in job.segment_moves:
+        log(f"区間の始め {old}F の直後にキー（{key}F）があるので、区間の始めを {new}F にずらしました（キーで跳ばないように）")
     if len(job.segments) > 1 and not mb:
         for s, n, text in job.segments:
             log(f"  区間 {s}〜{s + n - 1}F: {text}")
