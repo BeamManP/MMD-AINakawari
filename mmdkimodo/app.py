@@ -40,19 +40,21 @@ _set_window_long.restype = ctypes.c_void_p
 SETTINGS_PATH = os.path.join(runner.WORK_DIR, "settings.json")
 SERVER_CMD = r"F:\kimodo\start_textencoder.cmd"
 DEFAULTS = {
-    "mode": "fill", "range_mode": "all", "length": "",
+    "tab": "kimodo", "mode": "fill", "range_mode": "all", "length": "",
     "prompt": "A person moves naturally between poses.",
     "steps": 100, "seed": -1, "post_processing": True, "cfg_text": 2.0, "cfg_key": 2.0, "use_center": False,
     "stop_at_last_key": True, "smooth_stop": True, "key_stop": False, "wrist_lerp": False,
 }
 OLD_KEYS = ("use_keys", "range_start", "range_end", "pmx")   # 前の窓の保存にあった項目（読む時に変換して捨てる）
-MODES = [("fill", "キーの間を埋める"), ("extend", "続きを足す"), ("fresh", "プロンプトだけで作る"), ("nakawari", "中割り")]
+TABS = [("kimodo", "プロンプトで作る"), ("nakawari", "中割り")]
+MODES = [("fill", "キーの間を埋める"), ("extend", "続きを足す"), ("fresh", "プロンプトだけで作る")]
 MODE_NOTES = {
     "fill": "打ったキーのポーズを守って、キーとキーの間を作ります（長さは最後のキーまで）",
     "extend": "打ったキーのポーズを守って、最後のキーの後ろに続きを作ります",
     "fresh": "キーのポーズは使わず、最初のキーの場所と向きからプロンプトだけで作ります",
-    "nakawari": "MotionBricks でキーとキーの間をつなぎます（プロンプトは使いません。キーの間が 17〜57F の所だけ作り、ほかは MMD の補間のまま）",
 }
+NAKAWARI_NOTE = ("打ったキーとキーの間を、MotionBricks でつなぎます。プロンプトは使いません。\n"
+                 "キーの間が 17〜57 フレームの所だけ作り、それより短い・長い所は MMD の補間のまま残します。")
 PARTS = ["体", "左腕", "右腕", "左脚", "右脚"]
 NO_RANGE = 999999   # MMD の範囲選択の終わりの初期値（範囲を入れていない）
 
@@ -136,6 +138,8 @@ class App:
         if "mode" not in saved and saved.get("use_keys") is False:   # 前の窓の「打ったキーのポーズを守る」オフ
             saved["mode"] = "fresh" if saved.get("length") else "fill"
         self.cfg.update({k: v for k, v in saved.items() if k not in OLD_KEYS})
+        if self.cfg["mode"] == "nakawari":   # 中割りがモードの 1 つだった時の保存（11-04 の昼）
+            self.cfg.update(tab="nakawari", mode="fill")
         self.q = queue.Queue()
         self.busy = False
         self._model_ticks = 1   # MMD の読み取り（モデル・今のフレーム・範囲選択）は 2 回に 1 回（1 秒ごと）。最初はすぐ読む
@@ -172,16 +176,59 @@ class App:
         head.grid(row=0, column=0, sticky="we", **pad)
         self.model_text = tk.StringVar(value="選択中のモデル：（読み取り中）")
         ttk.Label(head, textvariable=self.model_text).pack(side="left")
-        self.server_dot = ttk.Label(head, text="")
-        self.server_dot.pack(side="right")
-        ttk.Separator(f).grid(row=1, column=0, sticky="we", padx=10)
 
-        # やりたいこと・範囲・長さ。行ごとに別の並びにする（表の列を共有すると、説明の長さが変わった時にボタンが横にずれる）
-        top = ttk.Frame(f)
-        top.grid(row=2, column=0, sticky="we", **pad)
+        # やり方ごとのタブ。どちらにも効く範囲・書き戻す部分・生成はタブの外
+        self.tabs = ttk.Notebook(f)
+        self.tabs.grid(row=1, column=0, sticky="we", padx=10, pady=(2, 4))
+        # ttk のタブは一番背の高いタブに高さを合わせるので、開いていないタブの中身は外しておく（中割りの下が空かないように）
+        self.tab_bodies = []
+        for _, text in TABS:
+            page = ttk.Frame(self.tabs, padding=(8, 6))
+            self.tabs.add(page, text=text)
+            self.tab_bodies.append(ttk.Frame(page))
+        self._build_kimodo(self.tab_bodies[0])
+        self._build_nakawari(self.tab_bodies[1])
+        self.tabs.bind("<<NotebookTabChanged>>", lambda _e: self._tab_changed())
+        self.tabs.select(1 if self.cfg["tab"] == "nakawari" else 0)
+        self._tab_changed()
 
+        # 範囲・書き戻す部分（仕組みはまだ。置き場所だけ）・生成
+        rf = ttk.Frame(f)
+        rf.grid(row=2, column=0, sticky="we", **pad)
+        ttk.Label(rf, text="範囲", width=10).pack(side="left")
+        self.range_mode = tk.StringVar(value=self.cfg["range_mode"])
+        self.range_text = tk.StringVar(value="MMD の範囲選択")
+        ttk.Radiobutton(rf, text="全部", value="all", variable=self.range_mode).pack(side="left", padx=(0, 12))
+        ttk.Radiobutton(rf, textvariable=self.range_text, value="mmd", variable=self.range_mode).pack(side="left")
+        wf = ttk.Frame(f)
+        wf.grid(row=3, column=0, sticky="we", **pad)
+        ttk.Label(wf, text="書き戻す部分").pack(side="left")
+        for part in PARTS:
+            check = ttk.Checkbutton(wf, text=part, state="disabled")
+            check.state(["selected", "!alternate", "disabled"])
+            check.pack(side="left", padx=(8, 0))
+        ttk.Label(wf, text="（準備中）", foreground="#888").pack(side="left", padx=(8, 0))
+        bf = ttk.Frame(f)
+        bf.grid(row=4, column=0, sticky="we", **pad)
+        self.gen_btn = ttk.Button(bf, text="生成", command=self._generate)
+        self.gen_btn.pack(side="left", fill="x", expand=True, ipady=8)
+        self.undo_btn = ttk.Button(bf, text="元に戻す", command=self._undo, state="disabled")
+        self.undo_btn.pack(side="left", padx=(6, 0), ipady=8)
+        self.status = tk.StringVar(value="MMD でキーを打ってから「生成」を押してください")
+        ttk.Label(f, textvariable=self.status, foreground="#335", wraplength=520).grid(row=5, column=0, sticky="w", **pad)
+
+        logs = Fold(f, "ログ")
+        logs.grid(row=6, column=0, sticky="nsew", padx=10, pady=(4, 8))
+        self.log = tk.Text(logs.body, height=12, wrap="word", state="disabled", background="#f6f6f6")
+        self.log.pack(fill="both", expand=True)
+        f.rowconfigure(6, weight=1)
+        self._mode_changed()
+
+    def _build_kimodo(self, t):
+        """「プロンプトで作る」タブ（Kimodo）。"""
+        # やりたいこと・長さ。行ごとに別の並びにする（表の列を共有すると、説明の長さが変わった時にボタンが横にずれる）
         def line(title, pady=(0, 0)):
-            row = ttk.Frame(top)
+            row = ttk.Frame(t)
             row.pack(fill="x", pady=pady)
             ttk.Label(row, text=title, width=10).pack(side="left")
             return row
@@ -193,13 +240,8 @@ class App:
         self.mode_note = tk.StringVar()
         # 説明が 1 行でも 2 行でも高さを変えない（変わると下の段が縦にずれる）
         tk.Label(line(""), textvariable=self.mode_note, foreground="#556", background=ttk.Style().lookup("TFrame", "background"),
-                 wraplength=440, height=2, anchor="nw", justify="left").pack(side="left", fill="x")
-        range_row = line("範囲", pady=(6, 0))
-        self.range_mode = tk.StringVar(value=self.cfg["range_mode"])
-        self.range_text = tk.StringVar(value="MMD の範囲選択")
-        ttk.Radiobutton(range_row, text="全部", value="all", variable=self.range_mode).pack(side="left", padx=(0, 12))
-        ttk.Radiobutton(range_row, textvariable=self.range_text, value="mmd", variable=self.range_mode).pack(side="left")
-        length_row = line("長さ", pady=(6, 0))
+                 wraplength=420, height=2, anchor="nw", justify="left").pack(side="left", fill="x")
+        length_row = line("長さ", pady=(4, 0))
         self.length = tk.StringVar(value=str(self.cfg["length"]))
         self.length_entry = ttk.Entry(length_row, textvariable=self.length, width=6)
         self.length_entry.pack(side="left")
@@ -215,47 +257,18 @@ class App:
         self.smooth = tk.BooleanVar(value=self.cfg["smooth_stop"] and smooth_stop.available())
         self.smooth_check = ttk.Checkbutton(stop_row, text="なめらかに（MotionBricks）", variable=self.smooth)
         self.smooth_check.pack(side="left", padx=(12, 0))
-        self.stop_row = stop_row
-        # 中割りの時は、止める欄の代わりに中割りの選び方を出す
-        self.nak_row = line("", pady=(4, 0))
-        self.key_stop = tk.BooleanVar(value=self.cfg["key_stop"])
-        ttk.Checkbutton(self.nak_row, text="キーごとに止まる", variable=self.key_stop).pack(side="left")
-        self.wrist_lerp = tk.BooleanVar(value=self.cfg["wrist_lerp"])
-        ttk.Checkbutton(self.nak_row, text="手首は普通の補間（MotionBricks の手首を使わない）", variable=self.wrist_lerp).pack(side="left", padx=(12, 0))
-        ttk.Separator(f).grid(row=3, column=0, sticky="we", padx=10)
+        ttk.Separator(t).pack(fill="x", pady=(8, 6))
 
         # プロンプト（区間ごとの行）
-        pf = ttk.Frame(f)
-        pf.grid(row=4, column=0, sticky="we", **pad)
-        ttk.Label(pf, text="プロンプト（英語・行ごとに、そのフレームから次の行までの動き）").pack(anchor="w")
-        self.prompt_rows = PromptRows(pf)
+        ttk.Label(t, text="プロンプト（英語・行ごとに、そのフレームから次の行までの動き）").pack(anchor="w")
+        self.prompt_rows = PromptRows(t)
         self.prompt_rows.pack(fill="x", pady=(4, 0))
         self.prompt_rows.load(self.cfg["prompt"])
         self.split_text = tk.StringVar(value="＋ 今のフレームで区切る")
-        ttk.Button(pf, textvariable=self.split_text, command=self._split_here).pack(anchor="w", pady=(4, 0))
-        ttk.Separator(f).grid(row=5, column=0, sticky="we", padx=10)
+        ttk.Button(t, textvariable=self.split_text, command=self._split_here).pack(anchor="w", pady=(4, 0))
 
-        # 書き戻す部分（仕組みはまだ。置き場所だけ）・生成
-        wf = ttk.Frame(f)
-        wf.grid(row=6, column=0, sticky="we", **pad)
-        ttk.Label(wf, text="書き戻す部分").pack(side="left")
-        for part in PARTS:
-            check = ttk.Checkbutton(wf, text=part, state="disabled")
-            check.state(["selected", "!alternate", "disabled"])
-            check.pack(side="left", padx=(8, 0))
-        ttk.Label(wf, text="（準備中）", foreground="#888").pack(side="left", padx=(8, 0))
-        bf = ttk.Frame(f)
-        bf.grid(row=7, column=0, sticky="we", **pad)
-        self.gen_btn = ttk.Button(bf, text="生成", command=self._generate)
-        self.gen_btn.pack(side="left", fill="x", expand=True, ipady=8)
-        self.undo_btn = ttk.Button(bf, text="元に戻す", command=self._undo, state="disabled")
-        self.undo_btn.pack(side="left", padx=(6, 0), ipady=8)
-        self.status = tk.StringVar(value="MMD でキーを打ってから「生成」を押してください")
-        ttk.Label(f, textvariable=self.status, foreground="#335", wraplength=520).grid(row=8, column=0, sticky="w", **pad)
-
-        # 畳む欄: 詳しい設定・ログ
-        details = Fold(f, "詳しい設定")
-        details.grid(row=9, column=0, sticky="we", padx=10, pady=(4, 0))
+        details = Fold(t, "詳しい設定")
+        details.pack(fill="x", pady=(8, 0))
         d, g = details.body, {"padx": 4, "pady": 2}
         ttk.Label(d, text="手数（少ないほど速い）").grid(row=0, column=0, sticky="w", **g)
         self.steps = tk.IntVar(value=self.cfg["steps"])
@@ -275,32 +288,48 @@ class App:
         # センターの上下などを毎フレームの腰の目印にする（リズムを残して動きを作る。プロンプトだけで作る時と組み合わせる想定）
         self.use_center = tk.BooleanVar(value=self.cfg["use_center"])
         ttk.Checkbutton(d, text="センターの動きを使う", variable=self.use_center).grid(row=2, column=2, columnspan=2, sticky="w", **g)
-        sf = ttk.Frame(d)
-        sf.grid(row=3, column=0, columnspan=4, sticky="we", **g)
-        self.server_label = ttk.Label(sf, text="")
-        self.server_label.pack(side="left")
+        # テキスト読み取りサーバーは Kimodo だけが使うので、このタブの中に置く
+        sf = ttk.Frame(t)
+        sf.pack(fill="x", pady=(8, 0))
+        self.server_dot = ttk.Label(sf, text="")
+        self.server_dot.pack(side="left")
+        self.server_label = ttk.Label(sf, text="", foreground="#556")
+        self.server_label.pack(side="left", padx=(6, 0))
         self.server_btn = ttk.Button(sf, text="サーバーを起動", command=self._start_server)
         self.server_btn.pack(side="right")
-        logs = Fold(f, "ログ")
-        logs.grid(row=10, column=0, sticky="nsew", padx=10, pady=(4, 8))
-        self.log = tk.Text(logs.body, height=12, wrap="word", state="disabled", background="#f6f6f6")
-        self.log.pack(fill="both", expand=True)
-        f.rowconfigure(10, weight=1)
-        self._mode_changed()
+
+    def _build_nakawari(self, t):
+        """「中割り」タブ（MotionBricks）。"""
+        tk.Label(t, text=NAKAWARI_NOTE, foreground="#556", background=ttk.Style().lookup("TFrame", "background"),
+                 wraplength=500, anchor="w", justify="left").pack(fill="x")
+        self.key_stop = tk.BooleanVar(value=self.cfg["key_stop"])
+        self.wrist_lerp = tk.BooleanVar(value=self.cfg["wrist_lerp"])
+        state = "normal" if smooth_stop.available() else "disabled"
+        ttk.Checkbutton(t, text="キーごとに止まる（外すと、次のキーへ向かう勢いのまま通る）", variable=self.key_stop,
+                        state=state).pack(anchor="w", pady=(10, 0))
+        ttk.Checkbutton(t, text="手首は普通の補間（MotionBricks は手首を回しすぎることがある）", variable=self.wrist_lerp,
+                        state=state).pack(anchor="w", pady=(4, 0))
+        if not smooth_stop.available():
+            ttk.Label(t, text=f"MotionBricks が入っていません（{smooth_stop.MB_PYTHON}）", foreground="#a33").pack(anchor="w", pady=(10, 0))
+
+    def _tab_changed(self):
+        current = self.tabs.index("current")
+        for i, body in enumerate(self.tab_bodies):
+            if i == current:
+                body.pack(fill="both", expand=True)
+            else:
+                body.pack_forget()
 
     def _mode_changed(self):
         mode = self.mode.get()
         self.mode_note.set(MODE_NOTES[mode])
-        if mode in ("fill", "nakawari"):
+        if mode == "fill":
             self.length_entry.configure(state="disabled")
             self.length_note.set("F（最後のキーまで）")
         else:
             self.length_entry.configure(state="normal")
             self.length_note.set("F（最初のキーから。必須）" if mode == "fresh" else "F（最初のキーから。最後のキーより長く）")
         self.stop_check.configure(state="disabled" if mode == "fresh" else "normal")   # プロンプトだけで作る時は止める位置のキーが無い
-        self.stop_row.pack_forget()
-        self.nak_row.pack_forget()
-        (self.nak_row if mode == "nakawari" else self.stop_row).pack(fill="x", pady=(4, 0))
         self._stop_changed()
 
     def _stop_changed(self):
@@ -368,8 +397,8 @@ class App:
                 if not ok:
                     messagebox.showerror("MMDKimodo", msg, parent=self.root)
         up = server_up()
-        self.server_dot.configure(text="● サーバー" if up else "○ サーバー停止中", foreground="#2a7" if up else "#a33")
-        self.server_label.configure(text="● テキスト読み取りサーバー起動中" if up else "○ サーバー停止中（無いと毎回 Llama を読み込むので遅い）")
+        self.server_dot.configure(text="●" if up else "○", foreground="#2a7" if up else "#a33")
+        self.server_label.configure(text="テキスト読み取りサーバー起動中" if up else "テキスト読み取りサーバー停止中（無いと毎回 Llama を読み込むので遅い）")
         self.server_btn.configure(state="disabled" if up else "normal")
         self.gen_btn.configure(state="disabled" if self.busy else "normal")
         self.undo_btn.configure(state="normal" if (self.last_backup and not self.busy) else "disabled")
@@ -381,11 +410,13 @@ class App:
         def opt_int(s):
             s = s.strip()
             return int(s) if s else None
+        tab = TABS[self.tabs.index("current")][0]
         mode = self.mode.get()
-        length = opt_int(self.length.get()) if mode not in ("fill", "nakawari") else None
-        if mode == "nakawari" and not smooth_stop.available():
+        nakawari = tab == "nakawari"
+        length = opt_int(self.length.get()) if mode != "fill" and not nakawari else None
+        if nakawari and not smooth_stop.available():
             raise ValueError(f"中割りには MotionBricks が要ります（{smooth_stop.MB_PYTHON} がありません）")
-        if mode in ("extend", "fresh") and length is None:
+        if not nakawari and mode != "fill" and length is None:
             raise ValueError("「続きを足す」「プロンプトだけで作る」では長さを入れてください")
         selection = None
         if self.range_mode.get() == "mmd":
@@ -396,15 +427,17 @@ class App:
                             steps=int(self.steps.get()), seed=int(self.seed.get()), post_processing=bool(self.post.get()),
                             range_start=selection[0] if selection else None, range_end=selection[1] if selection else None,
                             cfg_text=float(self.cfg_text.get()), cfg_key=float(self.cfg_key.get()),
-                            length=length, use_keys=mode != "fresh", use_center=bool(self.use_center.get()),
+                            length=length, use_keys=nakawari or mode != "fresh",
+                            use_center=bool(self.use_center.get()) and not nakawari,
                             stop_at_last_key=mode != "fresh" and bool(self.stop.get()),
                             smooth_stop=bool(self.smooth.get()) and smooth_stop.available(),
-                            engine="motionbricks" if mode == "nakawari" else "kimodo",
+                            engine="motionbricks" if nakawari else "kimodo",
                             key_stop=bool(self.key_stop.get()), wrist_lerp=bool(self.wrist_lerp.get()))
-        self.cfg.update(mode=mode, range_mode=self.range_mode.get(), length=self.length.get(), prompt=s.prompt,
+        self.cfg.update(tab=tab, mode=mode, range_mode=self.range_mode.get(), length=self.length.get(), prompt=s.prompt,
                         steps=s.steps, seed=s.seed, post_processing=s.post_processing,
-                        cfg_text=s.cfg_text, cfg_key=s.cfg_key, use_center=s.use_center, stop_at_last_key=bool(self.stop.get()),
-                        smooth_stop=bool(self.smooth.get()), key_stop=s.key_stop, wrist_lerp=s.wrist_lerp)
+                        cfg_text=s.cfg_text, cfg_key=s.cfg_key, use_center=bool(self.use_center.get()),
+                        stop_at_last_key=bool(self.stop.get()), smooth_stop=bool(self.smooth.get()),
+                        key_stop=s.key_stop, wrist_lerp=s.wrist_lerp)
         os.makedirs(runner.WORK_DIR, exist_ok=True)
         json.dump(self.cfg, open(SETTINGS_PATH, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         return s
