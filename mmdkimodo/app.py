@@ -43,14 +43,15 @@ DEFAULTS = {
     "mode": "fill", "range_mode": "all", "length": "",
     "prompt": "A person moves naturally between poses.",
     "steps": 100, "seed": -1, "post_processing": True, "cfg_text": 2.0, "cfg_key": 2.0, "use_center": False,
-    "stop_at_last_key": True, "smooth_stop": True,
+    "stop_at_last_key": True, "smooth_stop": True, "key_stop": False, "wrist_lerp": False,
 }
 OLD_KEYS = ("use_keys", "range_start", "range_end", "pmx")   # 前の窓の保存にあった項目（読む時に変換して捨てる）
-MODES = [("fill", "キーの間を埋める"), ("extend", "続きを足す"), ("fresh", "プロンプトだけで作る")]
+MODES = [("fill", "キーの間を埋める"), ("extend", "続きを足す"), ("fresh", "プロンプトだけで作る"), ("nakawari", "中割り")]
 MODE_NOTES = {
     "fill": "打ったキーのポーズを守って、キーとキーの間を作ります（長さは最後のキーまで）",
     "extend": "打ったキーのポーズを守って、最後のキーの後ろに続きを作ります",
     "fresh": "キーのポーズは使わず、最初のキーの場所と向きからプロンプトだけで作ります",
+    "nakawari": "MotionBricks でキーとキーの間をつなぎます（プロンプトは使いません。キーの間が 17〜57F の所だけ作り、ほかは MMD の補間のまま）",
 }
 PARTS = ["体", "左腕", "右腕", "左脚", "右脚"]
 NO_RANGE = 999999   # MMD の範囲選択の終わりの初期値（範囲を入れていない）
@@ -214,6 +215,13 @@ class App:
         self.smooth = tk.BooleanVar(value=self.cfg["smooth_stop"] and smooth_stop.available())
         self.smooth_check = ttk.Checkbutton(stop_row, text="なめらかに（MotionBricks）", variable=self.smooth)
         self.smooth_check.pack(side="left", padx=(12, 0))
+        self.stop_row = stop_row
+        # 中割りの時は、止める欄の代わりに中割りの選び方を出す
+        self.nak_row = line("", pady=(4, 0))
+        self.key_stop = tk.BooleanVar(value=self.cfg["key_stop"])
+        ttk.Checkbutton(self.nak_row, text="キーごとに止まる", variable=self.key_stop).pack(side="left")
+        self.wrist_lerp = tk.BooleanVar(value=self.cfg["wrist_lerp"])
+        ttk.Checkbutton(self.nak_row, text="手首は普通の補間（MotionBricks の手首を使わない）", variable=self.wrist_lerp).pack(side="left", padx=(12, 0))
         ttk.Separator(f).grid(row=3, column=0, sticky="we", padx=10)
 
         # プロンプト（区間ごとの行）
@@ -283,13 +291,16 @@ class App:
     def _mode_changed(self):
         mode = self.mode.get()
         self.mode_note.set(MODE_NOTES[mode])
-        if mode == "fill":
+        if mode in ("fill", "nakawari"):
             self.length_entry.configure(state="disabled")
             self.length_note.set("F（最後のキーまで）")
         else:
             self.length_entry.configure(state="normal")
             self.length_note.set("F（最初のキーから。必須）" if mode == "fresh" else "F（最初のキーから。最後のキーより長く）")
         self.stop_check.configure(state="disabled" if mode == "fresh" else "normal")   # プロンプトだけで作る時は止める位置のキーが無い
+        self.stop_row.pack_forget()
+        self.nak_row.pack_forget()
+        (self.nak_row if mode == "nakawari" else self.stop_row).pack(fill="x", pady=(4, 0))
         self._stop_changed()
 
     def _stop_changed(self):
@@ -371,8 +382,10 @@ class App:
             s = s.strip()
             return int(s) if s else None
         mode = self.mode.get()
-        length = opt_int(self.length.get()) if mode != "fill" else None
-        if mode != "fill" and length is None:
+        length = opt_int(self.length.get()) if mode not in ("fill", "nakawari") else None
+        if mode == "nakawari" and not smooth_stop.available():
+            raise ValueError(f"中割りには MotionBricks が要ります（{smooth_stop.MB_PYTHON} がありません）")
+        if mode in ("extend", "fresh") and length is None:
             raise ValueError("「続きを足す」「プロンプトだけで作る」では長さを入れてください")
         selection = None
         if self.range_mode.get() == "mmd":
@@ -385,11 +398,13 @@ class App:
                             cfg_text=float(self.cfg_text.get()), cfg_key=float(self.cfg_key.get()),
                             length=length, use_keys=mode != "fresh", use_center=bool(self.use_center.get()),
                             stop_at_last_key=mode != "fresh" and bool(self.stop.get()),
-                            smooth_stop=bool(self.smooth.get()) and smooth_stop.available())
+                            smooth_stop=bool(self.smooth.get()) and smooth_stop.available(),
+                            engine="motionbricks" if mode == "nakawari" else "kimodo",
+                            key_stop=bool(self.key_stop.get()), wrist_lerp=bool(self.wrist_lerp.get()))
         self.cfg.update(mode=mode, range_mode=self.range_mode.get(), length=self.length.get(), prompt=s.prompt,
                         steps=s.steps, seed=s.seed, post_processing=s.post_processing,
                         cfg_text=s.cfg_text, cfg_key=s.cfg_key, use_center=s.use_center, stop_at_last_key=bool(self.stop.get()),
-                        smooth_stop=bool(self.smooth.get()))
+                        smooth_stop=bool(self.smooth.get()), key_stop=s.key_stop, wrist_lerp=s.wrist_lerp)
         os.makedirs(runner.WORK_DIR, exist_ok=True)
         json.dump(self.cfg, open(SETTINGS_PATH, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         return s

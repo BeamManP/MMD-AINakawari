@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from . import pipeline, smooth_stop, vmd
+from . import nakawari, pipeline, smooth_stop, vmd
 from .mmd_link import MMDLink
 from .mmd_skel import MMDSkeleton
 
@@ -34,6 +34,9 @@ class Settings:
     use_center: bool = False    # True なら毎フレームの腰の位置（センターの上下など）を目印にする
     stop_at_last_key: bool = True   # 最後の体のキーで止まる（キーの後ろに腰を止める目印を足す）
     smooth_stop: bool = True        # 止まる所を MotionBricks で作り直して、なめらかに止まる（smooth_stop.py）
+    engine: str = "kimodo"          # "motionbricks" ならキーの間を MotionBricks だけで埋める（中割り・プロンプト無し。nakawari.py）
+    key_stop: bool = False          # 中割りで、キーごとに止まる（オフなら次のキーへの速さで通る）
+    wrist_lerp: bool = False        # 中割りで、手首だけキーの間を補間でつなぐ（MotionBricks は手首を回しすぎることがある）
 
 
 def _check_frame_base(link, motion, log):
@@ -135,11 +138,14 @@ def generate(settings, log=print, link=None, previous=None):
     _check_frame_base(link, original, log)
 
     rng = (settings.range_start, settings.range_end) if settings.range_start is not None else None
-    job = pipeline.prepare(pmx, original, settings.prompt, settings.steps, settings.seed,
+    mb = settings.engine == "motionbricks"
+    job = pipeline.prepare(pmx, original, "inbetween" if mb else settings.prompt, settings.steps, settings.seed,
                            settings.post_processing, frame_range=rng, cfg=(settings.cfg_text, settings.cfg_key),
                            length=settings.length, use_keys=settings.use_keys, use_center=settings.use_center,
-                           stop_at_last_key=settings.stop_at_last_key)
-    span = f"{job.first}〜{job.first + job.num_frames - 1}F・{job.num_frames} フレーム・テキストの効き {settings.cfg_text}・キーの効き {settings.cfg_key}"
+                           stop_at_last_key=settings.stop_at_last_key and not mb)
+    span = f"{job.first}〜{job.first + job.num_frames - 1}F・{job.num_frames} フレーム"
+    if not mb:
+        span += f"・テキストの効き {settings.cfg_text}・キーの効き {settings.cfg_key}"
     if settings.use_keys:
         log(f"体のキー {len(job.frames)} 個: {job.frames}（{span}）")
     else:
@@ -154,12 +160,17 @@ def generate(settings, log=print, link=None, previous=None):
             + (f"（後ろ {outside} フレームは止まるために余分に作るだけで、書き戻さない）" if outside > 0 else ""))
     if job.limb_frames:
         log(f"手足の IK だけのキー {len(job.limb_frames)} 個: {job.limb_frames}（手足の位置だけ合わせ、体は任せる）")
-    if len(job.segments) > 1:
+    if len(job.segments) > 1 and not mb:
         for s, n, text in job.segments:
             log(f"  区間 {s}〜{s + n - 1}F: {text}")
 
-    log("Kimodo で生成中…")
-    result = pipeline.run_kimodo(job, os.path.join(WORK_DIR, "kimodo"), on_line=lambda l: log("  " + l))
+    if mb:
+        log("MotionBricks で中割り中…")
+        result = nakawari.generate(job, os.path.join(WORK_DIR, "motionbricks"), key_stop=settings.key_stop,
+                                   wrist_lerp=settings.wrist_lerp, log=log)
+    else:
+        log("Kimodo で生成中…")
+        result = pipeline.run_kimodo(job, os.path.join(WORK_DIR, "kimodo"), on_line=lambda l: log("  " + l))
     if settings.smooth_stop and job.stop_frames:
         log("MotionBricks で止まり方を作り直し中…")
         result = smooth_stop.apply(job, result, os.path.join(WORK_DIR, "motionbricks"), log=log)

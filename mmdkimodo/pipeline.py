@@ -43,6 +43,7 @@ class Job:
     ref_yaw: float = 0.0          # 最初のキーの腰の向き（ラジアン）。Kimodo には +Z 向き・原点で渡す
     ground_lift: float = 0.0      # 足が床に着くように上げ下げした量（m）
     stop_frames: list = field(default_factory=list)   # 最後のキーで止まるために腰を止めておくフレーム（MMD のフレーム。範囲の外も含む）
+    mmd_frames: set = field(default_factory=set)      # 書き戻さず MMD の補間のままにするフレーム（中割りで作れなかった間）
     request: dict = field(default_factory=dict)
 
 
@@ -350,7 +351,7 @@ def build_motion(job, result, include_keys=False, workers=None):
     rot = np.array(result["local_rot"]).reshape(T, J, 4)
     key_set = {f - job.first for f in job.frames}
     # 最後のキーで止まるために余分に作らせたフレーム（job.num_frames より後ろ）は書き戻さない
-    ks = [k for k in range(min(T, job.num_frames)) if include_keys or k not in key_set]
+    ks = [k for k in range(min(T, job.num_frames)) if (include_keys or k not in key_set) and job.first + k not in job.mmd_frames]
     if workers is None:
         workers = max(1, min(8, (os.cpu_count() or 2) // 2))   # PC 全体を使い切らない（読み上げや MMD が止まらないように）
     workers = max(1, min(workers, len(ks) // 8))   # 少ないフレームは子プロセスを立てる方が遅い
