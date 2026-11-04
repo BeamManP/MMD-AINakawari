@@ -181,6 +181,57 @@ def bezier_weight(interp, channel, u):
     return 3 * s * s * t * y1 + 3 * s * t * t * y2 + t ** 3
 
 
+def _split_curve(x1, y1, x2, y2, u):
+    """(0,0)・(x1,y1)・(x2,y2)・(1,1) の曲線を x=u で 2 つに分け、それぞれを 0〜1 の箱に直した制御点 ((x1,y1,x2,y2), (…))。"""
+    lo, hi = 0.0, 1.0
+    for _ in range(40):
+        t = (lo + hi) / 2
+        s = 1 - t
+        if 3 * s * s * t * x1 + 3 * s * t * t * x2 + t ** 3 < u:
+            lo = t
+        else:
+            hi = t
+    t = (lo + hi) / 2
+    p0, p1, p2, p3 = np.array([0.0, 0.0]), np.array([x1, y1]), np.array([x2, y2]), np.array([1.0, 1.0])
+    a, b, c = p0 + (p1 - p0) * t, p1 + (p2 - p1) * t, p2 + (p3 - p2) * t   # de Casteljau
+    d, e = a + (b - a) * t, b + (c - b) * t
+    m = d + (e - d) * t   # 分ける点
+    out = []
+    for q1, q2, origin, size in ((a, d, p0, m - p0), (e, c, m, p3 - m)):
+        if size[0] <= 1e-9 or size[1] <= 1e-9:   # その側では値が変わらない（どんな曲線でも同じ）
+            out.append((0.2, 0.2, 0.8, 0.8))
+            continue
+        n1, n2 = (q1 - origin) / size, (q2 - origin) / size
+        out.append(tuple(float(np.clip(v, 0.0, 1.0)) for v in (n1[0], n1[1], n2[0], n2[1])))
+    return out
+
+
+def split_interp(interp, us):
+    """1 つのキーの間の補間曲線を、間の割合 us（0〜1 の昇順）で分けた 64 バイトの補間の一覧（len(us)+1 個・前から順）。
+
+    元のキーの間にキーを足す時に使う。足したキーにはその手前の部分、元の後ろのキーには最後の部分を持たせると、
+    MMD が見せる動きは足す前と同じになる（回転は球面の補間なので、同じ大円の上の割合として分けられる）。
+    物理演算の印（1 行目の 3・4 バイト目）は元のキーのものを写す。
+    """
+    points = curve_points(interp)
+    curves = [tuple(points[ch + 4 * r] / 127.0 for r in range(4)) for ch in range(4)]
+    pieces = [[None] * 4 for _ in range(len(us) + 1)]
+    for ch, cur in enumerate(curves):
+        done = 0.0
+        for i, u in enumerate(us):
+            left, cur = _split_curve(*cur, (u - done) / (1 - done)) if done < 1 else ((0.2, 0.2, 0.8, 0.8), cur)
+            pieces[i][ch] = left
+            done = u
+        pieces[-1][ch] = cur
+    out = []
+    for piece in pieces:
+        row = [int(round(piece[ch][r] * 127)) for r in range(4) for ch in range(4)]
+        data = bytearray(sum(([*row[k:], *([0] * k)] for k in range(4)), []))
+        data[2], data[3] = interp[2], interp[3]
+        out.append(bytes(data))
+    return out
+
+
 def sample(motion_tracks, name, frame):
     """VMD のトラックの、あるフレームでの (移動, 回転)。キーの間は MMD と同じく補間曲線どおりに補間する。"""
     keys = motion_tracks.get(name)

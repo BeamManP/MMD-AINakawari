@@ -26,7 +26,7 @@ class Settings:
     steps: int = 100
     seed: int = -1
     post_processing: bool = True
-    range_start: int = None     # 使うキーの範囲（MMD のフレーム）。None なら全部
+    range_start: int = None     # 作り直す範囲（MMD のフレーム）。None なら全部（pipeline.prepare の frame_range）
     range_end: int = None
     cfg_text: float = 2.0       # テキストの効き（Kimodo の既定 2）
     cfg_key: float = 2.0        # キーの効き（Kimodo の既定 2）
@@ -136,12 +136,25 @@ def generate(settings, log=print, link=None, previous=None):
                            settings.post_processing, frame_range=rng, cfg=(settings.cfg_text, settings.cfg_key),
                            length=settings.length, use_keys=settings.use_keys, use_center=settings.use_center,
                            stop_at_last_key=settings.stop_at_last_key and not mb,
-                           max_frames=None if mb else pipeline.MAX_FRAMES)   # 中割りはキーの間ごとに作るので上限なし
-    span = f"{job.first}〜{job.first + job.num_frames - 1}F・{job.num_frames} フレーム"
+                           max_frames=None if mb else pipeline.MAX_FRAMES,   # 中割りはキーの間ごとに作るので上限なし
+                           context_keys=not mb)   # 中割りは範囲の手前の動きを MotionBricks の文脈にする
+    outer = job.anchors + sorted(job.mmd_frames) if rng else []
+    real = [f for f in job.frames if f not in outer]   # マスターが打った体のキー（範囲の端と外側の文脈を除く）
+    if rng:
+        lo, hi = (job.anchors[0], job.anchors[-1]) if len(job.anchors) > 1 else (rng[0], rng[1])
+        span = f"{rng[0]}〜{rng[1]}F・{rng[1] - rng[0] + 1} フレーム"
+        log(f"範囲 {rng[0]}〜{rng[1]}F を作り直します: "
+            + (f"始まりと終わり（{lo}F・{hi}F）の姿勢を MMD から取り、外の動きにつなぎます"
+               if len(job.anchors) > 1 else f"始まり（{lo}F）の姿勢を MMD から取ってつなぎます（後ろにキーが無いので、終わりは決めません）")
+            + f"（外側 {pipeline.RANGE_CONTEXT} フレームの動きも渡します）")
+        if settings.length is not None and not mb:
+            log("  範囲を使う時は、長さの欄は使いません（範囲の終わりまで作ります）")
+    else:
+        span = f"{job.first}〜{job.first + job.num_frames - 1}F・{job.num_frames} フレーム"
     if not mb:
         span += f"・テキストの効き {settings.cfg_text}・キーの効き {settings.cfg_key}"
     if settings.use_keys:
-        log(f"体のキー {len(job.frames)} 個: {job.frames}（{span}）")
+        log(f"体のキー {len(real)} 個: {real}（{span}）")
     else:
         log(f"完全新規: 体のキーのポーズは使わず、{job.first}F の場所と向きから作ります（{span}）")
     if settings.use_center:
@@ -164,8 +177,8 @@ def generate(settings, log=print, link=None, previous=None):
         if any("぀" <= ch <= "ヿ" or "一" <= ch <= "鿿" for _, _, t in job.segments for ch in t):
             log("注意: プロンプトに日本語があります。Kimodo は英語の文で学習しているので、日本語はほとんど効きません"
                 "（例: A person poses cutely, tilting the head.）")
-        if len(job.frames) > pipeline.MANY_KEYS:
-            log(f"注意: 体のキーが {len(job.frames)} 個あります。Kimodo の推奨は {pipeline.MANY_KEYS} 個未満です"
+        if len(real) > pipeline.MANY_KEYS:
+            log(f"注意: 体のキーが {len(real)} 個あります。Kimodo の推奨は {pipeline.MANY_KEYS} 個未満です"
                 f"（多いとキーに縛られて動きが硬くなることがあります）")
     if not mb and not any(t.strip() for _, _, t in job.segments):
         log("プロンプトが空なので、キー（と腰・手足の目印）だけを手がかりに作ります（テキストの効きは使いません）")

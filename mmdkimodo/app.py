@@ -218,8 +218,9 @@ class App:
         ttk.Label(rf, text="範囲", width=10).pack(side="left")
         self.range_mode = tk.StringVar(value=self.cfg["range_mode"])
         self.range_text = tk.StringVar(value="MMD の範囲選択")
-        ttk.Radiobutton(rf, text="全部", value="all", variable=self.range_mode).pack(side="left", padx=(0, 12))
-        ttk.Radiobutton(rf, textvariable=self.range_text, value="mmd", variable=self.range_mode).pack(side="left")
+        ttk.Radiobutton(rf, text="全部", value="all", variable=self.range_mode, command=self._mode_changed).pack(side="left", padx=(0, 12))
+        ttk.Radiobutton(rf, textvariable=self.range_text, value="mmd", variable=self.range_mode,
+                        command=self._mode_changed).pack(side="left")
         bf = ttk.Frame(foot)
         bf.pack(fill="x")
         self.gen_btn = ttk.Button(bf, text="生成", command=self._generate)
@@ -373,7 +374,10 @@ class App:
     def _mode_changed(self):
         mode = self.mode.get()
         self.mode_note.set(MODE_NOTES[mode])
-        if mode == "fill":
+        if self.range_mode.get() == "mmd":
+            self.length_entry.configure(state="disabled")
+            self.length_note.set("F（範囲の終わりまで）")
+        elif mode == "fill":
             self.length_entry.configure(state="disabled")
             self.length_note.set("F（最後のキーまで）")
         else:
@@ -483,10 +487,11 @@ class App:
         tab = TABS[self.tabs.index("current")][0]
         mode = self.mode.get()
         nakawari = tab == "nakawari"
-        length = opt_int(self.length.get()) if mode != "fill" and not nakawari else None
+        in_range = self.range_mode.get() == "mmd"   # 範囲を使う時は範囲の終わりまで作るので、長さは使わない
+        length = opt_int(self.length.get()) if mode != "fill" and not nakawari and not in_range else None
         if nakawari and not smooth_stop.available():
             raise ValueError(f"中割りには MotionBricks が要ります（{smooth_stop.MB_PYTHON} がありません）")
-        if not nakawari and mode != "fill" and length is None:
+        if not nakawari and mode != "fill" and length is None and not in_range:
             raise ValueError("「続きを足す」「プロンプトだけで作る」では長さを入れてください")
         selection = None
         if self.range_mode.get() == "mmd":

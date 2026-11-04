@@ -24,6 +24,10 @@ def _step_toward(a, b, t):
     return {"root": root.tolist(), "local_rot": [float(v) for q in rot for v in q]}
 
 
+def _pose(key):
+    return {"root": key["root"], "local_rot": key["local_rot"]}
+
+
 def generate(job, work_dir, key_stop=False, wrist_lerp=False, log=print):
     if not smooth_stop.available():
         raise RuntimeError(f"MotionBricks が見つかりません（{smooth_stop.MB_PYTHON}）")
@@ -32,7 +36,7 @@ def generate(job, work_dir, key_stop=False, wrist_lerp=False, log=print):
         raise ValueError("中割りには体のキーが 2 つ以上要ります")
     if job.root_frames or job.limb_frames:
         log("  全ての親だけ・手足の IK だけのキーは、中割りでは使いません（MotionBricks は途中の目印を知らないため）")
-    poses = [{"root": k["root"], "local_rot": k["local_rot"]} for k in keys]
+    poses = [_pose(k) for k in keys]
     frames = [k["frame"] for k in keys]
     gaps = [b - a for a, b in zip(frames, frames[1:])]
     ok = [smooth_stop.MIN_LEN <= g <= smooth_stop.MAX_LEN for g in gaps]
@@ -58,9 +62,14 @@ def generate(job, work_dir, key_stop=False, wrist_lerp=False, log=print):
             target = [poses[k]]
             if not key_stop and k + 1 < len(keys):
                 target.append(_step_toward(poses[k], poses[k + 1], 1 / gaps[k]))
+            elif not key_stop and job.context_after and frames[k] + job.first == job.anchors[-1]:
+                target.append(_pose(job.context_after[0]))   # 範囲の終わり: 外の動きの次のフレームへ通り抜ける
             targets.append({"poses": target, "frames": gaps[k - 1], "num_poses_to_use": len(target)})
-        # 文脈は始めのキーの姿勢で止まっている形（手前は MMD の補間か、範囲の始まり）
-        jobs.append({"context": [poses[s]] * 4, "targets": targets})
+        # 文脈は始めのキーの姿勢で止まっている形。範囲の始まりからの時は、範囲の手前の MMD の動き（外の勢いをつなぐ）
+        context = [poses[s]] * 4
+        if s == 0 and job.anchors and job.context_before:
+            context = ([_pose(job.context_before[0])] * 4 + [_pose(p) for p in job.context_before] + [poses[0]])[-4:]
+        jobs.append({"context": context, "targets": targets})
     res = smooth_stop._run({"skeleton": pipeline.SOMA_JSON, "jobs": jobs}, work_dir, log=log)
 
     T = job.num_frames

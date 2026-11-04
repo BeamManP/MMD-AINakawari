@@ -9,13 +9,13 @@ import json
 import os
 import socket
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
 from . import quat as Q
 from . import resident, vmd
-from .mmd_skel import MMDSkeleton, sample
+from .mmd_skel import MMDSkeleton, sample, split_interp
 from .retarget import TOE_GROUND, Retargeter, conv_p, conv_q
 
 KIMODO_PYTHON = r"F:\kimodo\.venv\Scripts\python.exe"
@@ -31,6 +31,7 @@ KIMODO_HF_CACHE = r"F:\kimodo\hf_cache"
 SOMA_JSON = r"F:\kimodo\tools\somaskel30.json"
 MAX_FRAMES = 300  # Kimodo の 1 区間は 10 秒（30fps）まで（公式の limitations.md）。区間を分ければ全体はこれより長くてよい
 STOP_HOLD = 10    # 「最後のキーで止まる」で、キーの後ろに腰を止めておくフレーム数
+RANGE_CONTEXT = 3  # 範囲を作り直す時に、範囲の端の外側から使う姿勢のフレーム数（外の動きの勢いをつなぐ。MotionBricks の文脈は 4 姿勢）
 PARALLEL_SECONDS = 10   # 書き戻しの計算の残りがこれ以上かかりそうなら、子プロセスに分けて並べる
 ROOT_BONE = "全ての親"
 IGNORED_ROOTS = ("操作中心",)
@@ -53,7 +54,10 @@ class Job:
     ref_yaw: float = 0.0          # 最初のキーの腰の向き（ラジアン）。Kimodo には +Z 向き・原点で渡す
     ground_lift: float = 0.0      # 足が床に着くように上げ下げした量（m）
     stop_frames: list = field(default_factory=list)   # 最後のキーで止まるために腰を止めておくフレーム（MMD のフレーム。範囲の外も含む）
-    mmd_frames: set = field(default_factory=set)      # 書き戻さず MMD の補間のままにするフレーム（中割りで作れなかった間）
+    mmd_frames: set = field(default_factory=set)      # 書き戻さず MMD の補間のままにするフレーム（中割りで作れなかった間・範囲の外側の文脈）
+    anchors: list = field(default_factory=list)       # 範囲を作り直す時に、MMD の姿勢をキーにした範囲の端のフレーム
+    context_before: list = field(default_factory=list) # 範囲の始まりの手前の姿勢（Kimodo の形。中割りの文脈）
+    context_after: list = field(default_factory=list)  # 範囲の終わりの後ろの姿勢（Kimodo の形。中割りで通り抜ける先）
     request: dict = field(default_factory=dict)
 
 
@@ -204,7 +208,7 @@ def prompt_segments(prompt, first, num):
 
 
 def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame_range=None, cfg=(2.0, 2.0),
-            length=None, use_keys=True, use_center=False, stop_at_last_key=False, max_frames=MAX_FRAMES):
+            length=None, use_keys=True, use_center=False, stop_at_last_key=False, max_frames=MAX_FRAMES, context_keys=True):
     """cfg: (テキストの効き, キーの効き)。Kimodo の既定は (2, 2)。テキストを上げるとプロンプトの動きが強く出る（回転は 8・1 で振り向くほど）。
 
     length: 作るフレーム数（最初のキーから数える）。None なら最後のキーまで。最後のキーより長くすると、その先は続きを作る。
@@ -217,6 +221,11 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
                 Kimodo はキーの手前で減速して止まる（11-04 実験: 走って 60F のキーに着く動きで、行き過ぎ 1.55m → 0.08m・跳び無し）。
                 作る範囲がそのキーで終わる時は、裏で余分に作らせる（書き戻すのは元の範囲だけ）。
                 キーの後ろに全ての親・手足の目印がある（その先も動かす）時と、センターの動きを使う時は止めない。
+    frame_range: (始まり, 終わり) の MMD のフレーム。その範囲を作り直す。始まりの姿勢（MMD の補間込み）はいつもキーにし、
+                終わりの姿勢は後ろにもキーがある（外の動きが続く）時だけキーにする。長さ（length）は使わない。
+                範囲の中のキーも通る（完全新規なら使わない）。範囲の端の外側 RANGE_CONTEXT フレームの姿勢も使い、外の勢いをつなぐ。
+    context_keys: True なら端の外側の姿勢もキーとして渡し、作る長さに含める（Kimodo。書き戻さない）。
+                  False なら姿勢だけ job.context_before・context_after に入れる（中割りの MotionBricks の文脈）。
     """
     skel = MMDSkeleton(pmx)
     rt = Retargeter(skel, SOMA_JSON)
@@ -227,25 +236,45 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
     pose_frames = key_frames_of(tracks, body - limb_iks)
     limb_frames = key_frames_of(tracks, limb_iks)
     root_all = key_frames_of(tracks, {ROOT_BONE})
+    anchors, before, after = [], [], []   # 範囲の端の姿勢のフレーム・その外側の文脈のフレーム
     if frame_range:
-        pose_frames = [f for f in pose_frames if frame_range[0] <= f <= frame_range[1]]
-        limb_frames = [f for f in limb_frames if frame_range[0] <= f <= frame_range[1]]
-        root_all = [f for f in root_all if frame_range[0] <= f <= frame_range[1]]
-    body_frames = sorted(set(pose_frames) | set(limb_frames))
-    candidates = sorted(set(body_frames) | set(root_all))
-    if not candidates:
-        raise ValueError("キーが 1 つもありません（0F にキーを打ってください）")
-    first = candidates[0]
-    if length is not None:
-        num = int(length)
-        if num < 2:
-            raise ValueError("長さは 2 フレーム以上にしてください")
+        # 範囲を作り直す: 範囲の始まり（と、後ろにもキーがあれば終わり）の MMD の姿勢をキーにして、外の動きにつなぐ。
+        # 前は範囲の中のキーを絞るだけで、範囲の端は使っていなかった（30〜90F でキーが 45・60F なら 45〜60F だけ作っていた）
+        a, b = frame_range
+        if a > b:
+            raise ValueError(f"範囲の始まり（{a}F）が終わり（{b}F）より後ろです")
+        if b - a < 1:
+            raise ValueError("範囲は 2 フレーム以上にしてください")
+        continues = any(f > b for f in key_frames_of(tracks, body | {ROOT_BONE}))
+        anchors = [a, b] if continues else [a]
+        before = [f for f in range(a - RANGE_CONTEXT, a) if f >= 0]
+        after = list(range(b + 1, b + 1 + RANGE_CONTEXT)) if continues else []
+        pose_frames = [f for f in pose_frames if a <= f <= b]
+        limb_frames = [f for f in limb_frames if a < f < b]
+        root_all = [f for f in root_all if a < f < b]
+        if not context_keys:   # 文脈は姿勢だけ取る（MotionBricks の手前の文脈・通り抜ける先）
+            first, last = a, b
+        else:   # 文脈もキーとして渡し、勢いをつなぐ。書き戻すのは範囲の中だけ（mmd_frames）
+            first, last = (before or [a])[0], (after or [b])[-1]
+        num = last - first + 1
     else:
-        num = candidates[-1] - first + 1
-        if num < 2:
-            raise ValueError("キーが 1 つしかありません。長さ（フレーム）を入れるか、キーをもう 1 つ打ってください")
-    last = first + num - 1
-    frames = [f for f in pose_frames if f <= last] if use_keys else []
+        body_frames = sorted(set(pose_frames) | set(limb_frames))
+        candidates = sorted(set(body_frames) | set(root_all))
+        if not candidates:
+            raise ValueError("キーが 1 つもありません（0F にキーを打ってください）")
+        first = candidates[0]
+        if length is not None:
+            num = int(length)
+            if num < 2:
+                raise ValueError("長さは 2 フレーム以上にしてください")
+        else:
+            num = candidates[-1] - first + 1
+            if num < 2:
+                raise ValueError("キーが 1 つしかありません。長さ（フレーム）を入れるか、キーをもう 1 つ打ってください")
+        last = first + num - 1
+    real = [f for f in pose_frames if f <= last] if use_keys else []   # マスターが打った体のキー
+    context = (before + after) if context_keys else []
+    frames = sorted(set(real) | set(anchors) | set(context))
     # 手足の目印: 体のポーズのキーが無いフレームで、手足の IK にキーがあるもの（完全新規でも使う。0F の初期のキーは体にもあるので入らない）
     limb_keys = {}
     for f in limb_frames:
@@ -258,7 +287,7 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
         root_frames = [f for f in root_all if f <= last and f not in set(frames)]
 
     poses = {}
-    full = set(frames + [first] + list(limb_keys))   # 全身の姿勢が要るフレーム（手足の IK まで解く）
+    full = set(frames + [first] + list(limb_keys) + before + after)   # 全身の姿勢が要るフレーム（手足の IK まで解く）
     for f in sorted(full | set(root_frames)):
         # 通り道だけのフレームは腰の位置と向きしか使わないので、IK は解かない（腰は脚の IK に左右されない）
         G, P = pose_at(skel, tracks, f, solve_ik=f in full, skip_ik=rt.idle_iks)
@@ -285,6 +314,11 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
                 "local_rot": [float(v) for q in loc for v in q]}
 
     keys = [pose_key(f) for f in frames]
+    job.anchors = anchors
+    job.mmd_frames = set(context)   # 外側の文脈は勢いをつなぐためだけ。書き戻さず、元のキーも消さない
+    if not context_keys:
+        job.context_before = [pose_key(f) for f in before]
+        job.context_after = [pose_key(f) for f in after]
     ee_keys = [dict(pose_key(f), joints=joints) for f, joints in sorted(limb_keys.items())]
     job.limb_frames = sorted(limb_keys)
     # 全ての親を回している（回転のキーがある）時は、全ての親だけのキーで腰の向きも合わせる。
@@ -304,8 +338,9 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
             root_y_keys.append({"frame": f - first, "y": float(h[1])})
             job.hip_targets[f] = np.asarray(hips, float)   # 書き戻しで腰の高さをこれに合わせる（世界・Kimodo 座標）
     pad = 0   # 止まるために、元の範囲の後ろへ余分に作らせるフレーム数
-    if stop_at_last_key and frames and not use_center:
-        stop_key = frames[-1]
+    # 範囲の終わりで外の動きにつなぐ時は止めない（終わりの姿勢と、その先の動きが決まっている）
+    if stop_at_last_key and real and not use_center and len(anchors) < 2:
+        stop_key = real[-1]
         later = [f for f in root_frames + list(limb_keys) if f > stop_key]
         # 余分に作らせても、最後の区間が 1 区間の上限を超えないように（区間の始まりは後でキーの次へずれることがあるが、遅れるだけなので安全側）
         cap = prompt_segments(prompt, first, num)[-1][0] + max_frames - 1 if max_frames else stop_key + STOP_HOLD
@@ -397,7 +432,7 @@ def merge(original, generated, job):
     MMD に読み込む前に今のキーを全部消すので（mmd_link.load_motion）、元のキー・体以外の骨・表情（tail）を全部残す。
     生成した骨の、範囲の中（両端も含む）でキーのフレームでないところだけを入れ替える。
     完全新規（キーのポーズを使わない）では、最初のフレームの元のキーも入れ替わる。
-    MMD の補間のまま残すフレーム（job.mmd_frames。中割りで作れなかった間）は書き戻さないので、元のキーも消さない
+    MMD の補間のまま残すフレーム（job.mmd_frames。中割りで作れなかった間・範囲の外側の文脈）は書き戻さないので、元のキーも消さない
     （11-04 Codex のレビュー: 消していたので、残す間にあった足ＩＫだけのキーなどが無くなっていた）。
     """
     # 名前は VMD に入る形（15 バイトで切ったもの）でそろえて比べる。長い名前のボーンで元のキーと生成したキーが二重にならないように
@@ -411,12 +446,27 @@ def merge(original, generated, job):
     orig_tracks = original.tracks()
     have = {(k.name, k.frame) for k in original.bones}
     filled = []
-    for f in sorted(keys):
-        for name in {k.name for k in generated.bones}:   # 書く時は元の名前から 15 バイトで切る（切った名前を書くと文字化けする）
-            vn = vmd.vmd_name(name)
-            if (vn, f) not in have:
-                t, q = sample(orig_tracks, vn, f)
-                filled.append(vmd.BoneKey(name, f, t, q))
+    new_interp = {}   # 元のキー（id）→ 足したキーの後ろの部分の曲線
+    for name in {k.name for k in generated.bones}:   # 書く時は元の名前から 15 バイトで切る（切った名前を書くと文字化けする）
+        vn = vmd.vmd_name(name)
+        track = orig_tracks.get(vn, [])
+        added = [f for f in sorted(keys) if (vn, f) not in have and f not in job.mmd_frames]
+        for f in added:
+            t, q = sample(orig_tracks, vn, f)
+            filled.append(vmd.BoneKey(name, f, t, q))
+        # 元のキーの間に足したキーは、元の曲線をそこで分けた部分を持たせる。範囲の端（とキーのフレームの外側）で、
+        # MMD の補間のまま残る所の動きの形を変えないため（足したキーが直線の補間だと、範囲の手前の動きが直線になっていた）
+        for p, n in zip(track, track[1:]):
+            inside = [f for f in added if p.frame < f < n.frame]
+            if not inside:
+                continue
+            pieces = split_interp(n.interp, [(f - p.frame) / (n.frame - p.frame) for f in inside])
+            by_frame = dict(zip(inside, pieces))
+            for key in filled:
+                if key.name == name and key.frame in by_frame:
+                    key.interp = by_frame[key.frame]
+            new_interp[id(n)] = pieces[-1]
+    keep = [replace(k, interp=new_interp[id(k)]) if id(k) in new_interp else k for k in keep]
     return vmd.Motion(model_name=original.model_name, bones=keep + filled + generated.bones, tail=original.tail)
 
 
