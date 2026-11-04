@@ -10,11 +10,13 @@
 #endif
 #include <windows.h>
 #include <functional>
+#include <string>
 
 class KimodoPanel {
 public:
     // MMD の窓の子として作る。on_command はボタンが押された時に、ボタンの番号で呼ぶ。
-    bool create(HWND mmd, std::function<void(int)> on_command);
+    // samples は「サンプル」で出すプロンプトの一覧のファイル（mmdkimodo/prompt_samples.txt。押すたびに読む）
+    bool create(HWND mmd, std::function<void(int)> on_command, std::wstring samples);
     void destroy();
     // MMD の窓の大きさが変わった時に呼ぶ。MMD が自分の部品を並べ直した後で位置を直す。
     void request_layout();
@@ -35,10 +37,12 @@ private:
     void draw_label(const DRAWITEMSTRUCT* item);
     COLORREF color_at(int y) const;
     HWND add(const wchar_t* cls, const wchar_t* text, DWORD style, int id, DWORD ex_style = 0);
+    void show_samples();
 
     HWND mmd_ = nullptr;
     HWND panel_ = nullptr;
     HFONT font_ = nullptr;   // MMD のボタンの字体を一回り小さくしたもの（自分で作って消す）。ボタンだけは MMD の字体のまま
     RECT placed_{};
     std::function<void(int)> on_command_;
+    std::wstring samples_;
 };

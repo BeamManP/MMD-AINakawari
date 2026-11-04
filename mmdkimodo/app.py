@@ -588,7 +588,8 @@ class App:
             states = {panel.GENERATE: str(self.gen_btn.cget("state")) == "normal",
                       panel.UNDO: str(self.undo_btn.cget("state")) == "normal",
                       # 中割りはプロンプトを使わないので、欄を灰色にする（字は消さない。11-05 マスター）
-                      panel.PROMPT: self.tabs.index("current") == 0}
+                      panel.PROMPT: self.tabs.index("current") == 0,
+                      panel.SAMPLES: self.tabs.index("current") == 0}
             for item, on in states.items():
                 if self._seen.get(("enabled", item)) != on:
                     p.enable(item, on)

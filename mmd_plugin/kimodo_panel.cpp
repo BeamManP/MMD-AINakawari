@@ -2,7 +2,10 @@
 
 #include <algorithm>
 #include <cwchar>
+#include <cstdio>
+#include <string>
 #include <utility>
+#include <vector>
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 
@@ -17,7 +20,7 @@ constexpr wchar_t kModelModeText[] = L"モデル編";   // カメラ用のモー
 constexpr wchar_t kFoldText[] = L"－";
 constexpr int kFoldSize = 14;
 constexpr int kFoldGap = 2;
-// 三行式（11-05 マスター）: モード選択と「選んだキー」・プロンプト 1 行・生成／元に戻す／詳細、と下に状態の 1 行。
+// 三行式（11-05 マスター）: モード選択と範囲の字・プロンプト 1 行（下に「サンプル」）・生成／元に戻す／詳細、と下に状態の 1 行。
 // 横は MMD のパネル 1〜2 枚分。窓が狭くて入りきらない時は、MMD のほかのパネルと同じく右端で切れて見える（隠さない）
 constexpr int kWidth = 240;
 constexpr int kMinVisible = 40;  // 右に見えるのがこれより狭い時だけ隠す
@@ -32,6 +35,8 @@ constexpr int kGenerate = 104;
 constexpr int kUndo = 105;
 constexpr int kDetails = 106;
 constexpr int kStatus = 107;
+constexpr int kSamples = 108;          // 「サンプル」。押すとプロンプトの一覧が出る（英語が苦手な人向け。11-05 マスター）
+constexpr UINT kFirstSample = 1000;    // 一覧の項目の番号の始まり
 constexpr UINT kLayoutMessage = WM_APP + 1;
 constexpr UINT_PTR kLayoutTimer = 1;  // カメラ用のモードにすると下の段が右に伸びるので、時々測り直す
 // 隣のパネルと同じ縦のグラデーション（ボーン操作は 49,49,99 → 22,22,45）で、色だけ青緑にする。
@@ -83,9 +88,10 @@ HWND KimodoPanel::add(const wchar_t* cls, const wchar_t* text, DWORD style, int 
     return control;
 }
 
-bool KimodoPanel::create(HWND mmd, std::function<void(int)> on_command) {
+bool KimodoPanel::create(HWND mmd, std::function<void(int)> on_command, std::wstring samples) {
     mmd_ = mmd;
     on_command_ = std::move(on_command);
+    samples_ = std::move(samples);
     WNDCLASSW wc{};
     wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc = proc;
@@ -115,7 +121,8 @@ bool KimodoPanel::create(HWND mmd, std::function<void(int)> on_command) {
     // MMD の入力欄と同じく、細い枠の平らな欄（立体の枠 WS_EX_CLIENTEDGE だと MMD の中で浮いた）
     add(L"EDIT", L"", WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL, kPrompt);
     // ボタンは MMD のボタン（再生・登録など。ＭＳ Ｐゴシック 12）と同じ字にする（11-05 マスター）。字体は MMD のを借りる（消さない）
-    for (const auto& b : {std::make_pair(L"生　成", kGenerate), std::make_pair(L"元に戻す", kUndo), std::make_pair(L"詳　細", kDetails)}) {
+    for (const auto& b : {std::make_pair(L"サンプルから選ぶ ▼", kSamples), std::make_pair(L"生　成", kGenerate),
+                          std::make_pair(L"元に戻す", kUndo), std::make_pair(L"詳　細", kDetails)}) {
         const HWND button = add(L"BUTTON", b.first, BS_PUSHBUTTON | WS_TABSTOP, b.second);
         if (mmd_font) SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(mmd_font), FALSE);
     }
@@ -138,6 +145,55 @@ void KimodoPanel::destroy() {
 
 void KimodoPanel::request_layout() {
     if (panel_) PostMessageW(panel_, kLayoutMessage, 0, 0);
+}
+
+// 「サンプル」: prompt_samples.txt を読んで、種類ごとの子の一覧を「サンプル」の下に出す。選んだら英語の文をプロンプト欄に入れる
+// （欄の中身は Python が 0.5 秒ごとに窓へ写す）。押すたびに読むので、ファイルを書き換えればすぐ反映される
+void KimodoPanel::show_samples() {
+    std::wstring text;
+    FILE* f = nullptr;
+    if (!samples_.empty() && _wfopen_s(&f, samples_.c_str(), L"rb") == 0 && f) {
+        std::string bytes;
+        char buffer[4096];
+        for (size_t n; (n = fread(buffer, 1, sizeof(buffer), f)) > 0;) bytes.append(buffer, n);
+        fclose(f);
+        if (bytes.size() >= 3 && bytes.compare(0, 3, "\xEF\xBB\xBF") == 0) bytes.erase(0, 3);   // UTF-8 の BOM
+        const int n = MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), nullptr, 0);
+        text.resize(n);
+        MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), &text[0], n);
+    }
+    const HMENU menu = CreatePopupMenu();
+    HMENU group = nullptr;
+    std::vector<std::wstring> prompts;
+    size_t start = 0;
+    while (start < text.size()) {
+        size_t end = text.find(L'\n', start);
+        if (end == std::wstring::npos) end = text.size();
+        std::wstring line = text.substr(start, end - start);
+        start = end + 1;
+        while (!line.empty() && (line.back() == L'\r' || line.back() == L' ')) line.pop_back();
+        if (line.empty() || line[0] == L'#') continue;
+        if (line.front() == L'[' && line.back() == L']') {   // [種類]
+            group = CreatePopupMenu();
+            AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(group), line.substr(1, line.size() - 2).c_str());
+            continue;
+        }
+        const size_t colon = line.find(L'：');   // 動作：英語のプロンプト
+        if (colon == std::wstring::npos) continue;
+        prompts.push_back(line.substr(colon + 1));
+        AppendMenuW(group ? group : menu, MF_STRING, kFirstSample + prompts.size() - 1, line.c_str());
+    }
+    if (prompts.empty()) {
+        AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, (L"サンプルの一覧が読めません: " + samples_).c_str());
+    }
+    RECT r;
+    GetWindowRect(GetDlgItem(panel_, kSamples), &r);
+    // 下の段の一番下なので、一覧はボタンの上に開く
+    const UINT chosen = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_LEFTALIGN | TPM_BOTTOMALIGN | TPM_NONOTIFY, r.left, r.top, 0, panel_, nullptr);
+    DestroyMenu(menu);   // 子の一覧も一緒に消える
+    if (chosen >= kFirstSample && chosen - kFirstSample < prompts.size()) {
+        SetDlgItemTextW(panel_, kPrompt, prompts[chosen - kFirstSample].c_str());
+    }
 }
 
 bool KimodoPanel::filter(MSG* message) {
@@ -234,10 +290,11 @@ void KimodoPanel::arrange(int width, int height) {
     place(kEngine, pad, top, 92, 120);   // 高さは開いた時の一覧の高さ
     place(kRange, pad + 98, top + 2, inner - 98, 16);
     place(kPrompt, pad, top + 26, inner, 18);
-    place(kGenerate, pad, top + 50, button, 24);
-    place(kUndo, pad + button + 4, top + 50, button, 24);
-    place(kDetails, pad + (button + 4) * 2, top + 50, inner - (button + 4) * 2, 24);
-    place(kStatus, pad, std::min(top + 80, height - 18), inner, 14);
+    place(kSamples, pad, top + 47, inner, 20);   // プロンプト欄のすぐ下
+    place(kGenerate, pad, top + 72, button, 24);
+    place(kUndo, pad + button + 4, top + 72, button, 24);
+    place(kDetails, pad + (button + 4) * 2, top + 72, inner - (button + 4) * 2, 24);
+    place(kStatus, pad, std::min(top + 102, height - 18), inner, 14);
     RedrawWindow(panel_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);   // 子の部品まで描き直す
 }
 
@@ -323,6 +380,7 @@ LRESULT CALLBACK KimodoPanel::proc(HWND hwnd, UINT message, WPARAM wparam, LPARA
             self->draw_label(reinterpret_cast<const DRAWITEMSTRUCT*>(lparam));
             return TRUE;
         case WM_COMMAND:
+            if (HIWORD(wparam) == BN_CLICKED && LOWORD(wparam) == kSamples) self->show_samples();
             if (HIWORD(wparam) == BN_CLICKED && (LOWORD(wparam) == kGenerate || LOWORD(wparam) == kUndo
                                                  || LOWORD(wparam) == kDetails) && self->on_command_) {
                 self->on_command_(LOWORD(wparam));

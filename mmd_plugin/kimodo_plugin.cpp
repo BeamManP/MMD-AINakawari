@@ -181,7 +181,7 @@ public:
                                    GetWindowThreadProcessId(hwnd_, nullptr));
         if (!g_hook) show_error(hwnd_, L"メニューの受け口を作れませんでした（エラー " + std::to_wstring(GetLastError()) + L"）。");
         log_line("menu added id=0x%x at %d hook=%p", open_id_, help + 1, static_cast<void*>(g_hook));
-        if (panel_.create(hwnd_, [this](int button) { on_panel(button); })) {
+        if (panel_.create(hwnd_, [this](int button) { on_panel(button); }, samples_path())) {
             quiet_keys_in(panel_.prompt());
             attach();
         } else {
@@ -219,6 +219,13 @@ public:
 
 private:
     static HWND hub() { return FindWindowExW(HWND_MESSAGE, nullptr, kHubClass, nullptr); }
+
+    // パネルの「サンプル」の一覧。MMDKimodo.ini の home（MMDKimodo のフォルダ）の中にある
+    static std::wstring samples_path() {
+        wchar_t home[MAX_PATH]{};
+        GetPrivateProfileStringW(L"MMDKimodo", L"home", L"", home, MAX_PATH, (module_dir() + L"\\MMDKimodo.ini").c_str());
+        return *home ? std::wstring(home) + L"\\mmdkimodo\\prompt_samples.txt" : std::wstring();
+    }
 
     void open_window() {
         log_line("open_window");
