@@ -108,7 +108,8 @@ bool KimodoPanel::create(HWND mmd, std::function<void(int)> on_command) {
     SendMessageW(engine, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"プロンプト"));
     SendMessageW(engine, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"中割り"));
     SendMessageW(engine, CB_SETCURSEL, 0, 0);
-    add(L"BUTTON", L"選んだキーの間", BS_AUTOCHECKBOX | WS_TABSTOP, kRange);
+    // 範囲は字で出すだけ（Python が「選んだキー 90〜120F」などを書く）。前はチェックで切り替えていた（11-05 マスター「チェックも無しで」）
+    add(L"STATIC", L"", SS_OWNERDRAW, kRange);
     // プロンプトは 1 行。区間は「run / 45: stop」のように「 / 」でつなぐ（窓の方では行に分かれる。mmdkimodo/panel.py）。
     // MMD の入力欄と同じく、細い枠の平らな欄（立体の枠 WS_EX_CLIENTEDGE だと MMD の中で浮いた）
     add(L"EDIT", L"", WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL, kPrompt);
@@ -129,8 +130,6 @@ void KimodoPanel::destroy() {
         DestroyWindow(panel_);
         panel_ = nullptr;
     }
-    if (label_brush_) DeleteObject(label_brush_);
-    label_brush_ = nullptr;
     if (font_) DeleteObject(font_);
     font_ = nullptr;
     UnregisterClassW(kClass, instance());
@@ -225,9 +224,6 @@ void KimodoPanel::arrange(int width, int height) {
     place(kUndo, pad + button + 4, top + 50, button, 24);
     place(kDetails, pad + (button + 4) * 2, top + 50, inner - (button + 4) * 2, 24);
     place(kStatus, pad, std::min(top + 80, height - 18), inner, 14);
-    // 範囲のチェックの字の背景は、その高さのグラデーションの色（隣のパネルの字と同じく背景になじませる）
-    if (label_brush_) DeleteObject(label_brush_);
-    label_brush_ = CreateSolidBrush(color_at(top + 10));
     RedrawWindow(panel_, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);   // 子の部品まで描き直す
 }
 
@@ -267,7 +263,7 @@ void KimodoPanel::draw(HDC dc) {
     if (old) SelectObject(dc, old);
 }
 
-// 字の部品（プロンプトの見出し・状態の 1 行）は、背景のグラデーションの上に白い字で描く。
+// 字の部品（範囲・状態の 1 行）は、背景のグラデーションの上に白い字で描く。
 // 字は Python が WM_SETTEXT で書き換える（SS_OWNERDRAW は書き換えで描き直しが来る）
 void KimodoPanel::draw_label(const DRAWITEMSTRUCT* item) {
     const RECT in_panel = client_rect_of(item->hwndItem, panel_);
@@ -312,15 +308,6 @@ LRESULT CALLBACK KimodoPanel::proc(HWND hwnd, UINT message, WPARAM wparam, LPARA
         case WM_DRAWITEM:
             self->draw_label(reinterpret_cast<const DRAWITEMSTRUCT*>(lparam));
             return TRUE;
-        case WM_CTLCOLORSTATIC:
-        case WM_CTLCOLORBTN:
-            if (reinterpret_cast<HWND>(lparam) == GetDlgItem(hwnd, kRange) && self->label_brush_) {
-                const HDC dc = reinterpret_cast<HDC>(wparam);
-                SetTextColor(dc, RGB(255, 255, 255));
-                SetBkColor(dc, self->color_at(kCaptionHeight + 16));
-                return reinterpret_cast<LRESULT>(self->label_brush_);
-            }
-            break;
         case WM_COMMAND:
             if (HIWORD(wparam) == BN_CLICKED && (LOWORD(wparam) == kGenerate || LOWORD(wparam) == kUndo
                                                  || LOWORD(wparam) == kDetails) && self->on_command_) {

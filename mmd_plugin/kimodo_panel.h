@@ -38,7 +38,6 @@ private:
     HWND mmd_ = nullptr;
     HWND panel_ = nullptr;
     HFONT font_ = nullptr;   // MMD のボタンの字体を一回り小さくしたもの（自分で作って消す）。ボタンだけは MMD の字体のまま
-    HBRUSH label_brush_ = nullptr;
     RECT placed_{};
     std::function<void(int)> on_command_;
 };

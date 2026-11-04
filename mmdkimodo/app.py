@@ -43,7 +43,7 @@ _set_window_long.restype = ctypes.c_void_p
 SETTINGS_PATH = os.path.join(runner.WORK_DIR, "settings.json")
 SERVER_CMD = r"F:\kimodo\start_textencoder.cmd"
 DEFAULTS = {
-    "tab": "kimodo", "mode": "fill", "range_mode": "all", "length": "",
+    "tab": "kimodo", "mode": "fill", "range_mode": "keys", "length": "",   # 範囲は選んだキーの間から（11-05 マスター）
     "prompt": "A person moves naturally between poses.",
     "steps": 100, "seed": -1, "post_processing": True, "cfg_text": 2.0, "cfg_key": 2.0, "use_center": False,
     "stop_at_last_key": True, "smooth_stop": True, "key_stop": False, "wrist_lerp": False,
@@ -174,6 +174,7 @@ class App:
             self.cfg.update(tab="nakawari", mode="fill")
         self.q = queue.Queue()
         self.busy = False
+        self.selected_keys = None    # MMD のタイムラインで選んでいるキーのフレーム（_read_mmd が 1 秒ごとに読む。読めなければ None）
         self._status_before = None   # 生成できない知らせ（GPU が無い・サーバー待ち）を出す前の 1 行（出していない時は None）
         self._model_ticks = 1   # MMD の読み取り（モデル・今のフレーム・範囲選択）は 2 回に 1 回（1 秒ごと）。最初はすぐ読む
         self.last_run = runner.load_last_run(self.link)   # この MMD での前回の生成（作り直しと「元に戻す」に使う）。窓を開き直しても残る
@@ -454,12 +455,10 @@ class App:
             keys = self.link.selected_key_frames() if model else []
             picked = (f"選んだキーの間（{keys[0]}〜{keys[-1]}F）" if len(keys) > 1 else
                       f"選んだキーの間（{keys[0]}F だけ。2 つ以上選んでください）" if keys else "選んだキーの間（キーを選んでいません）")
-            # MMD の右下のパネルは狭いので短く
-            self.range_short = (f"選んだキー {keys[0]}〜{keys[-1]}F" if len(keys) > 1 else
-                                f"選んだキー（{keys[0]}F だけ）" if keys else "選んだキー（未選択）")
+            self.selected_keys = keys
         except Exception:   # 選び替えの途中などで鎖が読めない時は、次の読み取りで直る
             picked = "選んだキーの間（読み取れません）"
-            self.range_short = "選んだキー（読めません）"
+            self.selected_keys = None
         updates = [(self.model_text, text),
                    (self.split_text, f"＋ 今のフレーム（{frame}F）で区切る" if frame is not None else "＋ 今のフレームで区切る"),
                    (self.range_text, picked)]
@@ -505,11 +504,17 @@ class App:
             self.server_btn.pack_forget()
         # 生成できない時は、押してからエラーにせず、押せなくして下の 1 行で知らせる。
         # GPU が無い時はどちらのタブも（MotionBricks も GPU が要る）。高速モードのプロンプトで作るは 9550 も要る（中割りは使わない）
+        # 「選んだキーの間」でキーを 2 つ以上選んでいない時も（11-05 マスター。選んでいない時に全部を作り直さないように）
         block = None
+        keys = self.selected_keys
         if not self.diagnosis.usable:
             block = self.diagnosis.note
+        elif self.range_mode.get() == "keys" and keys is not None and len(keys) < 2 and not self.busy:
+            block = "範囲の最初と最後のキーを選んでください"   # パネルの 1 行に収まる長さ
         elif fast and not up and not self.busy and TABS[self.tabs.index("current")][0] == "kimodo":
             block = "テキスト読み取りサーバーを起動してください（「サーバーを起動」か、右上で低負荷モードに）"
+        if block and self._status_before is not None and self.status.get() != block:   # 止める理由が変わった
+            self.status.set(block)
         if block and self._status_before is None:
             self._status_before = self.status.get()
             self.status.set(block)
@@ -549,12 +554,10 @@ class App:
             read_panel = {
                 "prompt": lambda: panel.lines_of(p.text(panel.PROMPT)),
                 "engine": lambda: p.selection(panel.ENGINE),
-                "range": lambda: p.checked(panel.RANGE),
             }
             read_window = {
                 "prompt": self.prompt_rows.text,
                 "engine": lambda: self.tabs.index("current"),
-                "range": lambda: self.range_mode.get() == "keys",
             }
             try:
                 window_prompt = self.prompt_rows.text()
@@ -565,11 +568,17 @@ class App:
                         lambda v: self.prompt_rows.load(v), lambda v: p.set_text(panel.PROMPT, panel.one_line(v)))
             two_way("engine", read_panel["engine"](), read_window["engine"](),
                     lambda v: self.tabs.select(1 if v == 1 else 0), lambda v: p.select(panel.ENGINE, v))
-            two_way("range", read_panel["range"](), read_window["range"](),
-                    lambda v: (self.range_mode.set("keys" if v else "all"), self._mode_changed()),
-                    lambda v: p.set_checked(panel.RANGE, v))
+            # 範囲はパネルでは切り替えない（11-05 マスター。チェックを外した）。窓の設定と、選んでいるキーを字で出す
+            keys = self.selected_keys
+            if self.range_mode.get() != "keys":
+                range_text = "全部のキー"
+            elif keys is None:
+                range_text = "選んだキー（読めません）"
+            else:
+                range_text = (f"選んだキー {keys[0]}〜{keys[-1]}F" if len(keys) > 1 else
+                              f"選んだキー {keys[0]}F だけ" if keys else "キーを選んでいません")
             shown = {
-                panel.RANGE: getattr(self, "range_short", "選んだキー"),
+                panel.RANGE: range_text,
                 panel.STATUS: self.status.get(),
             }
             for item, text in shown.items():

@@ -1,7 +1,7 @@
 """MMD の右下の「Kimodo操作」パネル（mmd_plugin/kimodo_panel.cpp）を読み書きする。
 
 パネルはプラグイン（MMD のプロセスの中）が作る MMD の窓の子で、部品を並べるだけ。中身は窓（app.py の App）が 0.5 秒ごとに
-読み書きして、窓の設定と同期する（プロンプト・Kimodo か中割りか・選んだキーの間）。ボタンが押されるとプラグインが Hub に知らせる。
+読み書きして、窓の設定と同期する（プロンプト・Kimodo か中割りか。範囲は字で出すだけ）。ボタンが押されるとプラグインが Hub に知らせる。
 別のプロセスの部品なので、WM_GETTEXT・WM_SETTEXT などは Windows が中身を写してくれる。
 MMD が VMD の読み込みなどで忙しい間に窓まで固まらないよう、送る時は期限を付ける（SendMessageTimeout）。
 """
@@ -16,7 +16,6 @@ CLASS = "MMDKimodo.Panel"
 ENGINE, RANGE, PROMPT, GENERATE, UNDO, DETAILS, STATUS = 101, 102, 103, 104, 105, 106, 107
 
 WM_GETTEXT, WM_SETTEXT, WM_GETTEXTLENGTH = 0x000D, 0x000C, 0x000E
-BM_GETCHECK, BM_SETCHECK = 0x00F0, 0x00F1
 CB_GETCURSEL, CB_SETCURSEL = 0x0147, 0x014E
 SMTO_ABORTIFHUNG = 0x0002
 TIMEOUT_MS = 200
@@ -74,12 +73,6 @@ class Panel:
     def set_text(self, item, text):
         buffer = ctypes.create_unicode_buffer(text)
         self._call(item, WM_SETTEXT, 0, ctypes.addressof(buffer))
-
-    def checked(self, item):
-        return self._call(item, BM_GETCHECK) == 1
-
-    def set_checked(self, item, on):
-        self._call(item, BM_SETCHECK, 1 if on else 0)
 
     def selection(self, item):
         return self._call(item, CB_GETCURSEL)
