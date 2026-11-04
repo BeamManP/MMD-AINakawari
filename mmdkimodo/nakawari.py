@@ -78,7 +78,8 @@ def generate(job, work_dir, key_stop=False, wrist_lerp=False, log=print):
         root[a:a + n] = np.array(r["root"]).reshape(n, 3)
         rot[a:a + n] = np.array(r["local_rot"]).reshape(n, J, 4)
         covered[a:a + n] = True
-        sunk = max(sunk, smooth_stop.keep_above_ground(root, rot, a, a + n - 1))
+        for k in range(s, e):   # キーとキーの間ごとに（途中のキーは床に着いた姿勢のまま動かさない）
+            sunk = max(sunk, smooth_stop.keep_above_ground(root, rot, frames[k], frames[k + 1]))
         names = r["names"]
     if wrist_lerp:
         for jn in WRISTS:
