@@ -25,6 +25,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 import zipfile
 
@@ -123,6 +124,15 @@ def check_folder(dest):
         raise Failed(f"ドライブ {drive} がありません")
     if (os.path.normcase(os.path.abspath(dest)) + os.sep).startswith(os.path.normcase(paths.HOME) + os.sep):
         raise Failed(f"AIナカワリ の窓のフォルダ（{paths.HOME}）の中には入れられません。別のフォルダにしてください")
+    # MMD の plugin\ の下は、MMDPlugin が DLL を奥まで全部読み込もうとして MMD が落ちる（11-05 に踏んだ。11-06 Codex のレビュー）
+    folder = os.path.abspath(dest)
+    while True:
+        if os.path.basename(folder).lower() == "plugin" and os.path.isfile(os.path.join(os.path.dirname(folder), "MikuMikuDance.exe")):
+            raise Failed(f"MMD の plugin フォルダ（{folder}）の中には入れられません。MMD が起動しなくなります。別のフォルダにしてください")
+        parent = os.path.dirname(folder)
+        if parent == folder:
+            break
+        folder = parent
 
 
 def free_gb(dest):
@@ -252,11 +262,26 @@ class Setup:
             self.on_step(key, "done")
             self.log(f"   済み（{time.time() - t0:.0f} 秒）")
         shutil.rmtree(self.downloads, ignore_errors=True)
+        self.register()
         self.log("セットアップが終わりました")
+
+    def register(self):
+        """この窓の paths.json に場所を書く。全部の段が済んでいて飛ばした時も書く（別の MMD に入れた AIナカワリから、
+        前にセットアップした場所を選んだ時。試しの生成の段は飛ばされるので、そこで書くだけでは足りなかった。11-06 Codex のレビュー）。"""
+        paths.check(self.kimodo, "Kimodo")
+        changes = {"kimodo": self.kimodo}
+        if self.motionbricks:
+            paths.check(self.mb, "MotionBricks")
+            changes["motionbricks"] = self.mb
+        paths.save(**changes)
+        self.log(f"場所を書きました: {paths.PATHS_FILE}")
 
     def cancel(self):
         self._stop.set()
-        proc = self._proc
+        self._kill(self._proc)
+
+    @staticmethod
+    def _kill(proc):
         if proc and proc.poll() is None:   # uv・Python の子プロセスごと止める
             subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, creationflags=NO_WINDOW)
 
@@ -285,6 +310,11 @@ class Setup:
         self.log("> " + subprocess.list2cmdline(args))
         self._proc = proc = subprocess.Popen(args, cwd=cwd, env=self.env(**extra_env), stdin=subprocess.DEVNULL,
                                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
+        if self._stop.is_set():   # 起動の途中で中止が押された（cancel からは、まだ _proc が見えていなかった。11-06 Codex のレビュー）
+            self._kill(proc)
+            proc.wait()
+            self._proc = None
+            raise Cancelled()
         buf = b""
         tail = []
 
@@ -330,19 +360,52 @@ class Setup:
         if rc != 0:
             raise Failed(f"{what} が失敗しました（終了コード {rc}）。\n" + "\n".join(tail[-6:]))
 
-    def download(self, url, target, label, digest=None, size=None):
-        """url を target に落とす。途中の .part があれば続きから（サーバーが応じれば）。digest があれば sha256 で照らす。"""
+    def download(self, url, target, label, digest=None, size=None, retry=True):
+        """url を target に落とす。途中の .part があれば続きから（サーバーが応じれば）。digest があれば sha256 で照らす。
+
+        落とし終えてから照らす前に止まると、全部そろった .part が残る。そこから続きを頼むとサーバーが断る（416）ので、
+        大きさが分かっていて全部そろっていれば頼まずに照らすだけにし、断られた時は照らして合えば使い、合わなければ最初から落とす
+        （11-06 Codex のレビュー: 何度押しても進まなくなっていた）。"""
         os.makedirs(os.path.dirname(target), exist_ok=True)
         part = target + ".part"
         have = os.path.getsize(part) if os.path.exists(part) else 0
         if size is not None and have > size:
             os.remove(part)
             have = 0
+        if size is None or have != size:
+            self._fetch(url, part, have, label, size, digest, retry)
+            if not os.path.exists(part):   # 断られて照らして合い、もう置いた（_fetch の中）
+                return self._finish_download(target, label, digest, size, verified=True)
+        return self._finish_download(target, label, digest, size)
+
+    def _finish_download(self, target, label, digest, size, verified=False):
+        part = target + ".part"
+        if verified:
+            return
+        if size is not None and os.path.getsize(part) != size:
+            raise Failed(f"{label} の大きさが違います（{os.path.getsize(part)} バイト・正しくは {size}）。もう一度押してください")
+        if digest:
+            self.progress(f"{label}: 中身を確かめています")
+            if sha256(part, self._stop) != digest:
+                os.remove(part)
+                raise Failed(f"{label} の中身が違います（壊れて届いたかもしれません）。もう一度押してください")
+        os.replace(part, target)
+
+    def _fetch(self, url, part, have, label, size, digest, retry):
         request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         if have:
             request.add_header("Range", f"bytes={have}-")
         try:
             response = urllib.request.urlopen(request, timeout=60, context=tls_context())
+        except urllib.error.HTTPError as e:
+            if e.code == 416 and have:   # 続きを断られた: 手元の .part が全部そろっているかもしれない
+                if digest and sha256(part, self._stop) == digest:
+                    os.replace(part, part[:-len(".part")])
+                    return
+                os.remove(part)
+                if retry:
+                    return self._fetch(url, part, 0, label, size, digest, False)
+            raise Failed(f"{label} を落とせませんでした（{e}）。もう一度押してください") from None
         except OSError as e:
             raise Failed(f"{label} を落とせませんでした（{e}）。ネットにつながっているか確かめて、もう一度押してください") from None
         with response:
@@ -367,17 +430,19 @@ class Setup:
                     if time.time() - last > 0.5:
                         last = time.time()
                         self.progress(f"{label}: {done / 1e6:,.0f} / {total / 1e6:,.0f} MB" if total else f"{label}: {done / 1e6:,.0f} MB")
-        if size is not None and os.path.getsize(part) != size:
-            raise Failed(f"{label} の大きさが違います（{os.path.getsize(part)} バイト・正しくは {size}）。もう一度押してください")
-        if digest:
-            self.progress(f"{label}: 中身を確かめています")
-            if sha256(part, self._stop) != digest:
-                os.remove(part)
-                raise Failed(f"{label} の中身が違います（壊れて届いたかもしれません）。もう一度押してください")
-        os.replace(part, target)
 
     def fetch_zip(self, url, name, into, keep=()):
-        """GitHub の zip を落として、中の 1 つのフォルダの中身を into に置く。keep の名前の物（.venv など）は into に残す。"""
+        """GitHub の zip を落として、中の 1 つのフォルダの中身を into に置く。keep の名前の物（.venv など）は into に残す。
+
+        残す物は入れ替えの間 into.keep に退避する。入れ替えの途中で止まっても、次に回した時にそこから戻す
+        （前は展開先の一時フォルダに移していたので、止まると次に一時フォルダごと消していた。11-06 Codex のレビュー）。"""
+        keep_dir = into + ".keep"
+        if os.path.isdir(keep_dir):   # 前の入れ替えが途中で止まった
+            os.makedirs(into, exist_ok=True)
+            for entry in os.listdir(keep_dir):
+                if not os.path.exists(os.path.join(into, entry)):
+                    os.replace(os.path.join(keep_dir, entry), os.path.join(into, entry))
+            shutil.rmtree(keep_dir, ignore_errors=True)
         archive = os.path.join(self.downloads, f"{name}.zip")
         if not os.path.isfile(archive):
             self.download(url, archive, f"{name} の zip")
@@ -395,11 +460,16 @@ class Setup:
             raise Failed(f"{name} の zip の形が思っていた物と違います（{tops[:3]}）")
         top = os.path.join(work, tops[0])
         if os.path.isdir(into):
+            os.makedirs(keep_dir, exist_ok=True)
             for entry in os.listdir(into):
                 if entry in keep:
-                    os.replace(os.path.join(into, entry), os.path.join(top, entry))
+                    os.replace(os.path.join(into, entry), os.path.join(keep_dir, entry))
             shutil.rmtree(into)
         os.replace(top, into)
+        if os.path.isdir(keep_dir):
+            for entry in os.listdir(keep_dir):
+                os.replace(os.path.join(keep_dir, entry), os.path.join(into, entry))
+            shutil.rmtree(keep_dir, ignore_errors=True)
         shutil.rmtree(work, ignore_errors=True)
 
     def kimodo_python(self):

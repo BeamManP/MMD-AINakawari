@@ -106,45 +106,70 @@ def copy_plugin(mmd):
     shutil.copytree(PLUGIN_SRC, os.path.join(mmd, "plugin", NAME), dirs_exist_ok=True)
 
 
-def move_mme(mmd):
-    """exe の横の MME を plugin\\mme に移す。移す先に同じ名前の物があれば、中身が同じ時だけ横の方を消す。"""
+FOREIGN_D3DX9 = ("MikuMikuDance.exe の横に、MMDPlugin の物ではない d3dx9_43.dll があります。\n"
+                 "MMDPlugin は自前の d3dx9_43.dll（中で Windows の物を呼びます）を同じ場所に置く必要があるので、何も変えずに止めます。\n"
+                 "今の d3dx9_43.dll を別のフォルダへ移してから、もう一度ダブルクリックしてください。")
+
+
+def plan_mme(mmd):
+    """exe の横の MME を plugin\\mme に移す手順 [(元, 先, 先に同じ中身がある)] を、何も変えずに調べる。
+    移す先に中身の違う同じ名前の物があれば Stop（どれも動かす前に止める。11-06 Codex のレビュー: 途中まで移してから止まっていた）。"""
     mme_dir = os.path.join(mmd, "plugin", "mme")
-    os.makedirs(mme_dir, exist_ok=True)
+    moves = []
     for name in MME_FILES:
         src = os.path.join(mmd, name)
         if not os.path.isfile(src):
             continue
         dst = os.path.join(mme_dir, name)
-        if os.path.exists(dst):
-            if sha256(dst) != sha256(src):
-                raise Stop(f"MME を plugin\\mme に移そうとしましたが、{dst} に中身の違う {name} があります。\n"
-                           "どちらを使うか決められないので、何も変えずに止めます。どちらかを片付けてから、もう一度ダブルクリックしてください。")
-            os.remove(src)
+        same = os.path.exists(dst)
+        if same and sha256(dst) != sha256(src):
+            raise Stop(f"MME を plugin\\mme に移そうとしましたが、{dst} に中身の違う {name} があります。\n"
+                       "どちらを使うか決められないので、何も変えずに止めます。どちらかを片付けてから、もう一度ダブルクリックしてください。")
+        moves.append((src, dst, same))
+    return moves
+
+
+def move_mme(moves):
+    for src, dst, same in moves:
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        if same:
+            os.remove(src)   # 移す先に同じ中身がある（前に途中まで移した時など）
         else:
             os.replace(src, dst)
-        print(f"MME を移しました: {name} → plugin\\mme\\", flush=True)
+        print(f"MME を移しました: {os.path.basename(src)} → plugin\\mme\\", flush=True)
 
 
 def place_mmdplugin(mmd):
+    """確かめることを全部確かめてから、MME を移して MMDPlugin を置く（止まる時は何も変えていない）。"""
     root = lambda name: os.path.join(mmd, name)
-    if os.path.isfile(root("MMDPlugin.dll")) and os.path.isfile(root("d3d9.dll")) and not os.path.isfile(root("MMEffect.dll")):
-        print("MMDPlugin は入っています（そのまま使います）。")
-        return
+    is_ours = lambda name: sha256(root(name)) == MMDPLUGIN_FILES[name]
     for name, digest in MMDPLUGIN_FILES.items():
         if sha256(os.path.join(MMDPLUGIN_SRC, name)) != digest:
             raise Stop(f"同梱の {name} が壊れています。zip を落とし直して、展開し直してください。")
-    if os.path.isfile(root("MMEffect.dll")):
-        move_mme(mmd)
-    if os.path.isfile(root("d3d9.dll")) and sha256(root("d3d9.dll")) != MMDPLUGIN_FILES["d3d9.dll"]:
-        raise Stop("MikuMikuDance.exe の横に、MME でも MMDPlugin でもない d3d9.dll があります。\n"
-                   "上書きすると今の動きが変わるので、何も変えずに止めます。何の d3d9.dll かを確かめてください。")
     # MMDPlugin 0.41 の d3dx9_43.dll は Microsoft の物ではなく、中で Windows（System32）の物を呼ぶ MMDPlugin の中継
     # （133KB・署名なし。説明書の導入の手順は 2 つだけだが、0.41 で「d3dx9 のフック」が足された）。
     # 11-06 に検証用の MMD で、これが無いと起動直後に 0xC000041D で落ちるのを確かめた。なので別の d3dx9_43.dll があれば止める
-    if os.path.isfile(root("d3dx9_43.dll")) and sha256(root("d3dx9_43.dll")) != MMDPLUGIN_FILES["d3dx9_43.dll"]:
-        raise Stop("MikuMikuDance.exe の横に、MMDPlugin の物ではない d3dx9_43.dll があります。\n"
-                   "MMDPlugin は自前の d3dx9_43.dll（中で Windows の物を呼びます）を同じ場所に置く必要があるので、何も変えずに止めます。\n"
-                   "今の d3dx9_43.dll を別のフォルダへ移してから、もう一度ダブルクリックしてください。")
+    d3dx9 = root("d3dx9_43.dll")
+    if os.path.isfile(root("MMDPlugin.dll")) and os.path.isfile(root("d3d9.dll")) and not os.path.isfile(root("MMEffect.dll")):
+        # 入っている。0.41 の d3d9.dll なら、中継の d3dx9_43.dll もそろっているかを見る（11-06 Codex のレビュー）。
+        # ほかの版の MMDPlugin なら、その版の作りに任せる
+        if is_ours("d3d9.dll"):
+            if os.path.isfile(d3dx9) and not is_ours("d3dx9_43.dll"):
+                raise Stop(FOREIGN_D3DX9)
+            if not os.path.isfile(d3dx9):
+                copy_atomic(os.path.join(MMDPLUGIN_SRC, "d3dx9_43.dll"), d3dx9)
+                print("MMDPlugin 0.41 に足りなかった d3dx9_43.dll を置きました。", flush=True)
+        print("MMDPlugin は入っています（そのまま使います）。")
+        return
+    moves = plan_mme(mmd) if os.path.isfile(root("MMEffect.dll")) else []
+    moving = {os.path.basename(src).lower() for src, _dst, _same in moves}
+    if os.path.isfile(root("d3d9.dll")) and "d3d9.dll" not in moving and not is_ours("d3d9.dll"):
+        raise Stop("MikuMikuDance.exe の横に、MME でも MMDPlugin でもない d3d9.dll があります。\n"
+                   "上書きすると今の動きが変わるので、何も変えずに止めます。何の d3d9.dll かを確かめてください。")
+    if os.path.isfile(d3dx9) and not is_ours("d3dx9_43.dll"):
+        raise Stop(FOREIGN_D3DX9)
+    # ここから先が変える所
+    move_mme(moves)
     for name in MMDPLUGIN_FILES:
         copy_atomic(os.path.join(MMDPLUGIN_SRC, name), root(name))
     readme_dir = os.path.join(mmd, "plugin", "MMDPlugin")

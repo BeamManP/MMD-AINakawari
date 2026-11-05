@@ -170,7 +170,45 @@ def put_python(plugin_dir, mmd_mcp):
     run(["uv", "pip", "install", "--python", python, "--require-hashes", "--no-deps", "-r", requirements])
     # mmd-mcp の依存（MCP のサーバー・画面の撮影）は窓で使わないので入れない。要る物は requirements.txt にある
     run(["uv", "pip", "install", "--python", python, "--no-deps", "--reinstall-package", "mmd-mcp", mmd_mcp])
+    # 手元から入れた印（direct_url.json）には作る人のフォルダ（file:///E:/Projects/mmd-mcp）が入るので消す（11-06 Codex のレビュー）
+    site = os.path.join(plugin_dir, "python", "Lib", "site-packages")
+    for info in [d for d in os.listdir(site) if d.lower().startswith("mmd_mcp-") and d.endswith(".dist-info")]:
+        direct = os.path.join(site, info, "direct_url.json")
+        if os.path.isfile(direct):
+            os.remove(direct)
+        record = os.path.join(site, info, "RECORD")
+        with open(record, encoding="utf-8") as f:
+            rows = [r for r in f if not r.startswith(f"{info}/direct_url.json,")]
+        with open(record, "w", encoding="utf-8", newline="") as f:
+            f.writelines(rows)
     return python
+
+
+TEXT_SUFFIXES = (".json", ".txt", ".cfg", ".pth", ".py", ".ini", ".cmd", ".md", ".toml", ".in")
+TEXT_NAMES = ("RECORD", "METADATA", "INSTALLER", "WHEEL", "entry_points.txt")
+
+
+def check_no_local_paths(mmd_mcp):
+    """配る物の文字のファイルに、作る人の手元の場所（リポジトリ・ユーザーのフォルダ）が残っていないか。残っていれば止める。"""
+    home = os.path.expanduser("~")
+    needles = set()
+    for p in (ROOT, mmd_mcp, home):
+        for v in (p, p.replace("\\", "/"), "file:///" + p.replace("\\", "/")):
+            needles |= {v.lower().encode("utf-8"), v.lower().replace("\\", "\\\\").encode("utf-8")}
+    found = []
+    for root, _dirs, files in os.walk(STAGE):
+        for name in files:
+            if not (name.endswith(TEXT_SUFFIXES) or name in TEXT_NAMES):
+                continue
+            full = os.path.join(root, name)
+            if os.path.getsize(full) > 4_000_000:
+                continue
+            with open(full, "rb") as f:
+                data = f.read().lower()
+            if any(n in data for n in needles):
+                found.append(os.path.relpath(full, STAGE))
+    if found:
+        raise SystemExit(f"配る物に手元の場所が入っています: {found[:10]}")
 
 
 def put_app(app_dir, allow_dirty):
@@ -301,6 +339,7 @@ def main():
     with open(os.path.join(plugin_dir, "THIRD_PARTY.txt"), "w", encoding="utf-8") as f:
         f.write(THIRD_PARTY.format(pbs=PYTHON_FILE.split("+")[1].split("-")[0], uv=UV_VERSION))
 
+    check_no_local_paths(mmd_mcp)   # BUILD.json・THIRD_PARTY.txt も含めて、zip にする直前に見る
     name = f"{NAME}-{__version__}" + (f"-dirty-{state['ainakawari']['commit'][:7]}" if dirty else "") + ".zip"
     out = os.path.join(RELEASE, name)
     write_zip(out)

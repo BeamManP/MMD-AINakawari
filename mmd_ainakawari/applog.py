@@ -19,6 +19,7 @@ LOG_PATH = os.path.join(paths.WORK_DIR, "app.log")
 MAX_BYTES = 1 << 20
 _lock = threading.RLock()
 _file = None
+_lost = 0   # 書けなかった行の数（write）
 
 
 class _Stream:
@@ -47,22 +48,37 @@ def _open():
 
 
 def _rotate():
+    """app.log を app.log.1 に回す。回せなかった時（ほかのプログラムが app.log.1 を開いているなど）は、そのまま app.log に書き続ける
+    （11-06 Codex のレビュー: 閉じたままになり、以後の書き込みが例外になって、セットアップの画面の更新まで止まっていた）。"""
     global _file
     _file.close()
-    os.replace(LOG_PATH, LOG_PATH + ".1")
+    try:
+        os.replace(LOG_PATH, LOG_PATH + ".1")
+    except OSError:
+        pass
     _open()
 
 
 def write(text):
-    """記録に書く。複数行は 2 行目から字下げする。setup() の前は書かない（2 回目の起動など）。"""
+    """記録に書く。複数行は 2 行目から字下げする。setup() の前は書かない（2 回目の起動など）。
+    記録が書けなくても例外は出さない（窓やセットアップの画面を止めない）。書けなかった行は、次に開き直せた時に「書けなかった」と残す。"""
+    global _file, _lost
     stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    lines = str(text).rstrip("\n").split("\n")
     with _lock:
         if _file is None:
             return
-        if _file.tell() > MAX_BYTES:
-            _rotate()
-        lines = str(text).rstrip("\n").split("\n")
-        _file.write(f"{stamp} {lines[0]}\n" + "".join(f"    {line}\n" for line in lines[1:]))
+        try:
+            if _file.closed:
+                _open()
+            if _file.tell() > MAX_BYTES:
+                _rotate()
+            if _lost:
+                _file.write(f"{stamp} （記録が書けなかった行が {_lost} 行あります）\n")
+                _lost = 0
+            _file.write(f"{stamp} {lines[0]}\n" + "".join(f"    {line}\n" for line in lines[1:]))
+        except (OSError, ValueError):
+            _lost += 1
 
 
 def exception(title):

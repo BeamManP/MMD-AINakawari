@@ -218,6 +218,13 @@ class SetupWindow:
 
     def _poll(self):
         try:
+            self._drain()
+        finally:   # 1 つの処理が例外になっても、次の更新は止めない（例外は tk が記録に回す。applog.hook_tk）
+            if self.win.winfo_exists():
+                self.win.after(100, self._poll)
+
+    def _drain(self):
+        try:
             while True:
                 kind, value = self.q.get_nowait()
                 if kind == "log":
@@ -233,8 +240,6 @@ class SetupWindow:
                     self._finished(value)
         except queue.Empty:
             pass
-        if self.win.winfo_exists():
-            self.win.after(100, self._poll)
 
     def _finished(self, error):
         self.thread = None
