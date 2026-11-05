@@ -3,7 +3,7 @@
 // 窓がもう動いていれば「この MMD の窓を開いて」と知らせ、動いていなければ Python を起動する。
 // 下の段の右の空き地には「Kimodo操作」パネル（nakawari_panel.cpp）を置く。パネルの中身は Python の窓が読み書きするので、
 // MMD の起動時に Python の窓を隠したまま立ち上げておく（--attach）。
-// Python の場所は、この DLL の横の MMD-AINakawari.ini に書く。
+// Python の場所は、この DLL の横の MMD-AINakawari.ini に書く（相対の場所なら DLL のフォルダから。配布の zip はこの形）。
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -39,6 +39,19 @@ std::wstring module_dir() {
     GetModuleFileNameW(reinterpret_cast<HMODULE>(&__ImageBase), path, MAX_PATH);
     std::wstring dir = path;
     return dir.substr(0, dir.find_last_of(L"\\/"));
+}
+
+// MMD-AINakawari.ini の場所の値。相対の場所（配布の zip の python\pythonw.exe・app）は、この DLL のフォルダから読む。
+// 書いていなければ空を返す
+std::wstring ini_path(const wchar_t* key) {
+    wchar_t value[MAX_PATH]{};
+    GetPrivateProfileStringW(L"MMD-AINakawari", key, L"", value, MAX_PATH, (module_dir() + L"\\MMD-AINakawari.ini").c_str());
+    if (!*value) return std::wstring();
+    const bool absolute = (value[0] == L'\\' || value[0] == L'/') || (value[0] && value[1] == L':');
+    const std::wstring joined = absolute ? std::wstring(value) : module_dir() + L"\\" + value;
+    wchar_t full[MAX_PATH]{};
+    const DWORD n = GetFullPathNameW(joined.c_str(), MAX_PATH, full, nullptr);
+    return (n > 0 && n < MAX_PATH) ? std::wstring(full) : joined;
 }
 
 void show_error(HWND owner, const std::wstring& text) {
@@ -230,9 +243,8 @@ private:
 
     // パネルの「サンプル」の一覧。MMD-AINakawari.ini の home（AIナカワリ のフォルダ）の中にある
     static std::wstring samples_path() {
-        wchar_t home[MAX_PATH]{};
-        GetPrivateProfileStringW(L"MMD-AINakawari", L"home", L"", home, MAX_PATH, (module_dir() + L"\\MMD-AINakawari.ini").c_str());
-        return *home ? std::wstring(home) + L"\\mmd_ainakawari\\prompt_samples.txt" : std::wstring();
+        const std::wstring home = ini_path(L"home");
+        return home.empty() ? std::wstring() : home + L"\\mmd_ainakawari\\prompt_samples.txt";
     }
 
     void open_window() {
@@ -275,21 +287,19 @@ private:
     // Python の窓を起動する。どの MMD かを --open（窓を出す）か --attach（隠したまま）で渡す。
     void launch(const wchar_t* how, bool show_errors) {
         const std::wstring ini = module_dir() + L"\\MMD-AINakawari.ini";
-        wchar_t python[MAX_PATH]{}, home[MAX_PATH]{};
-        GetPrivateProfileStringW(L"MMD-AINakawari", L"python", L"", python, MAX_PATH, ini.c_str());
-        GetPrivateProfileStringW(L"MMD-AINakawari", L"home", L"", home, MAX_PATH, ini.c_str());
-        if (!*python || !*home) {
+        const std::wstring python = ini_path(L"python"), home = ini_path(L"home");
+        if (python.empty() || home.empty()) {
             log_line("launch: python/home missing");
             if (show_errors) show_error(hwnd_, L"MMD-AINakawari.ini に python と home を書いてください:\n" + ini);
             return;
         }
         wchar_t args[96]{};
         swprintf_s(args, L" -m mmd_ainakawari.app %s %llu", how, static_cast<unsigned long long>(reinterpret_cast<UINT_PTR>(hwnd_)));
-        std::wstring command = L"\"" + std::wstring(python) + L"\"" + args;
+        std::wstring command = L"\"" + python + L"\"" + args;
         STARTUPINFOW startup{};
         startup.cb = sizeof(startup);
         PROCESS_INFORMATION process{};
-        if (!CreateProcessW(python, &command[0], nullptr, nullptr, FALSE, 0, nullptr, home, &startup, &process)) {
+        if (!CreateProcessW(python.c_str(), &command[0], nullptr, nullptr, FALSE, 0, nullptr, home.c_str(), &startup, &process)) {
             log_line("launch failed %lu", GetLastError());
             if (show_errors) show_error(hwnd_, L"AIナカワリ を起動できませんでした（エラー " + std::to_wstring(GetLastError()) + L"）:\n"
                               + python + L"\n作業フォルダ: " + home);

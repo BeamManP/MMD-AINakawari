@@ -1,0 +1,10 @@
+# AIナカワリ の窓（同梱の Python）に入れる部品。版は 2026-11-05 にマスターの環境（mmd-mcp の .venv）で動いていた物。
+# mmd-mcp 自体は build_release.py が --no-deps で入れる（MCP のサーバー・画面の撮影の部品は窓では使わない）
+numpy==2.2.6
+psutil==7.2.2
+pywin32==312
+pydantic==2.13.5
+pydantic-core==2.46.5
+annotated-types==0.8.0
+typing-extensions==4.16.0
+typing-inspection==0.4.4

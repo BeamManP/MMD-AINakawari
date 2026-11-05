@@ -214,6 +214,12 @@ Kimodo の公式のコード・説明書・デモ、よその連携（Blender Br
   - Python の環境は 2 つのまま（Kimodo 3.10・MotionBricks 3.12）。MotionBricks の環境に torch は無く、まとめても数百 MB しか減らない
   - 窓は zip に同梱の Python（tkinter 入り）で動かす
   - 検証用のまっさらな MMD: `F:\AINakawari_検証\MikuMikuDance_v932x64\`（MMDPlugin・MME 無し。exe はいつもの物と同じ）
+- **配布の zip（11-05 夜に作った・検証用の MMD で通った）**: `python tools\release\build_release.py --mmdplugin <MMDPlugin_v0.41_x64.zip>`（`--allow-dirty` で試し作り）。できた物は `work\release\`。70MB
+  - 形: 直下に `AIナカワリ導入.cmd`・`MMD-AINakawari\`（`python\`＝python-build-standalone 3.10.19 ＋ 窓の部品 8 つ（`tools/release/requirements.txt`、sha256 つき）＋ mmd-mcp を `--no-deps` で・`app\`・`uv\uv.exe` 0.9.26・`mmdplugin\`）・`plugin\MMD-AINakawari\`（DLL と ini だけ。ini は `..\..\MMD-AINakawari\…` の相対。プラグインは相対の場所を DLL のフォルダから読む）
+  - **MMDPlugin は `plugin\` の下の DLL を奥まで全部読み込もうとする**。最初は Python を `plugin\MMD-AINakawari\python\` に置いて、MMD が起動直後に 0xC0000005（ntdll）で落ちた。部品を外して切り分け（AIナカワリの DLL を外しても・MME を外しても落ち、Python のフォルダを `plugin\` の外に出すと動く。日本語のフォルダ名は関係なし）。組み立てのスクリプトは `plugin\` の下に DLL と ini 以外があれば止まる
+  - 導入の本体は `tools/install_plugin.py`（cmd は同梱の Python で呼ぶだけの ASCII。日本語の案内を cmd に書くと化けやすい）。exe の sha256（mmd-mcp の `VERIFIED_SHA256`）・MMD が開いていないかを見てから、MME を `plugin\mme\` に移し（移す先に中身の違う同名があれば止まる）、MMDPlugin を置く（d3d9.dll を最後に置く。d3dx9_43.dll は既にあればそのまま。MME でも MMDPlugin でもない d3d9.dll があれば止まる）。zip を MMD の外に展開した時は、フォルダを選ぶ窓を出して写す（この道は未確認）
+  - 確かめたこと（検証用の MMD）: MME 入りの形から導入 → マスターの MMD と同じ置き方・2 回目は何もしない。起動すると MME・MMDPlugin・AIナカワリの DLL が読み込まれ、同梱の pythonw.exe が `--attach` で立ち上がり、メニューに「AIナカワリ」、窓も開いた。パネルはモデルを読み込んでいない（カメラ用のモード）ので隠れたまま＝決めた通り
+  - 試す時の注意: 開発版の窓（mmd-mcp の .venv）が動いていると、ほかの MMD のプラグインもそちらにつながる（窓の目印は 1 つ）。同梱の Python を試す時は開発版の窓を止める
 - **導入（配布）の前の案**: 11-04 マスター判断で「A: MMD の窓にセットアップ画面」。使うのは AI に慣れていない人なので、ボタンで案内し、失敗したらやり直しのボタン。小さい Python（埋め込み版）を同梱して窓は最初から動かす。mmd-mcp はライブラリとして一緒に入れる（MCP のサーバーは立てない。確かめた版に固定）
   - 大きさの実測（マスターの環境）: Llama-3-8B-Instruct 15.0GB・Kimodo の Python 環境 5.3GB（Python 3.10.19・torch 2.11.0+cu128）・Kimodo のモデル 1.1GB・LLM2Vec の LoRA 0.3GB → 約 22GB。最初に置き場所と空き容量を確かめる
   - **Llama-3-8B-Instruct は Hugging Face で gated = manual（Meta への申請・手動承認・トークンが要る）**。窓は申請のページを開いてトークンを貼る欄まで。Kimodo のモデル（NVIDIA Open Model License・商用可）と LLM2Vec の LoRA は同意制ではない。有志の同意制なしの版（`Aero-Ex/KIMODO-Meta3_llm2vec_FP16`・`_NF4` など）は、許諾と中身を確かめるまで使わない
