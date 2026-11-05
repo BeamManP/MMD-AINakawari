@@ -87,6 +87,14 @@ def text_encoders():
     return os.path.join(kimodo_dir(), "text_encoders")
 
 
+def check_text_encoders():
+    """文の読み取りが全部置けているか（tools/prepare_text_encoder.py が最後に READY を置く）。途中で止まった物は使わない。
+    低負荷の生成と、高速モードのサーバーの起動の前に見る（tools/start_textencoder.cmd も同じ印を見る）。"""
+    folder = text_encoders()
+    if not os.path.isfile(os.path.join(folder, "READY")):
+        raise NotSetUp(f"文の読み取りのモデルが {folder} に置けていません（途中で止まったかもしれません）。{SETUP_HINT}")
+
+
 def soma_json():
     """Kimodo の骨格（tools/export_skeleton.py が書き出す）。"""
     return os.path.join(kimodo_dir(), "tools", "somaskel30.json")

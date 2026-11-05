@@ -7,6 +7,12 @@ cd /d "%~dp0"
 set "HF_HUB_CACHE=%~dp0hf_cache"
 rem Llama is read from text_encoders (tools/prepare_text_encoder.py), not from the gated meta-llama repo.
 set "TEXT_ENCODERS_DIR=%~dp0text_encoders"
+rem READY is written last by prepare_text_encoder.py. Without it the folder is half-made (and may still point at meta-llama).
+if not exist "%TEXT_ENCODERS_DIR%\READY" (
+  echo The text encoder is not ready: "%TEXT_ENCODERS_DIR%\READY" is missing. Run tools\prepare_text_encoder.py again.
+  pause
+  exit /b 1
+)
 set "TEXT_ENCODER_TMP_FOLDER=%~dp0te_tmp"
 set GRADIO_SERVER_NAME=127.0.0.1
 set PYTHONUTF8=1

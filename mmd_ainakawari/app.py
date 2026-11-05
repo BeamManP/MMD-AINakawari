@@ -731,6 +731,7 @@ class App:
     def _start_server(self):
         try:
             cmd = paths.server_cmd()
+            paths.check_text_encoders()
         except paths.NotSetUp as e:
             messagebox.showerror("AIナカワリ", str(e), parent=self.root)
             return

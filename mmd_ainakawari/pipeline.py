@@ -412,9 +412,8 @@ def run_kimodo(job, work_dir, on_line=None, mode="low"):
     if mode not in PERF_MODES:
         raise ValueError(f"動作モードは {list(PERF_MODES)} のどれかです（{mode}）")
     log = on_line or (lambda _l: None)
-    # READY は tools/prepare_text_encoder.py が全部置けた時に置く（途中で止まった物を使わない）
-    if mode == "low" and not os.path.isfile(os.path.join(paths.text_encoders(), "READY")):
-        raise paths.NotSetUp(f"文の読み取りのモデルが {paths.text_encoders()} にありません。{paths.SETUP_HINT}")
+    if mode == "low":
+        paths.check_text_encoders()
     if mode == "fast" and not _port_open(TEXT_SERVER_PORT):
         raise RuntimeError("高速モードはテキスト読み取りサーバーが要ります。「サーバーを起動」を押すか、低負荷モードにしてください")
     # 片付けから頼み終わるまでを 1 つずつにする。MMD ごとの窓が違うモードで同時に頼むと、片付けと立ち上げが交互に入って

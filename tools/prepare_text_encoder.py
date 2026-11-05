@@ -86,8 +86,17 @@ def find_blob(cache, digest):
     return None
 
 
+def stamp(path):
+    st = os.stat(path)
+    return [st.st_size, st.st_mtime_ns]
+
+
 class Verified:
-    """照らし済みの記録（名前 → [大きさ, 更新時刻, sha256]）。大きさか更新時刻が変われば照らし直す。"""
+    """照らし済みの記録（名前 → [大きさ, 更新時刻, sha256]）。大きさか更新時刻が変われば照らし直す。
+
+    ほかの場所とハードリンクで共有している物（--reuse で使った HF のキャッシュ）は、記録を信じず毎回照らす。
+    共有先で大きさと時刻を変えずに書き換えられると、記録では見分けられないため（11-05 Codex のレビュー 2 回目）。
+    """
 
     def __init__(self, folder):
         self.path = os.path.join(folder, VERIFIED)
@@ -96,24 +105,33 @@ class Verified:
                 self.data = json.load(f)
         except (OSError, ValueError):
             self.data = {}
+        if not isinstance(self.data, dict):   # 記録が壊れていたら、全部照らし直す
+            self.data = {}
 
     def ok(self, folder, name, digest):
         path = os.path.join(folder, name)
         if not os.path.isfile(path):
             return False
-        st = os.stat(path)
-        if self.data.get(name) == [st.st_size, st.st_mtime_ns, digest]:
+        if os.stat(path).st_nlink == 1 and self.data.get(name) == stamp(path) + [digest]:
             return True
-        print(f"照らしています: {name}", flush=True)
-        if sha256(path) != digest:
-            return False
-        self.mark(folder, name, digest)
-        return True
+        return self.check(folder, name, digest)
 
-    def mark(self, folder, name, digest):
-        st = os.stat(os.path.join(folder, name))
-        self.data[name] = [st.st_size, st.st_mtime_ns, digest]
+    def check(self, folder, name, digest):
+        """照らして、合えば記録する。照らしている間に書き換わったら照らし直す（前後の大きさ・時刻を比べる）。"""
+        path = os.path.join(folder, name)
+        for _ in range(3):
+            print(f"照らしています: {name}", flush=True)
+            before = stamp(path)
+            actual = sha256(path)
+            if stamp(path) == before:
+                break
+        else:
+            raise SystemExit(f"{name} が照らしている間に書き換わり続けています。ほかのプログラムが触っていないか確かめてください")
+        if actual != digest:
+            return False
+        self.data[name] = before + [digest]
         write_atomic(self.path, json.dumps(self.data, indent=1))
+        return True
 
 
 def place_llama(dest, reuse):
@@ -130,6 +148,8 @@ def place_llama(dest, reuse):
             remove(target)
         partial = target + ".partial"
         remove(partial)   # 前に途中で止まった残り（キャッシュへのハードリンクのこともある。消してもキャッシュは残る）
+        # 置いてから 1 回だけ照らす（照らした時の大きさ・時刻を記録と組にするため）。合わなければ消す。
+        # 照らし終わるまで READY は無いので、途中の物が使われることはない
         blob = find_blob(reuse, digest)
         if blob:
             print(f"手元のキャッシュから使います: {name}", flush=True)
@@ -137,22 +157,18 @@ def place_llama(dest, reuse):
                 os.link(blob, partial)
             except OSError:
                 shutil.copyfile(blob, partial)
-            print(f"照らしています: {name}", flush=True)
-            if sha256(partial) != digest:
-                print(f"キャッシュの中身が違ったので、落とします: {name}", flush=True)
-                remove(partial)
-                blob = None
-        if not blob:
-            print(f"落とします: {name}（{LLAMA_MIRROR}）", flush=True)
-            got = hf_hub_download(LLAMA_MIRROR, name, revision=LLAMA_MIRROR_REVISION, local_dir=downloads)
-            print(f"照らしています: {name}", flush=True)
-            actual = sha256(got)
-            if actual != digest:
-                remove(got)
-                raise SystemExit(f"{name} の中身が Meta の物と違います（{actual}）。置かずに止めます")
-            os.replace(got, partial)
+            os.replace(partial, target)
+            if verified.check(folder, name, digest):
+                continue
+            print(f"キャッシュの中身が違ったので、落とします: {name}", flush=True)
+            remove(target)
+        print(f"落とします: {name}（{LLAMA_MIRROR}）", flush=True)
+        got = hf_hub_download(LLAMA_MIRROR, name, revision=LLAMA_MIRROR_REVISION, local_dir=downloads)
+        os.replace(got, partial)
         os.replace(partial, target)
-        verified.mark(folder, name, digest)
+        if not verified.check(folder, name, digest):
+            remove(target)
+            raise SystemExit(f"{name} の中身が Meta の物と違います。置かずに止めます")
     for name in LLAMA_LICENSE_FILES:
         target = os.path.join(folder, name)
         if not os.path.isfile(target):
@@ -188,9 +204,8 @@ def place_adapters(dest, llama):
     with open(os.path.join(dest, DOWNLOAD, *MNTP.split("/"), "adapter_config.json"), encoding="utf-8") as f:
         config = json.load(f)
     config["base_model_name_or_path"] = os.path.abspath(llama)
-    path = os.path.join(dest, *MNTP.split("/"), "adapter_config.json")
-    remove(path)   # 原本へのハードリンクなので、書く前に切り離す
-    write_atomic(path, json.dumps(config, indent=2, ensure_ascii=False))
+    # 使う方の adapter_config.json は原本へのハードリンク。os.replace は名前だけを入れ替えるので、原本は変わらない
+    write_atomic(os.path.join(dest, *MNTP.split("/"), "adapter_config.json"), json.dumps(config, indent=2, ensure_ascii=False))
 
 
 def main():
