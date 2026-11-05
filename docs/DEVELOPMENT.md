@@ -7,7 +7,9 @@ MMD でいつもどおりポーズを付けてキーを打つ → MMD のメニ�
 2026-11-03 作成（メモリア）。Unity 版 KimodoLink（`E:\UnityProject\PaizuriSim\Assets\KimodoLink`）の MMD 版。
 
 ## 入れ方（MMDPlugin のプラグイン）
-1. MMD に [MMDPlugin](https://bowlroll.net/file/121761)（ver0.41 64bit・おいがみ さん）を入れる: `d3d9.dll`・`d3dx9_43.dll`・`MMDPlugin.dll` を MMD のフォルダに。MME も使うなら MME 一式を `plugin\mme\` に移す（MMDPlugin の説明書のとおり。MMD 9.32 で動くのを 11-03 に確認）
+配布の zip から入れる時は README の「インストール」。下は開発版（リポジトリから動かす）の形。
+
+1. MMD に [MMDPlugin](https://bowlroll.net/file/121761)（ver0.41 64bit・おいがみ さん）を入れる: `d3d9.dll`・`d3dx9_43.dll`（MMDPlugin の中継。要る）・`MMDPlugin.dll` を MMD のフォルダに。MME も使うなら MME 一式を `plugin\mme\` に移す（MMDPlugin の説明書のとおり。MMD 9.32 で動くのを 11-03 に確認）
 2. `mmd_plugin\build.cmd` でビルドした `mmd_plugin\bin\MMD-AINakawari.dll` を、MMD の `plugin\MMD-AINakawari\` に置く
 3. 同じフォルダに `mmd_plugin\MMD-AINakawari.ini.example` を `MMD-AINakawari.ini` として置き、`python`（MMDKimodo を動かす pythonw.exe）と `home`（このフォルダ）を書く
 
@@ -217,9 +219,21 @@ Kimodo の公式のコード・説明書・デモ、よその連携（Blender Br
 - **配布の zip（11-05 夜に作った・検証用の MMD で通った）**: `python tools\release\build_release.py --mmdplugin <MMDPlugin_v0.41_x64.zip>`（`--allow-dirty` で試し作り）。できた物は `work\release\`。70MB
   - 形: 直下に `AIナカワリ導入.cmd`・`MMD-AINakawari\`（`python\`＝python-build-standalone 3.10.19 ＋ 窓の部品 8 つ（`tools/release/requirements.txt`、sha256 つき）＋ mmd-mcp を `--no-deps` で・`app\`・`uv\uv.exe` 0.9.26・`mmdplugin\`）・`plugin\MMD-AINakawari\`（DLL と ini だけ。ini は `..\..\MMD-AINakawari\…` の相対。プラグインは相対の場所を DLL のフォルダから読む）
   - **MMDPlugin は `plugin\` の下の DLL を奥まで全部読み込もうとする**。最初は Python を `plugin\MMD-AINakawari\python\` に置いて、MMD が起動直後に 0xC0000005（ntdll）で落ちた。部品を外して切り分け（AIナカワリの DLL を外しても・MME を外しても落ち、Python のフォルダを `plugin\` の外に出すと動く。日本語のフォルダ名は関係なし）。組み立てのスクリプトは `plugin\` の下に DLL と ini 以外があれば止まる
-  - 導入の本体は `tools/install_plugin.py`（cmd は同梱の Python で呼ぶだけの ASCII。日本語の案内を cmd に書くと化けやすい）。exe の sha256（mmd-mcp の `VERIFIED_SHA256`）・MMD が開いていないかを見てから、MME を `plugin\mme\` に移し（移す先に中身の違う同名があれば止まる）、MMDPlugin を置く（d3d9.dll を最後に置く。d3dx9_43.dll は既にあればそのまま。MME でも MMDPlugin でもない d3d9.dll があれば止まる）。zip を MMD の外に展開した時は、フォルダを選ぶ窓を出して写す（この道は未確認）
+  - 導入の本体は `tools/install_plugin.py`（cmd は同梱の Python で呼ぶだけの ASCII。日本語の案内を cmd に書くと化けやすい）。exe の sha256（mmd-mcp の `VERIFIED_SHA256`）・MMD が開いていないかを見てから、MME を `plugin\mme\` に移し（移す先に中身の違う同名があれば止まる）、MMDPlugin を置く（d3d9.dll を最後に置く。MME でも MMDPlugin でもない d3d9.dll・MMDPlugin の物でない d3dx9_43.dll があれば止まる）。zip を MMD の外に展開した時は、フォルダを選ぶ窓を出して写す（この道は未確認）
+  - **MMDPlugin 0.41 の `d3dx9_43.dll` は MMDPlugin の中継**（11-06）: 133KB・署名なし・版の情報なし（Microsoft の物は 2.4MB・署名つき）。起動した MMD は exe の横の物と System32 の物の両方を読んでいた。外すと起動直後に 0xC000041D で落ちる。説明書の「インストール方法」は d3d9.dll と MMDPlugin.dll の 2 つだけだが、0.41 の更新履歴に「d3dx9 のフックを一部追加」。なので再配布は MMDPlugin の条件（非商用なら転載は連絡不要）の範囲で、Microsoft の再配布の問題ではない。前は「既にあればそのまま」にしていたが、別の d3dx9_43.dll（Microsoft の物を横に置いている人など）だと中継が置かれず落ちるので、止めて案内する形に直した
   - 確かめたこと（検証用の MMD）: MME 入りの形から導入 → マスターの MMD と同じ置き方・2 回目は何もしない。起動すると MME・MMDPlugin・AIナカワリの DLL が読み込まれ、同梱の pythonw.exe が `--attach` で立ち上がり、メニューに「AIナカワリ」、窓も開いた。パネルはモデルを読み込んでいない（カメラ用のモード）ので隠れたまま＝決めた通り
   - 試す時の注意: 開発版の窓（mmd-mcp の .venv）が動いていると、ほかの MMD のプラグインもそちらにつながる（窓の目印は 1 つ）。同梱の Python を試す時は開発版の窓を止める
+- **セットアップの画面（11-06）**: `mmd_ainakawari/installer/`。詳細の窓の下の「セットアップ」で開く。入れる場所（既定は空きのいちばん多い固定ディスクの `\AINakawari`。半角の英数字・`_.-` だけ）・MotionBricks を入れるか・ライセンスの同意（Llama 3 のライセンスと使い方の決まり・NVIDIA の 2 つ）を選んで、ボタン一つ
+  - 形: `<場所>\kimodo\`（paths.py の Kimodo の形そのまま）・`<場所>\motionbricks\`・`<場所>\uv\`（uv の控えと uv が落とした Python。`UV_PYTHON_PREFERENCE=only-managed`・`UV_NO_CONFIG`）・`<場所>\hf_home\`（セットアップ中の huggingface_hub。xet の部品の控えは 0）・`setup_state.json`（済んだ段 → 版）
+  - 段: Kimodo の zip → `uv venv`（3.10.19）＋ `kimodo-requirements.txt`（82 個・sha256 つき。マスターの `F:\kimodo\.venv` の版を制約にして `uv pip compile`）＋ kimodo を `--no-deps --no-build-isolation` → 骨格 → Kimodo のモデル（`fetch_kimodo_model.py`。版で落として `refs\main` を書く。Kimodo は LOCAL_CACHE の時 main で探すため）→ 文の読み取り（`prepare_text_encoder.py`）→ 起動バッチ → 試しの生成（低負荷と同じ置き方・オフライン）で paths.json に書く。MotionBricks: zip → LFS の 3 ファイル（SOMA の onnx 2 つと骨格の usd。LFS の識別子＝sha256 で照らす。GitHub の zip の LFS は目印だけ）→ `uv sync --frozen` → 試しの生成（初回は TensorRT の準備）で paths.json に書く
+  - Kimodo の環境から viser と SOMA-X（git から入っていた。生成の道では読まない）を外した。torchvision も読まないので外した
+  - **kimodo は入れる時に C++ の部品（MotionCorrection の `_motion_correction.pyd`。生成の「後処理」が使う）を CMake とコンパイラで組み立てる**。マスターの PC は VS があって組み立てられていたが、使う人の PC には無い（試しで「CMake must be installed」で止まった）。`SKIP_MOTION_CORRECTION_IN_SETUP=1`（kimodo の setup.py の切り替え）で組み立てずに入れ、組み立て済みの pyd を置く。pyd は zip の `MMD-AINakawari\prebuilt\`（開発版は `work\prebuilt\`）に、`motion_correction.json`（ファイル名・sha256・作った元の kimodo のコミット）と一緒に置く。セットアップはコミットと sha256 を照らしてから置き、`import` できるかを確かめる
+  - pyd も torch も Visual C++ のランタイム（System32 の `msvcp140.dll`）を要る（torch の `c10.dll` も MSVCP140 を読む。Python 本体には vcruntime140 だけ）。セットアップは最初に見て、無ければ Microsoft の再頒布パッケージへ案内する
+  - MotionBricks の Python は 3.12.12 に固定（`.python-version` は 3.12 だが、`UV_NO_CONFIG` の下では uv が 3.14 を選び、TensorRT の部品が無くて止まった）
+  - 試し（11-06・`F:\AINakawari_setup_test`・Llama はマスターのキャッシュから写した）: 全 11 段が通った。Kimodo の部品 82 個の初回は torch の取得で約 25 分、環境 18 秒（控えから）・骨格 9 秒・Kimodo のモデル 250 秒・文の読み取り 45 秒（写しの照らし合わせ）・Kimodo の試しの生成 31 秒（60 フレーム）・MotionBricks の zip 1 秒・LFS 212 秒・環境 760 秒・試しの生成 75 秒（31 フレーム。TensorRT の準備込み）。続きからの再開で済んだ段が飛ばされるのも確かめた
+  - 続きから: 版が setup_state.json と同じ段は飛ばす。ある段をやり直したら同じ組の後ろの段の印も消す。落とす物は `.part` から続き（Range）。中止は uv などの子プロセスごと taskkill
+  - 窓のプロセスは、セットアップの窓が出ている間は MMD を全部閉じても終わらない（Hub._finish）。済んだら窓の「中割り」タブなどを作り直す（App.refresh_setup）
+- **窓の記録（11-06）**: `work\app.log`（`applog.py`）。窓のログの行・失敗の traceback・拾われなかった例外（tk・スレッド・pythonw が捨てる stdout/stderr）・セットアップのログ。1MB で 1 世代回す。ログの窓の「記録のフォルダを開く」
 - **導入（配布）の前の案**: 11-04 マスター判断で「A: MMD の窓にセットアップ画面」。使うのは AI に慣れていない人なので、ボタンで案内し、失敗したらやり直しのボタン。小さい Python（埋め込み版）を同梱して窓は最初から動かす。mmd-mcp はライブラリとして一緒に入れる（MCP のサーバーは立てない。確かめた版に固定）
   - 大きさの実測（マスターの環境）: Llama-3-8B-Instruct 15.0GB・Kimodo の Python 環境 5.3GB（Python 3.10.19・torch 2.11.0+cu128）・Kimodo のモデル 1.1GB・LLM2Vec の LoRA 0.3GB → 約 22GB。最初に置き場所と空き容量を確かめる
   - **Llama-3-8B-Instruct は Hugging Face で gated = manual（Meta への申請・手動承認・トークンが要る）**。窓は申請のページを開いてトークンを貼る欄まで。Kimodo のモデル（NVIDIA Open Model License・商用可）と LLM2Vec の LoRA は同意制ではない。有志の同意制なしの版（`Aero-Ex/KIMODO-Meta3_llm2vec_FP16`・`_NF4` など）は、許諾と中身を確かめるまで使わない

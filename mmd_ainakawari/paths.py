@@ -13,8 +13,8 @@ import os
 HOME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORK_DIR = os.path.join(HOME, "work")
 PATHS_FILE = os.path.join(WORK_DIR, "paths.json")
-# 窓からのセットアップができたら、ここを「詳細の窓のセットアップで入れてください」にする（11-05 Codex のレビュー: まだ無い画面を案内していた）
-SETUP_HINT = "README のインストールの手順で入れて、python -m mmd_ainakawari.paths で場所を書いてください"
+# 入れ方の案内（セットアップの画面は mmd_ainakawari/installer。11-06 にできた）
+SETUP_HINT = "詳細の窓の下の「セットアップ」で入れてください"
 KEYS = ("kimodo", "motionbricks")
 
 

@@ -1,0 +1,31 @@
+# Kimodo の環境の部品（セットアップが uv で入れる。kimodo 本体は GitHub の zip から --no-deps で後から入れる）。
+# 解き方（版はマスターの環境に合わせる。sha256 つき）:
+#   uv pip compile kimodo-requirements.in -c kimodo-constraints.txt --generate-hashes --python-version 3.10 --python-platform x86_64-pc-windows-msvc --index-strategy unsafe-best-match --emit-index-url -o kimodo-requirements.txt
+--extra-index-url https://download.pytorch.org/whl/cu128
+# 公式の手順では torch は先に手で入れる（CUDA 12.8 の物）
+torch==2.11.0+cu128
+# kimodo の pyproject.toml の dependencies（kimodo e1c219c）
+hydra-core>=1.3
+omegaconf>=2.3
+numpy>=1.23
+scipy>=1.10
+transformers==5.1.0
+urllib3>=2.6.3
+boto3
+peft>=0.18
+einops>=0.7
+tqdm>=4.0
+packaging>=21.0
+pydantic>=2.0
+filelock>=3.20.3
+gradio>=6.8.0
+gradio_client>=1.0
+trimesh>=3.21.7
+scenepic>=1.1.0
+pillow>=9.0
+av>=16.1.0
+bvhio
+# 文の読み取りを落とす（tools/prepare_text_encoder.py）・Kimodo のモデルを落とす（セットアップ）
+huggingface_hub
+# kimodo を zip から入れる時の組み立て（--no-build-isolation で使う。uv がネットから別に取りに行かないように）
+setuptools

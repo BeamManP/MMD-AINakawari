@@ -75,8 +75,11 @@ SMOKE = (
     "import mmd_mcp.bone_selection, mmd_mcp.bone_state;"
     "import mmd_ainakawari.app, mmd_ainakawari.panel, mmd_ainakawari.runner, mmd_ainakawari.nakawari,"
     " mmd_ainakawari.pipeline, mmd_ainakawari.smooth_stop, mmd_ainakawari.mmd_link, mmd_ainakawari.mmd_memory,"
-    " mmd_ainakawari.mmd_skel, mmd_ainakawari.paths;"
+    " mmd_ainakawari.mmd_skel, mmd_ainakawari.paths, mmd_ainakawari.applog;"
+    "import mmd_ainakawari.installer.window, mmd_ainakawari.installer.steps as s;"
     "import os, mmd_mcp.bone_selection as b; assert os.path.isfile(b.DLL_PATH), b.DLL_PATH;"
+    "assert os.path.isfile(s.REQUIREMENTS) and os.path.isfile(s.FETCH_MODEL), s.REQUIREMENTS;"
+    "uv = os.path.join(os.path.dirname(s.paths.HOME), 'uv', 'uv.exe'); assert os.path.isfile(uv), uv;"
     "print('ok')"
 )
 THIRD_PARTY = """AIナカワリ の zip に同梱している物
@@ -88,6 +91,14 @@ THIRD_PARTY = """AIナカワリ の zip に同梱している物
   python\\Lib\\site-packages\\mmd_mcp-*.dist-info の中
 - uv {uv}（https://github.com/astral-sh/uv）: MIT OR Apache-2.0
 - MMDPlugin 0.41 x64（おいがみ）: 転載は非商用に限り連絡不要。mmdplugin\\MMDPlugin_readme.txt
+  d3dx9_43.dll も MMDPlugin の物（中で Windows の d3dx9_43.dll を呼ぶ中継。Microsoft の DirectX の物ではない）
+
+AI のモデル（Kimodo・MotionBricks・Meta Llama 3・LLM2Vec）と、それを動かす Python の部品は同梱していない。
+詳細の窓の「セットアップ」が、使う人がライセンスに同意してから、それぞれの配布元から落とす:
+- Kimodo（NVIDIA）: コードは Apache-2.0、モデルは NVIDIA Open Model License
+- MotionBricks（NVIDIA）: コードは Apache-2.0、モデルは NVIDIA Open Model Agreement
+- Meta-Llama-3-8B-Instruct（Meta）: Meta Llama 3 Community License・Acceptable Use Policy。Built with Meta Llama 3
+- LLM2Vec（McGill-NLP）: MIT
 """
 
 

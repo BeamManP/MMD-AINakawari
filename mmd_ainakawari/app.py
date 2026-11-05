@@ -27,6 +27,7 @@ import winerror
 from mmd_mcp.windows import list_windows
 
 from . import applog, gpu, panel, paths, runner, samples, smooth_stop
+from .installer import window as setup_window
 from .message_window import MessageWindow, register_message
 from .mmd_link import MMDLink
 from .widgets import Fold, PromptRows, ScrollFrame
@@ -121,7 +122,10 @@ class Hub:
             self._finish()
 
     def _finish(self):
-        """相手の MMD が 1 つも無くなったら終わる。"""
+        """相手の MMD が 1 つも無くなったら終わる。セットアップの窓が出ている間は、閉じられるまで待つ（裏の uv などを置き去りにしない）。"""
+        if setup_window.is_open():
+            self.root.after(1000, lambda: self._finish() if not self.apps and not self.waiting and self.alive else None)
+            return
         self.alive = False
         self.root.destroy()
 
@@ -264,6 +268,7 @@ class App:
         sf = ttk.Frame(foot)
         sf.pack(fill="x", pady=(4, 0))
         ttk.Button(sf, text="ログ", width=6, command=self._toggle_log).pack(side="right")
+        ttk.Button(sf, text="セットアップ", command=self._open_setup).pack(side="right", padx=(0, 4))
         # 状態は 1 行（下の段の高さを変えない）。長い失敗の文はログと失敗の窓に全文が出る
         self.status = tk.StringVar(value="MMD でキーを打ってから「生成」を押してください")
         ttk.Label(sf, textvariable=self.status, foreground="#335").pack(side="left", fill="x", expand=True)
@@ -287,6 +292,7 @@ class App:
         bar.configure(command=self.log.yview)
         self._mode_changed()
         self._perf_changed()
+        self.refresh_setup()
 
         # 窓の高さの下限: 上と下の段と、タブの見出し＋中身 3 行ほど。これより低くできないので、生成と状態は必ず見える
         self.root.update_idletasks()
@@ -397,13 +403,36 @@ class App:
                  wraplength=500, anchor="w", justify="left").pack(fill="x")
         self.key_stop = tk.BooleanVar(value=self.cfg["key_stop"])
         self.wrist_lerp = tk.BooleanVar(value=self.cfg["wrist_lerp"])
-        state = "normal" if smooth_stop.available() else "disabled"
-        ttk.Checkbutton(t, text="キーごとに止まる（外すと、次のキーへ向かう勢いのまま通る）", variable=self.key_stop,
-                        state=state).pack(anchor="w", pady=(10, 0))
-        ttk.Checkbutton(t, text="手首は普通の補間（MotionBricks は手首を回しすぎることがある）", variable=self.wrist_lerp,
-                        state=state).pack(anchor="w", pady=(4, 0))
-        if not smooth_stop.available():
-            ttk.Label(t, text="MotionBricks が入っていません（詳細の窓のセットアップで入れられます）", foreground="#a33").pack(anchor="w", pady=(10, 0))
+        self.nakawari_checks = [
+            ttk.Checkbutton(t, text="キーごとに止まる（外すと、次のキーへ向かう勢いのまま通る）", variable=self.key_stop),
+            ttk.Checkbutton(t, text="手首は普通の補間（MotionBricks は手首を回しすぎることがある）", variable=self.wrist_lerp),
+        ]
+        self.nakawari_checks[0].pack(anchor="w", pady=(10, 0))
+        self.nakawari_checks[1].pack(anchor="w", pady=(4, 0))
+        self.nakawari_missing = ttk.Label(t, text="MotionBricks が入っていません（下の「セットアップ」で入れられます）", foreground="#a33")
+
+    def _open_setup(self):
+        setup_window.open_window(self.hub.root, self.diagnosis, on_done=self.refresh_setup)
+
+    def refresh_setup(self):
+        """入っている物（Kimodo・MotionBricks）に合わせて、窓の部品と状態の 1 行を出し直す。作った時と、セットアップが済んだ時に呼ぶ。"""
+        mb = smooth_stop.available()
+        for check in self.nakawari_checks:
+            check.configure(state="normal" if mb else "disabled")
+        if mb:
+            self.nakawari_missing.pack_forget()
+        else:
+            self.nakawari_missing.pack(anchor="w", pady=(10, 0))
+        if mb and self.cfg["smooth_stop"]:
+            self.smooth.set(True)
+        self._stop_changed()
+        try:
+            paths.kimodo_dir()
+        except paths.NotSetUp:
+            self.status.set("まだ AI のモデルが入っていません。下の「セットアップ」から入れてください")
+            return
+        if self.status.get().startswith("まだ AI のモデルが入っていません"):
+            self.status.set("MMD でキーを打ってから「生成」を押してください")
 
     def _perf_mode(self):
         return next(k for k, n in PERF_MODES if n == self.perf.get())

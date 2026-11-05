@@ -4,7 +4,8 @@ MMD のフォルダ（MikuMikuDance.exe のある所）に:
     - MMD-AINakawari\\（Python・app など）と plugin\\MMD-AINakawari\\（DLL と ini だけ）を置く。
       zip を MMD のフォルダの外に展開した時は、選んでもらった MMD のフォルダへ写す。
       Python を plugin\\ の下に置かないのは、MMDPlugin が plugin\\ の下の DLL を全部読み込もうとして MMD が落ちるため
-    - MMDPlugin（MMDPlugin.dll・d3d9.dll・d3dx9_43.dll）を exe の横に置く。MMDPlugin が既に入っていれば何もしない
+    - MMDPlugin（MMDPlugin.dll・d3d9.dll・d3dx9_43.dll。d3dx9_43.dll は MMDPlugin の中継で、Microsoft の物ではない）を
+      exe の横に置く。MMDPlugin が既に入っていれば何もしない
     - MME（exe の横の d3d9.dll・MMEffect.dll・MMHack.dll・MMEffect.ini・MMEffect.txt）を plugin\\mme\\ に移す。
       MMDPlugin の説明書の「MME も使う場合」の形
 自前の d3d9.dll は作らない。MME でも MMDPlugin でもない d3d9.dll が exe の横にあれば、触らずに止める。
@@ -137,9 +138,14 @@ def place_mmdplugin(mmd):
     if os.path.isfile(root("d3d9.dll")) and sha256(root("d3d9.dll")) != MMDPLUGIN_FILES["d3d9.dll"]:
         raise Stop("MikuMikuDance.exe の横に、MME でも MMDPlugin でもない d3d9.dll があります。\n"
                    "上書きすると今の動きが変わるので、何も変えずに止めます。何の d3d9.dll かを確かめてください。")
+    # MMDPlugin 0.41 の d3dx9_43.dll は Microsoft の物ではなく、中で Windows（System32）の物を呼ぶ MMDPlugin の中継
+    # （133KB・署名なし。説明書の導入の手順は 2 つだけだが、0.41 で「d3dx9 のフック」が足された）。
+    # 11-06 に検証用の MMD で、これが無いと起動直後に 0xC000041D で落ちるのを確かめた。なので別の d3dx9_43.dll があれば止める
+    if os.path.isfile(root("d3dx9_43.dll")) and sha256(root("d3dx9_43.dll")) != MMDPLUGIN_FILES["d3dx9_43.dll"]:
+        raise Stop("MikuMikuDance.exe の横に、MMDPlugin の物ではない d3dx9_43.dll があります。\n"
+                   "MMDPlugin は自前の d3dx9_43.dll（中で Windows の物を呼びます）を同じ場所に置く必要があるので、何も変えずに止めます。\n"
+                   "今の d3dx9_43.dll を別のフォルダへ移してから、もう一度ダブルクリックしてください。")
     for name in MMDPLUGIN_FILES:
-        if name == "d3dx9_43.dll" and os.path.isfile(root(name)):
-            continue   # 既にある物は使う（MMDPlugin の説明書でも、置くのは d3d9.dll と MMDPlugin.dll だけ）
         copy_atomic(os.path.join(MMDPLUGIN_SRC, name), root(name))
     readme_dir = os.path.join(mmd, "plugin", "MMDPlugin")
     os.makedirs(readme_dir, exist_ok=True)

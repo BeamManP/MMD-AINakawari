@@ -14,8 +14,7 @@ MMD（MikuMikuDance）で打ったキーとキーの間を、AI が中割りし�
 |---|---|
 | ![生成の前](docs/images/timeline_before.png) | ![生成の後](docs/images/timeline_after.png) |
 
-> [!WARNING]
-> **開発版です。** インストーラーはまだ無く、入れるのに Python の環境を 3 つ作る必要があります（下の「インストール」）。
+> [!NOTE]
 > 本プロジェクトは NVIDIA とは関係のない個人の制作物です。
 
 ## できること
@@ -37,65 +36,49 @@ MMD（MikuMikuDance）で打ったキーとキーの間を、AI が中割りし�
 |---|---|---|
 | OS | Windows 10／11（64bit） | Windows 11 |
 | MMD | MikuMikuDance 9.32 x64（日本語版） | 9.32 x64 |
-| プラグインの土台 | [MMDPlugin](https://bowlroll.net/file/121761) ver0.41 64bit | 0.41 |
-| GPU | NVIDIA の GPU。GTX 16 シリーズ／RTX 20 シリーズ以降、VRAM 6GB 以上（高速モードは 20GB 以上） | RTX 3090（24GB） |
+| GPU | NVIDIA の GPU。GTX 16 シリーズ／RTX 20 シリーズ以降、VRAM 6GB 以上（高速モードは 20GB 以上）。ドライバは新しい物に | RTX 3090（24GB） |
 | メモリ | 32GB 推奨（低負荷モードは文の読み取りに約 15GB 使う） | 64GB |
-| ディスク | 約 30GB（モデルと Python の環境） | |
+| ランタイム | [Microsoft Visual C++ 再頒布可能パッケージ（x64）](https://aka.ms/vs/17/release/vc_redist.x64.exe)。入っていなければ、セットアップがここへ案内します | |
+| ディスク | 約 29GB（Kimodo 約 23GB・MotionBricks 約 6GB。MotionBricks は入れなくても使える） | |
+| ネット | セットアップの時だけ（約 20GB を落とします） | |
 
+プラグインの土台の [MMDPlugin](https://bowlroll.net/file/121761)（ver0.41 64bit・おいがみ さん）は zip に入っています。MME もそのまま使えます。
 詳細の窓の「プロンプトで作る」タブの下に、この PC の GPU とメモリで動くかの判定が出ます。
 
-## インストール（開発版）
+## インストール
 
-今は、Kimodo・MotionBricks・窓の 3 つの Python 環境を手で作ります（詳細の窓からボタン一発で入れられるようにするのは次の作業です）。下の手順は `F:\kimodo`・`F:\motionbricks` に置く例です。置いた場所は、最後に `work\paths.json` に書きます（[5. 置いた場所を書く](#5-置いた場所を書く)）。
+### 1. zip を落として、MMD のフォルダに展開する
+[Releases](https://github.com/BeamManP/MMD-AINakawari/releases) から `MMD-AINakawari-<版>.zip` を落とします。
+**MMD を閉じてから**、zip の中身を `MikuMikuDance.exe` のあるフォルダに展開します。中身は次の 3 つです。
 
-### 1. MMDPlugin を入れる
-[MMDPlugin](https://bowlroll.net/file/121761)（おいがみ さん）の説明書のとおり、`d3d9.dll`・`d3dx9_43.dll`・`MMDPlugin.dll` を MMD のフォルダに置きます。MME も使う時は、MME 一式を `plugin\mme\` に移します。
-
-### 2. Kimodo を入れる
-1. [Kimodo](https://github.com/nv-tlabs/kimodo) を `F:\kimodo\repo` に clone し、[公式の手順](https://research.nvidia.com/labs/sil/projects/kimodo/docs/getting_started/installation.html)で Python 3.10 の環境を `F:\kimodo\.venv` に作ります
-2. このリポジトリを clone し、そのフォルダで骨格のファイルを書き出して、文の読み取りのモデルを置きます:
-   ```bat
-   mkdir F:\kimodo\tools
-   F:\kimodo\.venv\Scripts\python.exe tools\export_skeleton.py F:\kimodo\tools\somaskel30.json
-   F:\kimodo\.venv\Scripts\python.exe tools\prepare_text_encoder.py F:\kimodo\text_encoders
-   ```
-   文の読み取りには Meta-Llama-3-8B-Instruct（約 16GB）を使います。`prepare_text_encoder.py` は、申請の要らない写し（[NousResearch/Meta-Llama-3-8B-Instruct](https://huggingface.co/NousResearch/Meta-Llama-3-8B-Instruct)）から落とし、中身が Meta の配っている物と同じかを確かめてから置きます。**Hugging Face のアカウントや利用の申請は要りません。** 使う時は、Meta の [Llama 3 のライセンス](https://huggingface.co/NousResearch/Meta-Llama-3-8B-Instruct/blob/main/LICENSE)と[使い方の決まり](https://huggingface.co/NousResearch/Meta-Llama-3-8B-Instruct/blob/main/USE_POLICY.md)に従ってください（置いたフォルダにも入っています）
-3. Kimodo 本体のモデル（約 1.1GB）は、最初に生成した時に `F:\kimodo\hf_cache` に入ります
-4. 高速モード（VRAM 20GB 以上）を使う時は、`tools\start_textencoder.cmd` を `F:\kimodo\` に置きます（詳細の窓の「サーバーを起動」がこれを開きます）
-
-### 3. MotionBricks を入れる
-[Git LFS](https://git-lfs.com/) と [uv](https://docs.astral.sh/uv/) を入れてから:
-```bat
-git clone https://github.com/NVlabs/motionbricks F:\motionbricks
-cd /d F:\motionbricks
-git lfs pull
-uv sync
 ```
-最初に動かした時だけ、GPU に合わせた TensorRT の準備に数分かかります。
-
-### 4. 窓の Python を用意する
-窓は [mmd-mcp](https://github.com/BeamManP/mmd-mcp) の MMD とのやりとりの部品を使います（Visual Studio 2022／Build Tools の「C++ によるデスクトップ開発」が要ります）。
-```bat
-git clone https://github.com/BeamManP/mmd-mcp
-cd mmd-mcp
-python -m venv .venv
-.venv\Scripts\python.exe -m pip install -e . numpy
-cmd /c scripts\build_native.cmd
+AIナカワリ導入.cmd
+MMD-AINakawari\          窓の Python とプログラム
+plugin\MMD-AINakawari\   MMD に読み込ませる DLL
 ```
 
-### 5. 置いた場所を書く
-このリポジトリのフォルダで、手順 4 の Python を使って、Kimodo と MotionBricks の置き場所を書きます（`work\paths.json` に入ります）。MotionBricks を入れていない時は、2 つ目を省きます。
-```bat
-E:\path\to\mmd-mcp\.venv\Scripts\python.exe -m mmd_ainakawari.paths F:\kimodo F:\motionbricks
-```
+### 2. `AIナカワリ導入.cmd` をダブルクリックする
+黒い窓が開いて、MMD に MMDPlugin を置きます。「できました」と出たら、何かキーを押して閉じます。
 
-### 6. プラグインを MMD に入れる
-1. 手順 2 で clone したこのリポジトリのフォルダで作業します
-2. `mmd_plugin\build.cmd` でプラグインをビルドします（MMDPlugin の開発用ファイル `mmdplugin_dev_ver0.41_x64` の中身を `work\mmdplugin\dev` に置くか、その場所を環境変数 `AINAKAWARI_SDK` で渡します）
-3. できた `mmd_plugin\bin\MMD-AINakawari.dll` を、MMD の `plugin\MMD-AINakawari\` に置きます
-4. 同じフォルダに `mmd_plugin\MMD-AINakawari.ini.example` を `MMD-AINakawari.ini` として置き、`python`（手順 4 の `.venv\Scripts\pythonw.exe`）と `home`（このリポジトリのフォルダ）を書きます
+- Windows の「発行元を確認できませんでした」などの警告が出た時は、「実行」を押してください
+- MME が入っている時は、MME のファイル（`d3d9.dll`・`MMEffect.dll` など）を `plugin\mme\` に移します。MMDPlugin の説明書にある「MME も使う場合」の置き方で、MME はそのまま動きます
+- MMDPlugin が入っていれば、何も変えません
+- 次の時は、何も変えずに止まります（黒い窓に理由が出ます）: MMD が開いている／MMD が 9.32 x64 の日本語版ではない／MME でも MMDPlugin でもない `d3d9.dll` や `d3dx9_43.dll` がある
+- zip を MMD のフォルダの外に展開した時は、MMD のフォルダを選ぶ窓が出て、そこへ写します
 
-MMD を起動して、メニューバーに「AIナカワリ」、下の段の右に「AIナカワリ簡易操作」が出れば入っています。
+### 3. MMD を起動して、セットアップする
+1. メニューバーの「AIナカワリ」→「AIナカワリの窓を開く」で、詳細の窓を開きます
+2. 窓の下の「**セットアップ**」を押します
+3. 入れる場所を決めます（最初は、空きのいちばん多いドライブの `\AINakawari`）。半角の英数字だけのフォルダにしてください
+4. ライセンスを読んで「同意して入れます」に印を付け、「**セットアップを始める**」を押します
+
+Kimodo・MotionBricks・それを動かす Python を落として入れ、最後に試しに 1 回ずつ作って確かめます。ネットの速さによりますが、数十分〜1 時間ほどかかります。
+git や Python を自分で入れる必要はありません。Hugging Face のアカウントも要りません。
+
+- 途中で止まっても（失敗・中止・PC の再起動）、もう一度「セットアップ」を押せば、止まった段から続きます
+- セットアップの窓は、閉じても裏で進みます。もう一度「セットアップ」を押すと出てきます
+
+MMD の下の段の右に「AIナカワリ簡易操作」が出ていれば、使えます。
 
 ![MMD の下の段に並んだ簡易操作パネル](docs/images/bottom_strip.png)
 
@@ -141,6 +124,30 @@ MMD を起動して、メニューバーに「AIナカワリ」、下の段の�
 - Kimodo は 1 区間 300 フレーム（10 秒）まで（範囲の外の勢いをつなぐ数フレームも数えるので、選ぶ範囲はそれより少し短めに）。長い時は範囲を分けて作ります
 - 最初の 1 回は、モデルの読み込みで 40〜60 秒ほど余分にかかります（低負荷モード）。2 回目からは 10〜15 秒前後です
 
+## 更新・アンインストール
+
+**更新**: 新しい版の zip を、同じように MMD のフォルダに上書きで展開し、`AIナカワリ導入.cmd` をもう一度ダブルクリックします。窓の設定（`MMD-AINakawari\app\work\`）は残ります。そのあと「セットアップ」を開いて、「続きから始める」が出ていたら押してください（AI のモデルの版が変わった段だけ入れ直します）。
+
+**アンインストール**: MMD を閉じてから、次の物を消します。
+- MMD のフォルダの `AIナカワリ導入.cmd`・`MMD-AINakawari\`・`plugin\MMD-AINakawari\`
+- セットアップで選んだ場所（例: `D:\AINakawari\`）
+
+MMDPlugin（`MMDPlugin.dll`・`d3d9.dll`・`d3dx9_43.dll`・`plugin\MMDPlugin\`）と、`plugin\mme\` に移した MME は残ります。ほかの MMDPlugin のプラグインを使っていなければ、MMDPlugin の 3 ファイルと `plugin\MMDPlugin\` を消し、`plugin\mme\` の中身を `MikuMikuDance.exe` の横に戻すと、元の形になります。
+
+## 困った時は
+
+詳細の窓の「**ログ**」→「**記録のフォルダを開く**」で、記録のフォルダ（`MMD-AINakawari\app\work\`）が開きます。困った時は、次のファイルを [Issues](https://github.com/BeamManP/MMD-AINakawari/issues) に添えて知らせてください。
+
+| ファイル | 中身 |
+|---|---|
+| `app.log`（と `app.log.1`） | 窓のログ・セットアップのログ・失敗した時のエラーの詳しい場所 |
+| `Kimodo（低負荷）_server.log` など `～_server.log` | 裏で動く Kimodo・MotionBricks の記録（最後に起動した時の分） |
+
+よくあること:
+- **セットアップの「試しに作る」で止まる**: NVIDIA のドライバを新しくしてから、もう一度「セットアップ」を押してください
+- **「空きが足りません」**: 入れる場所を、空きの多いドライブに変えてください
+- **MMD が起動してすぐ落ちる**: `plugin\` の下に、AIナカワリの DLL と ini 以外の物（Python など）を置いていないか見てください。MMDPlugin は `plugin\` の下の DLL を全部読み込もうとします
+
 ## 分かっている制限
 - **PMX のモデルだけ**に対応しています（PMD は非対応）。標準ボーン（センター・上半身・腕・ひじ・足ＩＫなど）があるモデルが前提で、無いモデルはエラーで止まります
 - 指・表情・髪などは作りません（MMD の補間のまま）
@@ -150,15 +157,23 @@ MMD を起動して、メニューバーに「AIナカワリ」、下の段の�
 
 ## ライセンスとクレジット
 - このリポジトリのコード: [MIT-0](LICENSE)
-- スクリーンショットのモデル: Tda式初音ミクV4X（Tda さん）。初音ミクは クリプトン・フューチャー・メディア株式会社 のキャラクターです
+- スクリーンショットのモデル: Tda式初音ミクV4X（Tda さん）。モデルは同梱していません。初音ミクは クリプトン・フューチャー・メディア株式会社 のキャラクターです
 - [Kimodo](https://github.com/nv-tlabs/kimodo)（NVIDIA）: コードは Apache-2.0、モデルは [NVIDIA Open Model License](https://huggingface.co/nvidia/Kimodo-SOMA-RP-v1.2)
 - [MotionBricks](https://github.com/NVlabs/motionbricks)（NVIDIA）: コードは Apache-2.0、モデルは NVIDIA Open Model Agreement
-- [Meta-Llama-3-8B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct)（Meta）: Meta Llama 3 Community License（Kimodo が文の読み取りに使う）。**Built with Meta Llama 3**
+- [Meta-Llama-3-8B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct)（Meta）: [Meta Llama 3 Community License](https://huggingface.co/NousResearch/Meta-Llama-3-8B-Instruct/blob/main/LICENSE)・[使い方の決まり](https://huggingface.co/NousResearch/Meta-Llama-3-8B-Instruct/blob/main/USE_POLICY.md)（Kimodo が文の読み取りに使う）。**Built with Meta Llama 3**
 - [LLM2Vec](https://huggingface.co/McGill-NLP/LLM2Vec-Meta-Llama-3-8B-Instruct-mntp)（McGill-NLP）: MIT
-- [MMDPlugin](https://bowlroll.net/file/121761)（おいがみ さん）
+- [MMDPlugin](https://bowlroll.net/file/121761)（おいがみ さん）: zip に同梱（説明書の「本体の転載は、非商用に限り連絡不要」による）。`d3dx9_43.dll` も MMDPlugin の物です（Microsoft の DirectX の物ではありません）
 - [mmd-mcp](https://github.com/BeamManP/mmd-mcp)（MIT-0 ほか）
+- zip に同梱の Python（python-build-standalone）と uv などのライセンスは、zip の `MMD-AINakawari\THIRD_PARTY.txt` に書いています
 
-モデルはこのリポジトリには入っていません。それぞれの配布元の条件に同意して取得してください。
+AI のモデル（Kimodo・MotionBricks・Llama 3・LLM2Vec）は zip にもこのリポジトリにも入っていません。セットアップが、それぞれの配布元から落とします（セットアップの画面でライセンスに同意してから）。
+
+## 開発者向け
+リポジトリから動かす時は、[mmd-mcp](https://github.com/BeamManP/mmd-mcp) の Python 環境（`pip install -e . numpy` と `scripts\build_native.cmd`。Visual Studio 2022 の C++ が要ります）で窓を動かします。
+- セットアップは手でも回せます: `python -m mmd_ainakawari.installer.steps D:\AINakawari --motionbricks`（uv は PATH の物を使います）
+- 前に手で入れた Kimodo・MotionBricks の場所を書く: `python -m mmd_ainakawari.paths F:\kimodo F:\motionbricks`
+- プラグインのビルド: `mmd_plugin\build.cmd`（MMDPlugin の開発用ファイル `mmdplugin_dev_ver0.41_x64` の中身を `work\mmdplugin\dev` に置くか、その場所を環境変数 `AINAKAWARI_SDK` で渡す）。ini は `mmd_plugin\MMD-AINakawari.ini.example` を見本に
+- 配布の zip を作る: `python tools\release\build_release.py --mmdplugin <MMDPlugin_v0.41_x64.zip>`（できた物は `work\release\`）
 
 ## 開発の記録
 仕組み・踏んだ問題・確かめた数字は [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) にまとめています。
