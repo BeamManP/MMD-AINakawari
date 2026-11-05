@@ -16,7 +16,11 @@ class MMDSkeleton:
         self.model_name, bones = read_pmx_geometry(open(pmx_path, "rb").read())
         self.bones = bones
         self.names = [b["name"] for b in bones]
-        self.index = {n: i for i, n in enumerate(self.names)}
+        # 同じ名前の骨があれば前の方（MMD も VMD のキーを前の方に入れる）。11-06 スコープドッグはセンターが 2 本（体と、ライフルの持ち手）で、
+        # 後ろのライフルの方を基準に体の位置を計算して、体が上に飛んでいた
+        self.index = {}
+        for i, n in enumerate(self.names):
+            self.index.setdefault(n, i)
         # VMD の名前（15 バイトで切れたもの）→ PMX のボーン名。長い名前のボーンのキーを正しく当てるため
         self.vmd_alias = {}
         for n in self.names:

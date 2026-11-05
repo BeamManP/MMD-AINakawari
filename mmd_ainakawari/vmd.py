@@ -30,6 +30,7 @@ class Motion:
     model_name: str = ""
     bones: list = field(default_factory=list)
     tail: bytes = b""          # ボーンのキーより後ろ（表情・カメラ・照明・影・表示/IK）。空なら全部 0 件で書く
+    dropped: list = field(default_factory=list)   # 読んだ時に外した、同じ名前の 2 本目以降の骨の名前（mmd_memory.MotionReader.read）
 
     def tracks(self):
         """ボーン名 → フレーム順のキーの一覧。"""

@@ -129,7 +129,15 @@ class MotionReader:
             return struct.unpack_from("<3i", b) + (b[12:28], struct.unpack_from("<7f", b, 28))   # 最後の 4 バイトは選択の印
 
         motion = vmd.Motion(model_name=vmd._name(m.read(model + bone_state.MODEL_NAME_JA, 50).split(b"\0", 1)[0]))
+        # VMD は骨を名前（先頭 15 バイト）でしか指せず、MMD は読み込む時に同じ名前のキーを全部前の方の骨に入れる。
+        # 2 本目以降のキーを書くと前の方の骨のキーを上書きして壊すので外す（2 本目のキーはどのみち戻せない）。11-06 スコープドッグのセンター
+        seen = set()
         for i, raw in enumerate(names):
+            if raw[:15] in seen:
+                if any(True for _ in _chain(bone_entry, i)):
+                    motion.dropped.append(vmd._name(raw[:15]))
+                continue
+            seen.add(raw[:15])
             for f, _pre, _nxt, ip, v in _chain(bone_entry, i):
                 interp = interp_bytes(ip[0:4], ip[4:8], ip[8:12], ip[12:16])
                 motion.bones.append(vmd.BoneKey(vmd._name(raw[:15]), f, np.array(v[:3]), np.array(v[3:]), interp, raw[:15]))

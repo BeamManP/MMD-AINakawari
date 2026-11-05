@@ -127,6 +127,9 @@ def generate(settings, log=print, link=None, previous=None):
     log(f"MMD から「{st['model']}」のモーションを読み込み中…")
     original = link.read_motion(backup)
     log(f"  キー {len(original.bones)} 個")
+    if original.dropped:   # mmd_memory.MotionReader.read
+        log(f"注意: 同じ名前のボーンが 2 本以上あります（{'・'.join(sorted(set(original.dropped)))}）。"
+            "MMD は同じ名前のキーを前の方のボーンに入れるので、2 本目以降のキーは残せません（生成のあとは 0 に戻ります）")
     skel = MMDSkeleton(pmx)
     fixed_pos = {vmd.vmd_name(b["name"]) for b in skel.bones if not b["flags"] & 0x0004}
     # 照合は書き戻す骨だけ（それ以外は元のキーをそのまま通しているので、比べても意味が無い）
