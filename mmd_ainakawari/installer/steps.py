@@ -83,6 +83,18 @@ def find_uv():
     raise Failed(f"uv が見つかりません（{bundled} が無い）。zip の中身を全部展開し直してください")
 
 
+def tls_context():
+    """落とす時の証明書: Windows の証明書ストア ＋ certifi（Mozilla の束）。
+    Windows はルート証明書を、ほかのアプリが使った時に後から取ってくるので、まっさらな PC ではまだ無いことがある
+    （11-06: まっさらな環境の試しで、GitHub の zip が CERTIFICATE_VERIFY_FAILED になった）。会社のプロキシの証明書などは
+    Windows にだけ入っているので、Windows の分も残して足し合わせる。certifi は窓の Python の部品（tools/release/requirements.in）"""
+    import ssl
+    import certifi
+    context = ssl.create_default_context()
+    context.load_verify_locations(cafile=certifi.where())
+    return context
+
+
 def motion_correction_info():
     """組み立て済みの MotionCorrection の (フォルダ, 記録)。無ければ Failed。"""
     for folder in (os.path.join(os.path.dirname(paths.HOME), PREBUILT), os.path.join(paths.WORK_DIR, PREBUILT)):
@@ -312,7 +324,7 @@ class Setup:
         if have:
             request.add_header("Range", f"bytes={have}-")
         try:
-            response = urllib.request.urlopen(request, timeout=60)
+            response = urllib.request.urlopen(request, timeout=60, context=tls_context())
         except OSError as e:
             raise Failed(f"{label} を落とせませんでした（{e}）。ネットにつながっているか確かめて、もう一度押してください") from None
         with response:

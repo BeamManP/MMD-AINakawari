@@ -8,3 +8,6 @@ pydantic-core==2.46.5
 annotated-types==0.8.0
 typing-extensions==4.16.0
 typing-inspection==0.4.4
+# セットアップが GitHub から落とす時の証明書の束（Windows の証明書ストアと足し合わせる。11-06: まっさらな環境の試しで、
+# Windows がまだ取ってきていないルート証明書のせいで CERTIFICATE_VERIFY_FAILED になった）
+certifi==2026.10.23

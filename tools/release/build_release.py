@@ -72,7 +72,7 @@ APP_FILES = (
 # 窓で読み込んで確かめる物（mmd_ainakawari の部品と、それが使う mmd-mcp の部品）
 SMOKE = (
     "import tkinter; tkinter.Tk().destroy();"
-    "import numpy, psutil, win32gui, pydantic;"
+    "import numpy, psutil, win32gui, pydantic, certifi;"
     "import mmd_mcp.bone_selection, mmd_mcp.bone_state;"
     "import mmd_ainakawari.app, mmd_ainakawari.panel, mmd_ainakawari.runner, mmd_ainakawari.nakawari,"
     " mmd_ainakawari.pipeline, mmd_ainakawari.smooth_stop, mmd_ainakawari.mmd_link, mmd_ainakawari.mmd_memory,"
@@ -97,7 +97,7 @@ PREBUILT_LICENSES = (
 THIRD_PARTY = """AIナカワリ の zip に同梱している物
 
 - Python 3.10.19（python-build-standalone {pbs}）: Python Software Foundation License ほか。python\\LICENSE.txt
-- numpy・psutil・pywin32・pydantic・pydantic-core・annotated-types・typing-extensions・typing-inspection:
+- numpy・psutil・pywin32・pydantic・pydantic-core・annotated-types・typing-extensions・typing-inspection・certifi（MPL-2.0）:
   各ライセンスは python\\Lib\\site-packages\\*.dist-info の中
 - mmd-mcp（https://github.com/BeamManP/mmd-mcp）: MIT-0（DLL の中の Microsoft のランタイムは THIRD_PARTY_NOTICES.md）。
   python\\Lib\\site-packages\\mmd_mcp-*.dist-info の中
