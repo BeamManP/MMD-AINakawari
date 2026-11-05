@@ -19,6 +19,7 @@ WM_GETTEXT, WM_SETTEXT, WM_GETTEXTLENGTH = 0x000D, 0x000C, 0x000E
 CB_GETCURSEL, CB_SETCURSEL = 0x0147, 0x014E
 SMTO_ABORTIFHUNG = 0x0002
 ENABLE_MESSAGE = 0x8000 + 2   # WM_APP + 2。パネルに部品の押せる・押せないを頼む（nakawari_panel.cpp の kEnableMessage）
+ALERT_MESSAGE = 0x8000 + 3    # WM_APP + 3。状態の 1 行を赤くするかを頼む（kAlertMessage。古いプラグインは知らないので無視する）
 TIMEOUT_MS = 200
 
 _user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -85,3 +86,7 @@ class Panel:
     def enable(self, item, on):
         # EnableWindow を直接呼ぶと、MMD が答えるまで待って期限を付けられないので、パネルに頼む（11-05 Codex のレビュー）
         self._call(item, ENABLE_MESSAGE, item, 1 if on else 0, to=self.hwnd)
+
+    def alert(self, on):
+        """状態の 1 行を赤で描くか（セットアップ前の案内など）。"""
+        self._call(STATUS, ALERT_MESSAGE, 0, 1 if on else 0, to=self.hwnd)

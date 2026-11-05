@@ -41,6 +41,9 @@ constexpr UINT kLayoutMessage = WM_APP + 1;
 // Python が部品の押せる・押せないを頼む（wparam = 部品の番号・lparam = 押せるなら 1）。mmd_ainakawari/panel.py の ENABLE_MESSAGE。
 // EnableWindow を外から呼ぶと、相手が答えるまで待って期限を付けられないので、ここで呼ぶ（11-05 Codex のレビュー）
 constexpr UINT kEnableMessage = WM_APP + 2;
+// Python が状態の 1 行を赤くするかを頼む（lparam = 赤なら 1）。mmd_ainakawari/panel.py の ALERT_MESSAGE。
+// AI のモデルが入っていない時の「詳細からセットアップを実行してください」に使う（11-06 マスター）
+constexpr UINT kAlertMessage = WM_APP + 3;
 constexpr UINT_PTR kLayoutTimer = 1;  // カメラ用のモードにすると下の段が右に伸びるので、時々測り直す
 // 隣のパネルと同じ縦のグラデーション（ボーン操作は 49,49,99 → 22,22,45）で、色だけ青緑にする。
 constexpr int kTop[3] = {49, 99, 99};
@@ -350,7 +353,8 @@ void NakawariPanel::draw_label(const DRAWITEMSTRUCT* item) {
     wchar_t text[512]{};
     GetWindowTextW(item->hwndItem, text, 512);
     SetBkMode(item->hDC, TRANSPARENT);
-    SetTextColor(item->hDC, item->CtlID == kStatus ? RGB(255, 255, 200) : RGB(220, 230, 230));
+    // 状態の 1 行は薄い黄色。案内（status_alert_）の時は、暗い青緑の背景でも読める明るい赤
+    SetTextColor(item->hDC, item->CtlID != kStatus ? RGB(220, 230, 230) : status_alert_ ? RGB(255, 110, 110) : RGB(255, 255, 200));
     const HGDIOBJ old = font_ ? SelectObject(item->hDC, font_) : nullptr;
     RECT r = item->rcItem;
     DrawTextW(item->hDC, text, -1, &r, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
@@ -378,6 +382,12 @@ LRESULT CALLBACK NakawariPanel::proc(HWND hwnd, UINT message, WPARAM wparam, LPA
             return 0;
         case kEnableMessage:
             if (const HWND item = GetDlgItem(hwnd, static_cast<int>(wparam))) EnableWindow(item, lparam != 0);
+            return 0;
+        case kAlertMessage:
+            if (self->status_alert_ != (lparam != 0)) {
+                self->status_alert_ = lparam != 0;
+                if (const HWND item = GetDlgItem(hwnd, kStatus)) InvalidateRect(item, nullptr, TRUE);
+            }
             return 0;
         case kLayoutMessage:
             self->layout();

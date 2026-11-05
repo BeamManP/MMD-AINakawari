@@ -42,6 +42,7 @@ private:
     HWND mmd_ = nullptr;
     HWND panel_ = nullptr;
     HFONT font_ = nullptr;   // MMD のボタンの字体を一回り小さくしたもの（自分で作って消す）。ボタンだけは MMD の字体のまま
+    bool status_alert_ = false;   // 状態の 1 行を赤で描く（Python が kAlertMessage で頼む。セットアップ前の案内など）
     RECT placed_{};
     std::function<void(int)> on_command_;
     std::wstring samples_;

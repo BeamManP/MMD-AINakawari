@@ -431,7 +431,9 @@ class App:
         self._stop_changed()
         try:
             paths.kimodo_dir()
+            self.kimodo_ready = True
         except paths.NotSetUp:
+            self.kimodo_ready = False   # パネルの状態の 1 行も赤い案内にする（_sync_panel）
             self.kimodo_missing.pack(anchor="w", pady=(0, 8), before=self.kimodo_top)
             self.status.set("まだ AI のモデルが入っていません。下の「セットアップ」から入れてください")
             return
@@ -651,14 +653,19 @@ class App:
             else:
                 range_text = (f"選んだキー {keys[0]}〜{keys[-1]}F" if len(keys) > 1 else
                               f"選んだキー {keys[0]}F だけ" if keys else "キーを選んでいません")
+            # AI のモデル（Kimodo）が入っていない時は、状態の 1 行を赤い案内にする（11-06 マスター）
+            missing = not self.kimodo_ready
             shown = {
                 panel.RANGE: range_text,
-                panel.STATUS: self.status.get(),
+                panel.STATUS: "詳細からセットアップを実行してください" if missing else self.status.get(),
             }
             for item, text in shown.items():
                 if self._seen.get(("text", item)) != text:
                     p.set_text(item, text)
                     self._seen[("text", item)] = text
+            if self._seen.get("alert") != missing:
+                p.alert(missing)
+                self._seen["alert"] = missing
             states = {panel.GENERATE: str(self.gen_btn.cget("state")) == "normal",
                       panel.UNDO: str(self.undo_btn.cget("state")) == "normal",
                       # 中割りはプロンプトを使わないので、欄を灰色にする（字は消さない。11-05 マスター）
