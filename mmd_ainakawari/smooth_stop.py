@@ -32,7 +32,11 @@ MIN_SPEED = 1.0              # キーの 30〜10 フレーム手前の腰の平�
 
 
 def available():
-    return paths.motionbricks_python() is not None and os.path.exists(MB_SCRIPT)
+    """MotionBricks が使えるか。paths.json が壊れていても例外を出さない（窓を作る途中で呼ぶので。11-05 Codex のレビュー）。"""
+    try:
+        return paths.motionbricks_python() is not None and os.path.exists(MB_SCRIPT)
+    except paths.NotSetUp:
+        return False
 
 
 def _speeds(roots, fps):
