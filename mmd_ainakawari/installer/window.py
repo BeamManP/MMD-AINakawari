@@ -193,7 +193,7 @@ class SetupWindow:
         self.setup = setup
         self.start_btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
-        self.status.set("入れています。数十分〜1 時間ほどかかります（ネットの速さによります）。この窓は閉じても裏で進みます")
+        self.status.set("入れています（落とす量は約 20GB）。この窓は閉じても裏で進みます")
 
         def work():
             try:
