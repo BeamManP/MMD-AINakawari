@@ -26,7 +26,7 @@ import winerror
 
 from mmd_mcp.windows import list_windows
 
-from . import gpu, panel, paths, runner, samples, smooth_stop
+from . import applog, gpu, panel, paths, runner, samples, smooth_stop
 from .message_window import MessageWindow, register_message
 from .mmd_link import MMDLink
 from .widgets import Fold, PromptRows, ScrollFrame
@@ -273,6 +273,12 @@ class App:
         self.log_win.title("AIナカワリ のログ")
         self.log_win.withdraw()
         self.log_win.protocol("WM_DELETE_WINDOW", self.log_win.withdraw)
+        # 困った時に送ってもらう記録（app.log・*_server.log）のある所を開く（README の「困った時は」）
+        lf = ttk.Frame(self.log_win)
+        lf.pack(side="bottom", fill="x", padx=4, pady=4)
+        ttk.Button(lf, text="記録のフォルダを開く", command=lambda: os.startfile(paths.WORK_DIR)).pack(side="left")
+        ttk.Label(lf, text="困った時は、このフォルダの app.log と ～_server.log を送ってください", foreground="#555").pack(
+            side="left", padx=(8, 0))
         bar = ttk.Scrollbar(self.log_win, orient="vertical")
         bar.pack(side="right", fill="y")
         self.log = tk.Text(self.log_win, width=90, height=24, wrap="word", state="disabled", background="#f6f6f6",
@@ -491,6 +497,7 @@ class App:
                 var.set(value)
 
     def _write_log(self, line):
+        applog.write(line)
         self.log.configure(state="normal")
         self.log.insert("end", line + "\n")
         self.log.see("end")
@@ -703,7 +710,8 @@ class App:
                     self.last_backup = r["backup"]
                     self.last_run = r
                 self.q.put(("done", (True, ok_message)))
-            except Exception as e:  # 窓に出して止める（握りつぶさない）
+            except Exception as e:  # 窓に出して止める（握りつぶさない）。どこで落ちたかは記録にだけ書く
+                applog.exception("失敗した時の traceback:")
                 self.q.put(("log", f"失敗: {e}"))
                 self.q.put(("done", (False, f"失敗: {e}")))
         threading.Thread(target=work, daemon=True).start()
@@ -775,7 +783,9 @@ def main():
             messagebox.showerror("AIナカワリ", "AIナカワリ はもう起動中ですが、知らせる先が見つかりません。少し待ってからもう一度開いてください")
             root.destroy()
         return
+    applog.setup()   # mutex を取ってから（記録を書くのは 1 つのプロセスだけ）
     root = tk.Tk()
+    applog.hook_tk(root)
     root.withdraw()  # 親の窓は見せない。MMD ごとの窓（Toplevel）だけ出す
     hub = Hub(root)
     try:
