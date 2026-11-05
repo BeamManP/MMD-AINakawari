@@ -109,6 +109,7 @@ def generate(settings, log=print, link=None, previous=None):
     t0 = time.time()
     link = link or MMDLink()
     previous = previous or load_last_run(link)
+    cursor = link.current_frame()   # 押した時のフレーム。読み込みは 0F で行うので、終わったらここへ戻す（11-06 マスター）
     st = link.state()
     if not st["model_selected"]:
         raise RuntimeError("MMD でモデルを選んでください（今はカメラ・照明・アクセサリが選ばれています）")
@@ -219,7 +220,7 @@ def generate(settings, log=print, link=None, previous=None):
 
     log("MMD に読み込み中…")
     link.load_motion(out, 0)
-    link.set_frame(job.first)
+    link.set_frame(job.first if cursor is None else cursor)   # 読めなかった時は、作った範囲の始め（前の動き）
     err = result.get("key_max_error_m") or [0]
     root_err = result.get("root_key_error_m") or []
     extra = f"・全ての親のキーとの腰のずれ最大 {max(root_err) * 100:.0f}cm" if root_err else ""
@@ -233,7 +234,10 @@ def undo(backup, log=print, link=None):
     link = link or MMDLink()
     if not backup or not os.path.exists(backup):
         raise RuntimeError("戻す控えがありません")
+    cursor = link.current_frame()   # 押した時のフレームへ戻す（読めなければ 0F のまま）
     link.load_motion(backup, 0)
+    if cursor is not None:
+        link.set_frame(cursor)
     log(f"元に戻しました（{backup}）")
 
 
