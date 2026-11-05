@@ -12,7 +12,7 @@ import webbrowser
 from tkinter import filedialog, messagebox, ttk
 
 from .. import applog, paths
-from . import pins, steps
+from . import steps
 
 LICENSES = [
     ("Meta Llama 3 Community License（文の読み取りに使う Llama 3）",
@@ -73,9 +73,6 @@ class SetupWindow:
         ttk.Button(row, text="選ぶ…", command=self._browse).pack(side="left")
         self.space = tk.StringVar()
         ttk.Label(f, textvariable=self.space, foreground="#555").pack(anchor="w", pady=(2, 0))
-        self.mb = tk.BooleanVar(value=True)
-        ttk.Checkbutton(f, text=f"MotionBricks も入れる（「なめらかに」と MotionBricks のタブで使います。約 {pins.SIZE_GB_MOTIONBRICKS}GB）",
-                        variable=self.mb, command=self._refresh).pack(anchor="w", pady=(6, 0))
         if diagnosis is not None:
             ttk.Label(f, text=f"この PC: {diagnosis.summary()} → {diagnosis.note}", foreground="#555").pack(anchor="w", pady=(6, 0))
         self.dest.trace_add("write", lambda *_a: self._refresh())
@@ -137,12 +134,12 @@ class SetupWindow:
             self.dest.set(os.path.normpath(folder))
 
     def _make_setup(self):
-        return steps.Setup(self.dest.get().strip(), self.mb.get(), log=lambda line: self.q.put(("log", line)),
+        return steps.Setup(self.dest.get().strip(), log=lambda line: self.q.put(("log", line)),
                            progress=lambda text: self.q.put(("progress", text)),
                            on_step=lambda key, state: self.q.put(("step", (key, state))))
 
     def _refresh(self):
-        """入れる場所・MotionBricks・同意が変わった時: 空きと段の一覧を出し直し、始めるボタンの可否を決める。"""
+        """入れる場所・同意が変わった時: 空きと段の一覧を出し直し、始めるボタンの可否を決める。"""
         if self.thread is not None:
             return
         try:

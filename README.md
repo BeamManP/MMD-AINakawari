@@ -39,7 +39,7 @@ MMD（MikuMikuDance）で打ったキーとキーの間を、AI が中割りし�
 | GPU | NVIDIA の GPU。GTX 16 シリーズ／RTX 20 シリーズ以降、VRAM 6GB 以上（高速モードは 20GB 以上）。ドライバは新しい物に | RTX 3090（24GB） |
 | メモリ | 32GB 推奨（低負荷モードは文の読み取りに約 15GB 使う） | 64GB |
 | ランタイム | [Microsoft Visual C++ 再頒布可能パッケージ（x64）](https://aka.ms/vs/17/release/vc_redist.x64.exe)。入っていなければ、セットアップがここへ案内します | |
-| ディスク | 約 29GB（Kimodo 約 23GB・MotionBricks 約 6GB。MotionBricks は入れなくても使える） | |
+| ディスク | 約 29GB（Kimodo 約 23GB・MotionBricks 約 6GB） | |
 | ネット | セットアップの時だけ（約 20GB を落とします） | |
 
 プラグインの土台の [MMDPlugin](https://bowlroll.net/file/121761)（ver0.41 64bit・おいがみ さん）は zip に入っています。MME もそのまま使えます。
@@ -170,7 +170,7 @@ AI のモデル（Kimodo・MotionBricks・Llama 3・LLM2Vec）は zip にもこ�
 
 ## 開発者向け
 リポジトリから動かす時は、[mmd-mcp](https://github.com/BeamManP/mmd-mcp) の Python 環境（`pip install -e . numpy` と `scripts\build_native.cmd`。Visual Studio 2022 の C++ が要ります）で窓を動かします。
-- セットアップは手でも回せます: `python -m mmd_ainakawari.installer.steps D:\AINakawari --motionbricks`（uv は PATH の物を使います）
+- セットアップは手でも回せます: `python -m mmd_ainakawari.installer.steps D:\AINakawari`（uv は PATH の物を使います）
 - 前に手で入れた Kimodo・MotionBricks の場所を書く: `python -m mmd_ainakawari.paths F:\kimodo F:\motionbricks`
 - プラグインのビルド: `mmd_plugin\build.cmd`（MMDPlugin の開発用ファイル `mmdplugin_dev_ver0.41_x64` の中身を `work\mmdplugin\dev` に置くか、その場所を環境変数 `AINAKAWARI_SDK` で渡す）。ini は `mmd_plugin\MMD-AINakawari.ini.example` を見本に
 - 配布の zip を作る: `python tools\release\build_release.py --mmdplugin <MMDPlugin_v0.41_x64.zip>`（できた物は `work\release\`）

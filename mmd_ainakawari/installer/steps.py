@@ -13,7 +13,7 @@
 git・Python・Hugging Face のアカウントは要らない（uv は zip に同梱。Python は uv が落とす）。
 
 手で回す時（窓と同じ Python で。--reuse-hf-cache は開発用: Llama の重みが入ったキャッシュから写す）:
-    python -m mmd_ainakawari.installer.steps D:\\AINakawari [--motionbricks] [--reuse-hf-cache F:\\kimodo\\hf_cache]
+    python -m mmd_ainakawari.installer.steps D:\\AINakawari [--reuse-hf-cache F:\\kimodo\\hf_cache]
 """
 import argparse
 import hashlib
@@ -163,10 +163,9 @@ class Setup:
     on_step(段の名前, "skip" | "run" | "done" | "fail"): 段の印を画面に出す。
     """
 
-    def __init__(self, dest, motionbricks, log=print, progress=None, on_step=None, reuse_hf_cache=None):
+    def __init__(self, dest, log=print, progress=None, on_step=None, reuse_hf_cache=None):
         check_folder(dest)
         self.dest = dest
-        self.motionbricks = motionbricks
         self.log = log
         self.progress = progress or (lambda _text: None)
         self.on_step = on_step or (lambda _key, _state: None)
@@ -193,17 +192,18 @@ class Setup:
              file_sha256(os.path.join(TOOLS, "prepare_text_encoder.py")), 15.6, self.text_encoder),
             ("server_cmd", "kimodo", "高速モードの起動バッチを置く", file_sha256(os.path.join(TOOLS, "start_textencoder.cmd")), 0,
              self.server_cmd),
-            ("kimodo_test", "kimodo", "Kimodo で試しに作って、場所を書く", pins.KIMODO_COMMIT, 0, self.kimodo_test),
+            ("kimodo_test", "kimodo", "Kimodo が動くか確かめる（試しに 2 秒の動きを作ります）", pins.KIMODO_COMMIT, 0, self.kimodo_test),
         ]
         m = [
             ("mb_src", "mb", "MotionBricks の本体を落とす", pins.MOTIONBRICKS_COMMIT, 0.2, self.mb_src),
             ("mb_models", "mb", "MotionBricks のモデルを落とす（約 1.1GB）", pins.MOTIONBRICKS_COMMIT, 1.2, self.mb_models),
             ("mb_env", "mb", "MotionBricks の Python の環境を作る（約 3GB）",
              f"{pins.MOTIONBRICKS_COMMIT}/{pins.MOTIONBRICKS_PYTHON}", 3.3, self.mb_env),
-            ("mb_test", "mb", "MotionBricks で試しに作って、場所を書く（初回は TensorRT の準備で数分）", pins.MOTIONBRICKS_COMMIT, 0.8,
-             self.mb_test),
+            ("mb_test", "mb", "MotionBricks が動くか確かめる（試しに 1 秒の動きを作ります。GPU に合わせた準備で数分かかります）",
+             pins.MOTIONBRICKS_COMMIT, 0.8, self.mb_test),
         ]
-        return k + (m if self.motionbricks else [])
+        # MotionBricks は選ばせずに必ず入れる（11-06 マスター。前は画面で選べた）
+        return k + m
 
     def load_state(self):
         try:
@@ -269,11 +269,8 @@ class Setup:
         """この窓の paths.json に場所を書く。全部の段が済んでいて飛ばした時も書く（別の MMD に入れた AIナカワリから、
         前にセットアップした場所を選んだ時。試しの生成の段は飛ばされるので、そこで書くだけでは足りなかった。11-06 Codex のレビュー）。"""
         paths.check(self.kimodo, "Kimodo")
-        changes = {"kimodo": self.kimodo}
-        if self.motionbricks:
-            paths.check(self.mb, "MotionBricks")
-            changes["motionbricks"] = self.mb
-        paths.save(**changes)
+        paths.check(self.mb, "MotionBricks")
+        paths.save(kimodo=self.kimodo, motionbricks=self.mb)
         self.log(f"場所を書きました: {paths.PATHS_FILE}")
 
     def cancel(self):
@@ -605,11 +602,10 @@ class Setup:
 def main():
     parser = argparse.ArgumentParser(description="AIナカワリ のセットアップ（ふつうは詳細の窓の「セットアップ」から）")
     parser.add_argument("dest", nargs="?", help="入れる場所（省くと空きのいちばん多いドライブの \\AINakawari）")
-    parser.add_argument("--motionbricks", action="store_true", help="MotionBricks も入れる")
     parser.add_argument("--reuse-hf-cache", help="開発用: Llama の重みが入った Hugging Face のキャッシュから写す")
     args = parser.parse_args()
     try:
-        setup = Setup(args.dest or default_folder(), args.motionbricks, log=lambda line: print(line, flush=True),
+        setup = Setup(args.dest or default_folder(), log=lambda line: print(line, flush=True),
                       on_step=lambda key, state: print(f"[{state}] {key}", flush=True), reuse_hf_cache=args.reuse_hf_cache)
         setup.run()
     except (Failed, Cancelled) as e:

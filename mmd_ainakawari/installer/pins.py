@@ -30,7 +30,4 @@ MOTIONBRICKS_LFS = {
     "motionbricks/assets/human/soma_base_skel_minimal_no_root.usd":
         ("4ab93d78a0f1c06d3bcbedee5ceebb5d9d5b002fd0a88638e9399ed80b61871d", 2036435),
 }
-
-# 入れた後の大きさの目安（GB。11-05 にマスターの環境で測った物＋ uv の置き場所）
-SIZE_GB_KIMODO = 23      # Python の環境 5.3・Llama 3 15.0・Kimodo のモデル 1.1・LLM2Vec 0.3・Python と部品の控え
-SIZE_GB_MOTIONBRICKS = 6   # Python の環境 3.1・モデル 1.1・TensorRT の準備 0.7・Python と部品の控え
+# 入れた後の大きさは、段ごとの目安（steps.Setup.steps の GB）で見積もる。全部で約 29GB（11-06 まっさらな環境のテストで実測）
