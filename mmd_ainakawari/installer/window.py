@@ -74,7 +74,7 @@ class SetupWindow:
         self.space = tk.StringVar()
         ttk.Label(f, textvariable=self.space, foreground="#555").pack(anchor="w", pady=(2, 0))
         self.mb = tk.BooleanVar(value=True)
-        ttk.Checkbutton(f, text=f"MotionBricks も入れる（「なめらかに」と「中割り」で使います。約 {pins.SIZE_GB_MOTIONBRICKS}GB）",
+        ttk.Checkbutton(f, text=f"MotionBricks も入れる（「なめらかに」と MotionBricks のタブで使います。約 {pins.SIZE_GB_MOTIONBRICKS}GB）",
                         variable=self.mb, command=self._refresh).pack(anchor="w", pady=(6, 0))
         if diagnosis is not None:
             ttk.Label(f, text=f"この PC: {diagnosis.summary()} → {diagnosis.note}", foreground="#555").pack(anchor="w", pady=(6, 0))

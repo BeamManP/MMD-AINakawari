@@ -50,7 +50,7 @@ DEFAULTS = {
     "perf_mode": "low",
 }
 OLD_KEYS = ("use_keys", "range_start", "range_end", "pmx")   # 前の窓の保存にあった項目（読む時に変換して捨てる）
-TABS = [("kimodo", "プロンプトで作る"), ("nakawari", "中割り")]
+TABS = [("kimodo", "Kimodo"), ("nakawari", "MotionBricks")]   # 右下のパネルの選び方と同じ名前（11-06 マスター。前は「プロンプトで作る／中割り」）
 # 動作モード（pipeline.PERF_MODES）。既定は低負荷（VRAM 8GB の GPU でも動く）。高速は GPU 診断で使える時だけ
 PERF_MODES = [("low", "低負荷モード"), ("fast", "高速モード")]
 MODES = [("fill", "キーの間を埋める"), ("extend", "続きを足す"), ("fresh", "プロンプトだけで作る")]
@@ -306,7 +306,7 @@ class App:
             self.log_win.lift()
 
     def _build_kimodo(self, t):
-        """「プロンプトで作る」タブ（Kimodo）。"""
+        """「Kimodo」タブ（プロンプトで作る）。"""
         # やりたいこと・長さ。行ごとに別の並びにする（表の列を共有すると、説明の長さが変わった時にボタンが横にずれる）
         def line(title, pady=(0, 0)):
             row = ttk.Frame(t)
@@ -398,7 +398,7 @@ class App:
         sf.pack_propagate(False)
 
     def _build_nakawari(self, t):
-        """「中割り」タブ（MotionBricks）。"""
+        """「MotionBricks」タブ（プロンプト無しの中割り）。"""
         tk.Label(t, text=NAKAWARI_NOTE, foreground="#556", background=ttk.Style().lookup("TFrame", "background"),
                  wraplength=500, anchor="w", justify="left").pack(fill="x")
         self.key_stop = tk.BooleanVar(value=self.cfg["key_stop"])
@@ -695,7 +695,7 @@ class App:
         in_range = self.range_mode.get() == "keys"   # 範囲を使う時は範囲の終わりまで作るので、長さは使わない
         length = opt_int(self.length.get()) if mode != "fill" and not nakawari and not in_range else None
         if nakawari and not smooth_stop.available():
-            raise ValueError("中割りには MotionBricks が要ります（詳細の窓のセットアップで入れてください）")
+            raise ValueError("MotionBricks が入っていません（詳細の窓の下の「セットアップ」で入れてください）")
         if not nakawari and mode != "fill" and length is None and not in_range:
             raise ValueError("「続きを足す」「プロンプトだけで作る」では長さを入れてください")
         selection = None
@@ -710,7 +710,7 @@ class App:
         self.cfg.update(tab=tab, range_mode=self.range_mode.get(), key_stop=common["key_stop"], wrist_lerp=common["wrist_lerp"],
                         perf_mode=common["perf_mode"])
         if nakawari:
-            # 中割りは、隠れている「プロンプトで作る」の欄を読まない（入力の途中や誤りで中割りが止まっていた。11-04 Codex のレビュー）
+            # 中割りは、隠れている「Kimodo」タブの欄を読まない（入力の途中や誤りで中割りが止まっていた。11-04 Codex のレビュー）
             s = runner.Settings(prompt="", engine="motionbricks", **common)
         else:
             s = runner.Settings(prompt=self.prompt_rows.text(),

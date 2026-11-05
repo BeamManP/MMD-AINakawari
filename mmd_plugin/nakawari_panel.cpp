@@ -114,7 +114,7 @@ bool NakawariPanel::create(HWND mmd, std::function<void(int)> on_command, std::w
     lf.lfWidth = 0;
     font_ = CreateFontIndirectW(&lf);
     const HWND engine = add(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, kEngine);
-    // 中の動きを作るモデルの名前（11-05 マスター）。0 が窓の「プロンプトで作る」、1 が「中割り」のタブ
+    // 中の動きを作るモデルの名前（11-05 マスター）。0 が窓の「Kimodo」、1 が「MotionBricks」のタブ
     SendMessageW(engine, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Kimodo"));
     SendMessageW(engine, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"MotionBricks"));
     SendMessageW(engine, CB_SETCURSEL, 0, 0);
