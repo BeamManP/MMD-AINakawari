@@ -13,25 +13,20 @@ from dataclasses import dataclass, field, replace
 
 import numpy as np
 
+from . import paths
 from . import quat as Q
 from . import resident, vmd
 from .mmd_skel import MMDSkeleton, sample, split_interp
 from .retarget import TOE_GROUND, Retargeter, conv_p, conv_q
 
-KIMODO_PYTHON = r"F:\kimodo\.venv\Scripts\python.exe"
-KIMODO_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "kimodo_gen.py")
-KIMODO_DIR = r"F:\kimodo"
+# Kimodo の Python・キャッシュ・骨格などの場所は paths（work/paths.json）から。11-05 まで F:\kimodo に決め打ちだった
+KIMODO_SCRIPT = os.path.join(paths.HOME, "tools", "kimodo_gen.py")
 TEXT_SERVER_PORT = 9550   # Kimodo のテキスト読み取りサーバー（高速モードで使う）
 # 動作モード → (常駐の Kimodo の口, テキストの読み取りの置き場所, 名前)。tools/kimodo_gen.py の説明・mmd_ainakawari/gpu.py
 PERF_MODES = {
     "low": (9553, "cpu", "Kimodo（低負荷）"),   # テキストの読み取りは CPU・メインメモリ約 15GB・VRAM 約 1.5GB（＋MotionBricks 1.0GB。README の「動作モード」）
     "fast": (9551, "api", "Kimodo（高速）"),    # テキストの読み取りはサーバー（VRAM 約 16.8GB）
 }
-KIMODO_HF_CACHE = r"F:\kimodo\hf_cache"
-# 文の読み取り（LLM2Vec ＋ Llama 3）の置き場所。tools/prepare_text_encoder.py が置く。Kimodo の TEXT_ENCODERS_DIR で読ませると、
-# Llama を meta-llama（Hugging Face の申請が要る）から取りに行かない。tools/start_textencoder.cmd も同じ場所
-KIMODO_TEXT_ENCODERS = r"F:\kimodo\text_encoders"
-SOMA_JSON = r"F:\kimodo\tools\somaskel30.json"
 MAX_FRAMES = 300  # Kimodo の 1 区間は 10 秒（30fps）まで（公式の limitations.md）。区間を分ければ全体はこれより長くてよい
 STOP_HOLD = 10    # 「最後のキーで止まる」で、キーの後ろに腰を止めておくフレーム数
 RANGE_CONTEXT = 3  # 範囲を作り直す時に、範囲の端の外側から使う姿勢のフレーム数（外の動きの勢いをつなぐ。MotionBricks の文脈は 4 姿勢）
@@ -233,7 +228,7 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
                   False なら姿勢だけ job.context_before・context_after に入れる（中割りの MotionBricks の文脈）。
     """
     skel = MMDSkeleton(pmx)
-    rt = Retargeter(skel, SOMA_JSON)
+    rt = Retargeter(skel, paths.soma_json())
     tracks = tracks_of(skel, motion)
     body = body_bone_names(skel, rt)
     # 手足を動かす IK（腕の IK・足ＩＫ）だけにキーがあるフレームは、その手足の目印にする。体の他の骨にもキーがあれば全身のポーズ
@@ -397,9 +392,11 @@ def _port_open(port):
 def kimodo_server(mode):
     port, text, name = PERF_MODES[mode]
     # GPU の番号は nvidia-smi と同じ並びに（gpu.py の診断と同じ GPU を cuda:0 にする）
-    env = dict(os.environ, HF_HUB_CACHE=KIMODO_HF_CACHE, TEXT_ENCODERS_DIR=KIMODO_TEXT_ENCODERS,
+    # TEXT_ENCODERS_DIR: 文の読み取り（LLM2Vec ＋ Llama 3）を tools/prepare_text_encoder.py が置いた所から読ませる。
+    # 無いと Kimodo は Llama を meta-llama（Hugging Face の申請が要る）から取りに行く
+    env = dict(os.environ, HF_HUB_CACHE=paths.kimodo_hf_cache(), TEXT_ENCODERS_DIR=paths.text_encoders(),
                PYTHONUTF8="1", PYTHONIOENCODING="utf-8", CUDA_DEVICE_ORDER="PCI_BUS_ID")
-    return resident.Server(name, port, KIMODO_PYTHON, KIMODO_SCRIPT, KIMODO_DIR, env, args=(text,))
+    return resident.Server(name, port, paths.kimodo_python(), KIMODO_SCRIPT, paths.kimodo_dir(), env, args=(text,))
 
 
 _KIMODO_LOCK = threading.Lock()
@@ -415,9 +412,8 @@ def run_kimodo(job, work_dir, on_line=None, mode="low"):
     if mode not in PERF_MODES:
         raise ValueError(f"動作モードは {list(PERF_MODES)} のどれかです（{mode}）")
     log = on_line or (lambda _l: None)
-    if mode == "low" and not os.path.isfile(os.path.join(KIMODO_TEXT_ENCODERS, "meta-llama", "Meta-Llama-3-8B-Instruct", "config.json")):
-        raise RuntimeError(f"文の読み取りのモデルが {KIMODO_TEXT_ENCODERS} にありません。"
-                           "tools/prepare_text_encoder.py で置いてください（README の Kimodo の手順）")
+    if mode == "low" and not os.path.isfile(os.path.join(paths.text_encoders(), "meta-llama", "Meta-Llama-3-8B-Instruct", "config.json")):
+        raise paths.NotSetUp(f"文の読み取りのモデルが {paths.text_encoders()} にありません。{paths.SETUP_HINT}")
     if mode == "fast" and not _port_open(TEXT_SERVER_PORT):
         raise RuntimeError("高速モードはテキスト読み取りサーバーが要ります。「サーバーを起動」を押すか、低負荷モードにしてください")
     # 片付けから頼み終わるまでを 1 つずつにする。MMD ごとの窓が違うモードで同時に頼むと、片付けと立ち上げが交互に入って
@@ -552,7 +548,7 @@ def _build_frames(args):
     """build_motion の 1 プロセス分。(名前, フレーム, 移動, 回転) の一覧を返す。"""
     job, names, root, rot, ks = args
     skel = MMDSkeleton(job.pmx)
-    rt = Retargeter(skel, SOMA_JSON)
+    rt = Retargeter(skel, paths.soma_json())
     if names != rt.soma_names:
         raise ValueError("Kimodo の結果の関節の並びが SOMA の骨格ファイルと違います")
     from_canon = Q.from_axis_angle([0, 1, 0], job.ref_yaw)

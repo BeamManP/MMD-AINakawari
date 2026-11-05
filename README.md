@@ -46,7 +46,7 @@ MMD（MikuMikuDance）で打ったキーとキーの間を、AI が中割りし�
 
 ## インストール（開発版）
 
-今は、Kimodo・MotionBricks・窓の 3 つの Python 環境を手で作ります。置き場所は、下の手順の場所（`F:\kimodo`・`F:\motionbricks`）に決め打ちになっています。違う場所に置く時は、`mmd_ainakawari/pipeline.py`（`KIMODO_*`・`SOMA_JSON`）・`mmd_ainakawari/smooth_stop.py`（`MB_*`）・`mmd_ainakawari/app.py`（`SERVER_CMD`）と、高速モードを使うなら `tools/start_textencoder.cmd` の中の場所を書き換えてください（設定ファイルにするのは次の作業です）。
+今は、Kimodo・MotionBricks・窓の 3 つの Python 環境を手で作ります（詳細の窓からボタン一発で入れられるようにするのは次の作業です）。下の手順は `F:\kimodo`・`F:\motionbricks` に置く例です。置いた場所は、最後に `work\paths.json` に書きます（[5. 置いた場所を書く](#5-置いた場所を書く)）。
 
 ### 1. MMDPlugin を入れる
 [MMDPlugin](https://bowlroll.net/file/121761)（おいがみ さん）の説明書のとおり、`d3d9.dll`・`d3dx9_43.dll`・`MMDPlugin.dll` を MMD のフォルダに置きます。MME も使う時は、MME 一式を `plugin\mme\` に移します。
@@ -83,7 +83,13 @@ python -m venv .venv
 cmd /c scripts\build_native.cmd
 ```
 
-### 5. プラグインを MMD に入れる
+### 5. 置いた場所を書く
+このリポジトリのフォルダで、手順 4 の Python を使って、Kimodo と MotionBricks の置き場所を書きます（`work\paths.json` に入ります）。MotionBricks を入れていない時は、2 つ目を省きます。
+```bat
+E:\path\to\mmd-mcp\.venv\Scripts\python.exe -m mmd_ainakawari.paths F:\kimodo F:\motionbricks
+```
+
+### 6. プラグインを MMD に入れる
 1. 手順 2 で clone したこのリポジトリのフォルダで作業します
 2. `mmd_plugin\build.cmd` でプラグインをビルドします（MMDPlugin の開発用ファイル `mmdplugin_dev_ver0.41_x64` の中身を `work\mmdplugin\dev` に置くか、その場所を環境変数 `AINAKAWARI_SDK` で渡します）
 3. できた `mmd_plugin\bin\MMD-AINakawari.dll` を、MMD の `plugin\MMD-AINakawari\` に置きます

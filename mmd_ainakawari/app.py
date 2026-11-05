@@ -26,7 +26,7 @@ import winerror
 
 from mmd_mcp.windows import list_windows
 
-from . import gpu, panel, runner, samples, smooth_stop
+from . import gpu, panel, paths, runner, samples, smooth_stop
 from .message_window import MessageWindow, register_message
 from .mmd_link import MMDLink
 from .widgets import Fold, PromptRows, ScrollFrame
@@ -41,7 +41,6 @@ _set_window_long = ctypes.windll.user32.SetWindowLongPtrW
 _set_window_long.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
 _set_window_long.restype = ctypes.c_void_p
 SETTINGS_PATH = os.path.join(runner.WORK_DIR, "settings.json")
-SERVER_CMD = r"F:\kimodo\start_textencoder.cmd"
 DEFAULTS = {
     "tab": "kimodo", "mode": "fill", "range_mode": "keys", "length": "",   # 範囲は選んだキーの間から（11-05 マスター）
     "prompt": "A person moves naturally between poses.",
@@ -398,7 +397,7 @@ class App:
         ttk.Checkbutton(t, text="手首は普通の補間（MotionBricks は手首を回しすぎることがある）", variable=self.wrist_lerp,
                         state=state).pack(anchor="w", pady=(4, 0))
         if not smooth_stop.available():
-            ttk.Label(t, text=f"MotionBricks が入っていません（{smooth_stop.MB_PYTHON}）", foreground="#a33").pack(anchor="w", pady=(10, 0))
+            ttk.Label(t, text="MotionBricks が入っていません（詳細の窓のセットアップで入れられます）", foreground="#a33").pack(anchor="w", pady=(10, 0))
 
     def _perf_mode(self):
         return next(k for k, n in PERF_MODES if n == self.perf.get())
@@ -660,7 +659,7 @@ class App:
         in_range = self.range_mode.get() == "keys"   # 範囲を使う時は範囲の終わりまで作るので、長さは使わない
         length = opt_int(self.length.get()) if mode != "fill" and not nakawari and not in_range else None
         if nakawari and not smooth_stop.available():
-            raise ValueError(f"中割りには MotionBricks が要ります（{smooth_stop.MB_PYTHON} がありません）")
+            raise ValueError("中割りには MotionBricks が要ります（詳細の窓のセットアップで入れてください）")
         if not nakawari and mode != "fill" and length is None and not in_range:
             raise ValueError("「続きを足す」「プロンプトだけで作る」では長さを入れてください")
         selection = None
@@ -730,10 +729,15 @@ class App:
         self._run(lambda log: runner.undo(backup, log, link=self.link), "生成前のモーションに戻しました")
 
     def _start_server(self):
-        if not os.path.exists(SERVER_CMD):
-            messagebox.showerror("AIナカワリ", f"サーバーの起動バッチがありません: {SERVER_CMD}", parent=self.root)
+        try:
+            cmd = paths.server_cmd()
+        except paths.NotSetUp as e:
+            messagebox.showerror("AIナカワリ", str(e), parent=self.root)
             return
-        subprocess.Popen(["cmd.exe", "/c", SERVER_CMD], creationflags=subprocess.CREATE_NEW_CONSOLE)
+        if not os.path.exists(cmd):
+            messagebox.showerror("AIナカワリ", f"サーバーの起動バッチがありません: {cmd}", parent=self.root)
+            return
+        subprocess.Popen(["cmd.exe", "/c", cmd], creationflags=subprocess.CREATE_NEW_CONSOLE)
         self.status.set("サーバーを起動しました（黒い窓）。10〜20 秒で ● になります")
 
 

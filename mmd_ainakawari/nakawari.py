@@ -11,7 +11,7 @@ pipeline.prepare が出すキーの姿勢（Kimodo の形・最初のキーを�
 """
 import numpy as np
 
-from . import pipeline, smooth_stop
+from . import paths, pipeline, smooth_stop
 from . import quat as Q
 
 WRISTS = ("LeftHand", "RightHand")
@@ -30,7 +30,7 @@ def _pose(key):
 
 def generate(job, work_dir, key_stop=False, wrist_lerp=False, log=print):
     if not smooth_stop.available():
-        raise RuntimeError(f"MotionBricks が見つかりません（{smooth_stop.MB_PYTHON}）")
+        raise RuntimeError("MotionBricks が入っていません。詳細の窓のセットアップで MotionBricks を入れてください")
     keys = sorted(job.request["keys"], key=lambda k: k["frame"])
     if len(keys) < 2:
         raise ValueError("中割りには体のキーが 2 つ以上要ります")
@@ -70,7 +70,7 @@ def generate(job, work_dir, key_stop=False, wrist_lerp=False, log=print):
         if s == 0 and job.anchors and job.context_before:
             context = ([_pose(job.context_before[0])] * 4 + [_pose(p) for p in job.context_before] + [poses[0]])[-4:]
         jobs.append({"context": context, "targets": targets})
-    res = smooth_stop._run({"skeleton": pipeline.SOMA_JSON, "jobs": jobs}, work_dir, log=log)
+    res = smooth_stop._run({"skeleton": paths.soma_json(), "jobs": jobs}, work_dir, log=log)
 
     T = job.num_frames
     J = len(keys[0]["local_rot"]) // 4

@@ -207,7 +207,14 @@ Kimodo の公式のコード・説明書・デモ、よその連携（Blender Br
 ## 次にやること（2026-11-04 3時の時点）
 - **MotionBricks を配布に入れるか**: 入れた大きさは `F:\motionbricks` で 8.5GB（Python 環境 3.1GB・モデル込みのパッケージ 2.2GB・TensorRT の変換済みエンジン 0.7GB・git 2.4GB。git を除けば約 6GB）。TensorRT のエンジンは GPU ごとに初回に作る（数分）。コードは Apache-2.0、モデルは NVIDIA Open Model Agreement（商用可）。入れない人は「なめらかに」が押せないだけで、Kimodo だけの止まり方になる
 - **MotionBricks の使い道を広げる**: 今は「なめらかに止まる」と「中割り」のタブ。Kimodo の区間のつなぎに使う案もあったが、区間の始めのキーで跳ぶ問題は区間の始めをずらして消えた
-- **導入（配布）**: 11-04 マスター判断で「A: MMD の窓にセットアップ画面」。使うのは AI に慣れていない人なので、ボタンで案内し、失敗したらやり直しのボタン。小さい Python（埋め込み版）を同梱して窓は最初から動かす。mmd-mcp はライブラリとして一緒に入れる（MCP のサーバーは立てない。確かめた版に固定）
+- **導入（配布）の決定（11-05 マスター）**:
+  - 使う人の手作業は「release の zip を MMD のフォルダに展開 → `AIナカワリ導入.cmd` をダブルクリック → MMD を起動」まで。重いモデルは zip に入れない。その後は詳細の窓のセットアップで、入れる場所を選んでボタン一発（段ごとに ✓、失敗したら続きから）
+  - MMDPlugin は同梱する（説明書「転載は非商用なら連絡不要」。有料にはしない）。zip の直下には置かず、`AIナカワリ導入.cmd` が置く。MME（直下の `d3d9.dll`・`MMEffect.dll`・`MMHack.dll`・`MMEffect.ini`・`MMEffect.txt`）を見つけたら `plugin\mme\` に移す（MMDPlugin の説明書の形。マスターの MMD もこの形）。MMDPlugin が既にあれば何もしない。自前の d3d9.dll は作らない（MMDPlugin を使うほかのプラグインとぶつかる）
+  - Kimodo・MotionBricks は確かめた版（コミット）に固定。git は使わず GitHub の zip と LFS のファイルの URL で落とす。uv を同梱して Python ごと作らせる
+  - Python の環境は 2 つのまま（Kimodo 3.10・MotionBricks 3.12）。MotionBricks の環境に torch は無く、まとめても数百 MB しか減らない
+  - 窓は zip に同梱の Python（tkinter 入り）で動かす
+  - 検証用のまっさらな MMD: `F:\AINakawari_検証\MikuMikuDance_v932x64\`（MMDPlugin・MME 無し。exe はいつもの物と同じ）
+- **導入（配布）の前の案**: 11-04 マスター判断で「A: MMD の窓にセットアップ画面」。使うのは AI に慣れていない人なので、ボタンで案内し、失敗したらやり直しのボタン。小さい Python（埋め込み版）を同梱して窓は最初から動かす。mmd-mcp はライブラリとして一緒に入れる（MCP のサーバーは立てない。確かめた版に固定）
   - 大きさの実測（マスターの環境）: Llama-3-8B-Instruct 15.0GB・Kimodo の Python 環境 5.3GB（Python 3.10.19・torch 2.11.0+cu128）・Kimodo のモデル 1.1GB・LLM2Vec の LoRA 0.3GB → 約 22GB。最初に置き場所と空き容量を確かめる
   - **Llama-3-8B-Instruct は Hugging Face で gated = manual（Meta への申請・手動承認・トークンが要る）**。窓は申請のページを開いてトークンを貼る欄まで。Kimodo のモデル（NVIDIA Open Model License・商用可）と LLM2Vec の LoRA は同意制ではない。有志の同意制なしの版（`Aero-Ex/KIMODO-Meta3_llm2vec_FP16`・`_NF4` など）は、許諾と中身を確かめるまで使わない
   - **11-05 解決（マスター承認「Bでいこう」）**: 申請なしの写し `NousResearch/Meta-Llama-3-8B-Instruct`（Llama 3 のライセンス文つき。1.b.i の再配布の条件どおり）の重み 4 つの sha256 が、Meta から落とした物と一致。`config.json`・目次もバイト単位で一致（トークナイザーは mntp の物を使うので元の Llama からは読まない）。`tools/prepare_text_encoder.py` が写しから落として sha256 で照らし、mntp の `adapter_config.json` の元の場所を手元のフォルダに書き換えて置く。Kimodo の `TEXT_ENCODERS_DIR` で読ませる（Kimodo は無改造）。LLM2Vec は mntp の `config.json` の `_name_or_path`（meta-llama のまま）を使い直すので、Llama 3 の印の付け方も同じ。文 4 つの読み取りの結果が完全一致、meta-llama のキャッシュを隠して低負荷・高速の両方で生成できた。Kimodo のモデルも申請なしなので、**Hugging Face のアカウントが要らなくなった**

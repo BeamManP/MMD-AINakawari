@@ -18,14 +18,12 @@ import os
 
 import numpy as np
 
-from . import pipeline, resident
+from . import paths, pipeline, resident
 from . import quat as Q
 from .retarget import TOE_GROUND
 
-ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MB_PYTHON = r"F:\motionbricks\.venv\Scripts\python.exe"
-MB_DIR = r"F:\motionbricks"
-MB_SCRIPT = os.path.join(ROOT_DIR, "tools", "mb_gen.py")
+# MotionBricks の Python・置き場所は paths（work/paths.json）から。入れていなければ None。11-05 まで F:\motionbricks に決め打ちだった
+MB_SCRIPT = os.path.join(paths.HOME, "tools", "mb_gen.py")
 MB_PORT = 9552   # 常駐の MotionBricks（tools/mb_gen.py --serve）
 MIN_LEN, MAX_LEN = 17, 57    # MotionBricks の 1 回で作れる、文脈の最後から目標までのフレーム数
 LEN_STEP = 3
@@ -34,7 +32,7 @@ MIN_SPEED = 1.0              # キーの 30〜10 フレーム手前の腰の平�
 
 
 def available():
-    return os.path.exists(MB_PYTHON) and os.path.exists(MB_SCRIPT)
+    return paths.motionbricks_python() is not None and os.path.exists(MB_SCRIPT)
 
 
 def _speeds(roots, fps):
@@ -50,7 +48,7 @@ GROUND_SPREAD = 4   # 持ち上げる量を前後これだけのフレームに�
 def _soma():
     global _SOMA
     if _SOMA is None:
-        soma = json.load(open(pipeline.SOMA_JSON, encoding="utf-8"))
+        soma = json.load(open(paths.soma_json(), encoding="utf-8"))
         names = soma["names"]
         neutral = np.array(soma["neutral_joints"])
         toes = [names.index(n) for n in ("LeftToeBase", "RightToeBase")]
@@ -104,7 +102,7 @@ def apply(job, result, work_dir, log=print):
     if not job.stop_frames:
         return result
     if not available():
-        raise RuntimeError(f"MotionBricks が見つかりません（{MB_PYTHON}）。「なめらかに止まる」を外すか、MotionBricks を入れてください")
+        raise RuntimeError("MotionBricks が入っていません。「なめらかに止まる」を外すか、詳細の窓のセットアップで MotionBricks を入れてください")
     stop = job.stop_frames[0] - 1
     kf = stop - job.first
     key = next(k for k in job.request["keys"] if k["frame"] == kf)
@@ -128,7 +126,7 @@ def apply(job, result, work_dir, log=print):
     key_pose = {"root": key["root"], "local_rot": key["local_rot"]}
     jobs = [{"context": [{"root": roots[t].tolist(), "local_rot": rots[t].reshape(-1).tolist()} for t in range(kf - L - 3, kf - L + 1)],
              "targets": [{"poses": [key_pose], "frames": L, "num_poses_to_use": 1}]} for L in lengths]
-    res = _run({"skeleton": pipeline.SOMA_JSON, "jobs": jobs}, work_dir, log=log)
+    res = _run({"skeleton": paths.soma_json(), "jobs": jobs}, work_dir, log=log)
 
     best = None
     for L, r in zip(lengths, res["results"]):
@@ -161,6 +159,6 @@ def _run(request, work_dir, log=print):
     os.makedirs(work_dir, exist_ok=True)
     json.dump(request, open(os.path.join(work_dir, "request.json"), "w", encoding="utf-8"))
     env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8", CUDA_DEVICE_ORDER="PCI_BUS_ID")   # gpu.py の診断と同じ GPU
-    result, _line = resident.call(resident.Server("MotionBricks", MB_PORT, MB_PYTHON, MB_SCRIPT, MB_DIR, env), request, log=log)
+    result, _line = resident.call(resident.Server("MotionBricks", MB_PORT, paths.motionbricks_python(), MB_SCRIPT, paths.motionbricks_dir(), env), request, log=log)
     json.dump(result, open(os.path.join(work_dir, "result.json"), "w", encoding="utf-8"))
     return result
