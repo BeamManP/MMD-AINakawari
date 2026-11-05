@@ -14,6 +14,7 @@ zip の形（使う人は、中身を MMD のフォルダに展開して「AIナ
         app\                      mmd_ainakawari・tools の一部・LICENSE・README.md（設定は app\work に書かれる）
         uv\uv.exe                 セットアップで Kimodo・MotionBricks の Python を作る
         mmdplugin\                MMDPlugin 0.41 x64（AIナカワリ導入.cmd が exe の横に置く）
+        prebuilt\                 組み立て済みの MotionCorrection（kimodo の C++ の部品。セットアップが Kimodo の環境に入れる）とライセンスの文
         BUILD.json                作った時の版（コミット・Python・uv）
         THIRD_PARTY.txt           同梱した物とライセンス
     Python などを plugin\ の下に置かないこと。MMDPlugin は plugin\ の下の DLL を奥まで全部読み込もうとして、MMD が起動直後に落ちる
@@ -79,8 +80,19 @@ SMOKE = (
     "import mmd_ainakawari.installer.window, mmd_ainakawari.installer.steps as s;"
     "import os, mmd_mcp.bone_selection as b; assert os.path.isfile(b.DLL_PATH), b.DLL_PATH;"
     "assert os.path.isfile(s.REQUIREMENTS) and os.path.isfile(s.FETCH_MODEL), s.REQUIREMENTS;"
+    "folder, info = s.motion_correction_info(); assert folder == os.path.join(os.path.dirname(s.paths.HOME), s.PREBUILT), folder;"
+    "assert info['kimodo_commit'] == s.pins.KIMODO_COMMIT and s.sha256(os.path.join(folder, info['file'])) == info['sha256'];"
     "uv = os.path.join(os.path.dirname(s.paths.HOME), 'uv', 'uv.exe'); assert os.path.isfile(uv), uv;"
     "print('ok')"
+)
+# 組み立て済みの MotionCorrection に組み込まれている物のライセンスの文（prebuilt\ に置く）。版は kimodo の CMakeLists.txt の GIT_TAG
+PREBUILT_LICENSES = (
+    ("https://raw.githubusercontent.com/nv-tlabs/kimodo/{kimodo}/LICENSE", "LICENSE_kimodo.txt",
+     "987057aca9b5c6f338cadfcc2666d74a093c43e6fd02173c5d9ed63ec66cc53d"),
+    ("https://raw.githubusercontent.com/pybind/pybind11/v2.11.1/LICENSE", "LICENSE_pybind11.txt",
+     "83965b843b98f670d3a85bd041ed4b372c8ec50d7b4a5995a83ac697ba675dcb"),
+    ("https://gitlab.com/libeigen/eigen/-/raw/3.4.0/COPYING.MPL2", "LICENSE_eigen_MPL2.txt",
+     "fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85"),
 )
 THIRD_PARTY = """AIナカワリ の zip に同梱している物
 
@@ -92,6 +104,10 @@ THIRD_PARTY = """AIナカワリ の zip に同梱している物
 - uv {uv}（https://github.com/astral-sh/uv）: MIT OR Apache-2.0
 - MMDPlugin 0.41 x64（おいがみ）: 転載は非商用に限り連絡不要。mmdplugin\\MMDPlugin_readme.txt
   d3dx9_43.dll も MMDPlugin の物（中で Windows の d3dx9_43.dll を呼ぶ中継。Microsoft の DirectX の物ではない）
+- MotionCorrection（Kimodo の一部・NVIDIA）: Apache-2.0。prebuilt\\LICENSE_kimodo.txt
+  prebuilt\\_motion_correction.cp310-win_amd64.pyd は、kimodo のコミット（prebuilt\\motion_correction.json）から組み立てた物。
+  中に pybind11 v2.11.1（BSD-3-Clause。prebuilt\\LICENSE_pybind11.txt）と Eigen 3.4.0（MPL-2.0。prebuilt\\LICENSE_eigen_MPL2.txt。
+  ソースは https://gitlab.com/libeigen/eigen/-/tree/3.4.0）を含む
 
 AI のモデル（Kimodo・MotionBricks・Meta Llama 3・LLM2Vec）と、それを動かす Python の部品は同梱していない。
 詳細の窓の「セットアップ」が、使う人がライセンスに同意してから、それぞれの配布元から落とす:
@@ -182,6 +198,30 @@ def put_uv(plugin_dir):
             shutil.copyfileobj(src, dst)
 
 
+def put_prebuilt(plugin_dir, folder):
+    """組み立て済みの MotionCorrection（kimodo の C++ の部品）を prebuilt\\ に置く。セットアップが Kimodo の環境に入れる。
+    使う人の PC にはコンパイラが無いので組み立てて配る（11-06 マスター判断 A: 作る人の手元で kimodo を入れた時に組み立てた物）。
+    記録（motion_correction.json）の kimodo のコミットがセットアップの版（pins.py）と同じで、sha256 が合う物だけを入れる。"""
+    sys.path.insert(0, ROOT)
+    from mmd_ainakawari.installer import pins, steps
+    with open(os.path.join(folder, steps.MOTION_CORRECTION_JSON), encoding="utf-8") as f:
+        info = json.load(f)
+    if info.get("kimodo_commit") != pins.KIMODO_COMMIT:
+        raise SystemExit(f"{folder} の MotionCorrection は kimodo {info.get('kimodo_commit')} の物で、セットアップの版 {pins.KIMODO_COMMIT} と違います")
+    pyd = os.path.join(folder, info["file"])
+    if sha256(pyd) != info["sha256"]:
+        raise SystemExit(f"{pyd} の sha256 が記録と違います")
+    out = os.path.join(plugin_dir, steps.PREBUILT)
+    os.makedirs(out)
+    shutil.copyfile(pyd, os.path.join(out, info["file"]))
+    with open(os.path.join(out, steps.MOTION_CORRECTION_JSON), "w", encoding="utf-8") as f:
+        json.dump(info, f, indent=1, ensure_ascii=False)
+    # pyd に組み込まれている物のライセンスの文（版を固定して落とす）
+    for url, name, digest in PREBUILT_LICENSES:
+        shutil.copyfile(fetch(url.format(kimodo=pins.KIMODO_COMMIT), name, digest), os.path.join(out, name))
+    return info
+
+
 def put_mmdplugin(plugin_dir, zip_path):
     out = os.path.join(plugin_dir, "mmdplugin")
     os.makedirs(out)
@@ -209,6 +249,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--mmdplugin", required=True, help="MMDPlugin_v0.41_x64.zip（おいがみさんの配布物）")
     parser.add_argument("--mmd-mcp", default=os.path.join(os.path.dirname(ROOT), "mmd-mcp"), help="mmd-mcp のリポジトリ")
+    parser.add_argument("--motion-correction", default=os.path.join(ROOT, "work", "prebuilt"),
+                        help="組み立て済みの MotionCorrection（pyd と motion_correction.json）のフォルダ")
     parser.add_argument("--allow-dirty", action="store_true", help="コミットしていない変更があっても作る（試し用。zip の名前に dirty が付く）")
     args = parser.parse_args()
     if sys.version_info < (3, 10, 12):
@@ -233,6 +275,7 @@ def main():
     count = put_app(os.path.join(plugin_dir, "app"), args.allow_dirty)
     put_uv(plugin_dir)
     put_mmdplugin(plugin_dir, args.mmdplugin)
+    motion_correction = put_prebuilt(plugin_dir, os.path.abspath(args.motion_correction))
 
     stray = [os.path.join(r, f) for r, _, fs in os.walk(os.path.join(STAGE, "plugin")) for f in fs if f.lower() != f"{NAME}.ini".lower()
              and f.lower() != f"{NAME}.dll".lower()]
@@ -251,6 +294,7 @@ def main():
         "python": PYTHON_FILE,
         "uv": UV_VERSION,
         "mmdplugin": "0.41 x64",
+        "motion_correction": motion_correction,
     }
     with open(os.path.join(plugin_dir, "BUILD.json"), "w", encoding="utf-8") as f:
         json.dump(build, f, indent=1, ensure_ascii=False)
