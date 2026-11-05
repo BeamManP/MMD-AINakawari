@@ -53,14 +53,15 @@ MMD（MikuMikuDance）で打ったキーとキーの間を、AI が中割りし�
 
 ### 2. Kimodo を入れる
 1. [Kimodo](https://github.com/nv-tlabs/kimodo) を `F:\kimodo\repo` に clone し、[公式の手順](https://research.nvidia.com/labs/sil/projects/kimodo/docs/getting_started/installation.html)で Python 3.10 の環境を `F:\kimodo\.venv` に作ります
-2. 文の読み取りに使う [Meta-Llama-3-8B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct) は、Hugging Face で利用の申請（Meta のライセンスへの同意）が要ります。申請が通ったら、Kimodo の環境で `F:\kimodo\.venv\Scripts\hf.exe auth login` を実行してログインしておきます
-3. モデルは、最初に生成した時に `F:\kimodo\hf_cache` に入ります（約 17GB）
-4. このリポジトリを clone し、そのフォルダで骨格のファイルを書き出します:
+2. このリポジトリを clone し、そのフォルダで骨格のファイルを書き出して、文の読み取りのモデルを置きます:
    ```bat
    mkdir F:\kimodo\tools
    F:\kimodo\.venv\Scripts\python.exe tools\export_skeleton.py F:\kimodo\tools\somaskel30.json
+   F:\kimodo\.venv\Scripts\python.exe tools\prepare_text_encoder.py F:\kimodo\text_encoders
    ```
-5. 高速モード（VRAM 20GB 以上）を使う時は、`tools\start_textencoder.cmd` を `F:\kimodo\` に置きます（詳細の窓の「サーバーを起動」がこれを開きます）
+   文の読み取りには Meta-Llama-3-8B-Instruct（約 16GB）を使います。`prepare_text_encoder.py` は、申請の要らない写し（[NousResearch/Meta-Llama-3-8B-Instruct](https://huggingface.co/NousResearch/Meta-Llama-3-8B-Instruct)）から落とし、中身が Meta の配っている物と同じかを確かめてから置きます。**Hugging Face のアカウントや利用の申請は要りません。** 使う時は、Meta の [Llama 3 のライセンス](https://huggingface.co/NousResearch/Meta-Llama-3-8B-Instruct/blob/main/LICENSE)と[使い方の決まり](https://huggingface.co/NousResearch/Meta-Llama-3-8B-Instruct/blob/main/USE_POLICY.md)に従ってください（置いたフォルダにも入っています）
+3. Kimodo 本体のモデル（約 1.1GB）は、最初に生成した時に `F:\kimodo\hf_cache` に入ります
+4. 高速モード（VRAM 20GB 以上）を使う時は、`tools\start_textencoder.cmd` を `F:\kimodo\` に置きます（詳細の窓の「サーバーを起動」がこれを開きます）
 
 ### 3. MotionBricks を入れる
 [Git LFS](https://git-lfs.com/) と [uv](https://docs.astral.sh/uv/) を入れてから:
@@ -146,8 +147,8 @@ MMD を起動して、メニューバーに「AIナカワリ」、下の段の�
 - スクリーンショットのモデル: Tda式初音ミクV4X（Tda さん）。初音ミクは クリプトン・フューチャー・メディア株式会社 のキャラクターです
 - [Kimodo](https://github.com/nv-tlabs/kimodo)（NVIDIA）: コードは Apache-2.0、モデルは [NVIDIA Open Model License](https://huggingface.co/nvidia/Kimodo-SOMA-RP-v1.2)
 - [MotionBricks](https://github.com/NVlabs/motionbricks)（NVIDIA）: コードは Apache-2.0、モデルは NVIDIA Open Model Agreement
-- [Meta-Llama-3-8B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct)（Meta）: Meta Llama 3 Community License（Kimodo が文の読み取りに使う）
-- [LLM2Vec](https://huggingface.co/McGill-NLP/LLM2Vec-Meta-Llama-3-8B-Instruct-mntp)（McGill-NLP）
+- [Meta-Llama-3-8B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct)（Meta）: Meta Llama 3 Community License（Kimodo が文の読み取りに使う）。**Built with Meta Llama 3**
+- [LLM2Vec](https://huggingface.co/McGill-NLP/LLM2Vec-Meta-Llama-3-8B-Instruct-mntp)（McGill-NLP）: MIT
 - [MMDPlugin](https://bowlroll.net/file/121761)（おいがみ さん）
 - [mmd-mcp](https://github.com/BeamManP/mmd-mcp)（MIT-0 ほか）
 

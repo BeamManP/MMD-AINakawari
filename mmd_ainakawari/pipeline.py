@@ -28,6 +28,9 @@ PERF_MODES = {
     "fast": (9551, "api", "Kimodo（高速）"),    # テキストの読み取りはサーバー（VRAM 約 16.8GB）
 }
 KIMODO_HF_CACHE = r"F:\kimodo\hf_cache"
+# 文の読み取り（LLM2Vec ＋ Llama 3）の置き場所。tools/prepare_text_encoder.py が置く。Kimodo の TEXT_ENCODERS_DIR で読ませると、
+# Llama を meta-llama（Hugging Face の申請が要る）から取りに行かない。tools/start_textencoder.cmd も同じ場所
+KIMODO_TEXT_ENCODERS = r"F:\kimodo\text_encoders"
 SOMA_JSON = r"F:\kimodo\tools\somaskel30.json"
 MAX_FRAMES = 300  # Kimodo の 1 区間は 10 秒（30fps）まで（公式の limitations.md）。区間を分ければ全体はこれより長くてよい
 STOP_HOLD = 10    # 「最後のキーで止まる」で、キーの後ろに腰を止めておくフレーム数
@@ -394,7 +397,8 @@ def _port_open(port):
 def kimodo_server(mode):
     port, text, name = PERF_MODES[mode]
     # GPU の番号は nvidia-smi と同じ並びに（gpu.py の診断と同じ GPU を cuda:0 にする）
-    env = dict(os.environ, HF_HUB_CACHE=KIMODO_HF_CACHE, PYTHONUTF8="1", PYTHONIOENCODING="utf-8", CUDA_DEVICE_ORDER="PCI_BUS_ID")
+    env = dict(os.environ, HF_HUB_CACHE=KIMODO_HF_CACHE, TEXT_ENCODERS_DIR=KIMODO_TEXT_ENCODERS,
+               PYTHONUTF8="1", PYTHONIOENCODING="utf-8", CUDA_DEVICE_ORDER="PCI_BUS_ID")
     return resident.Server(name, port, KIMODO_PYTHON, KIMODO_SCRIPT, KIMODO_DIR, env, args=(text,))
 
 
@@ -411,6 +415,9 @@ def run_kimodo(job, work_dir, on_line=None, mode="low"):
     if mode not in PERF_MODES:
         raise ValueError(f"動作モードは {list(PERF_MODES)} のどれかです（{mode}）")
     log = on_line or (lambda _l: None)
+    if mode == "low" and not os.path.isfile(os.path.join(KIMODO_TEXT_ENCODERS, "meta-llama", "Meta-Llama-3-8B-Instruct", "config.json")):
+        raise RuntimeError(f"文の読み取りのモデルが {KIMODO_TEXT_ENCODERS} にありません。"
+                           "tools/prepare_text_encoder.py で置いてください（README の Kimodo の手順）")
     if mode == "fast" and not _port_open(TEXT_SERVER_PORT):
         raise RuntimeError("高速モードはテキスト読み取りサーバーが要ります。「サーバーを起動」を押すか、低負荷モードにしてください")
     # 片付けから頼み終わるまでを 1 つずつにする。MMD ごとの窓が違うモードで同時に頼むと、片付けと立ち上げが交互に入って
