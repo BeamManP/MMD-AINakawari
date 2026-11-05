@@ -59,9 +59,10 @@ class SetupWindow:
         f = ttk.Frame(win, padding=12)
         f.pack(fill="both", expand=True)
 
-        ttk.Label(f, text="AI のモデル（Kimodo・MotionBricks）と、それを動かす Python をまとめて入れます。\n"
-                          "git や Python を自分で入れる必要はありません。Hugging Face のアカウントも要りません。",
-                  justify="left").pack(anchor="w")
+        if diagnosis is not None:
+            self._show_environment(f, diagnosis)
+        ttk.Label(f, text="AI のモデル（Kimodo・MotionBricks）と、それを動かす Python をまとめて入れます。",
+                  justify="left").pack(anchor="w", pady=(10 if diagnosis is not None else 0, 0))
 
         # 入れる場所と空き
         row = ttk.Frame(f)
@@ -73,8 +74,6 @@ class SetupWindow:
         ttk.Button(row, text="選ぶ…", command=self._browse).pack(side="left")
         self.space = tk.StringVar()
         ttk.Label(f, textvariable=self.space, foreground="#555").pack(anchor="w", pady=(2, 0))
-        if diagnosis is not None:
-            ttk.Label(f, text=f"この PC: {diagnosis.summary()} → {diagnosis.note}", foreground="#555").pack(anchor="w", pady=(6, 0))
         self.dest.trace_add("write", lambda *_a: self._refresh())
 
         # 規約
@@ -117,6 +116,24 @@ class SetupWindow:
         self._poll()
 
     # ---- 表示 ----
+    @staticmethod
+    def _show_environment(f, d):
+        """一番上の「現在の環境: GPU・メインメモリ → MotionBricks ○ Kimodo 低負荷モード ○ Kimodo 高速モード ○」（11-06 マスター）。
+        使える物は緑の ○、使えない物は赤の ×。GPU を調べられなかった時は、どれも橙の ？（低負荷モードで試せる。gpu.diagnose）。
+        赤がある時は、理由（gpu.diagnose の一言）を下に小さく出す。"""
+        unknown = not d.gpu and d.low_ok
+        row = ttk.Frame(f)
+        row.pack(anchor="w", fill="x")
+        hardware = d.summary() if d.gpu else f"{'GPU を調べられませんでした' if unknown else 'NVIDIA の GPU が見つかりません'}・メインメモリ {d.ram_gb:.0f}GB"
+        ttk.Label(row, text=f"現在の環境：{hardware}　→").pack(side="left")
+        marks = [("MotionBricks", bool(d.gpu)), ("Kimodo 低負荷モード", d.low_ok and bool(d.gpu)), ("Kimodo 高速モード", d.fast_ok)]
+        for name, ok in marks:
+            mark, color = ("？", "#c70") if unknown else ("○", "#2a7") if ok else ("×", "#c33")
+            tk.Label(row, text=f"{name} {mark}", foreground=color, font=("", 9, "bold"),
+                     background=ttk.Style().lookup("TFrame", "background")).pack(side="left", padx=(8, 0))
+        if unknown or not all(ok for _n, ok in marks):
+            ttk.Label(f, text=d.note, foreground="#555").pack(anchor="w", pady=(2, 0))
+
     def _initial_folder(self):
         """前に入れた場所（paths.json の Kimodo の 1 つ上）があればそこ。無ければ空きのいちばん多いドライブ。"""
         try:
