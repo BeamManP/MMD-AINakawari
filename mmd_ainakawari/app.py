@@ -314,7 +314,10 @@ class App:
             ttk.Label(row, text=title, width=10).pack(side="left")
             return row
 
+        # Kimodo が入っていない時だけ、タブの一番上に出す（refresh_setup。MotionBricks のタブの nakawari_missing と同じ。11-06 マスター）
+        self.kimodo_missing = ttk.Label(t, text="AI のモデル（Kimodo）が入っていません。下の「セットアップ」で入れてください", foreground="#a33")
         mode_row = line("やりたいこと")
+        self.kimodo_top = mode_row
         self.mode = tk.StringVar(value=self.cfg["mode"] if self.cfg["mode"] in MODE_NOTES else "fill")
         for key, text in MODES:
             ttk.Radiobutton(mode_row, text=text, value=key, variable=self.mode, command=self._mode_changed).pack(side="left", padx=(0, 12))
@@ -429,8 +432,10 @@ class App:
         try:
             paths.kimodo_dir()
         except paths.NotSetUp:
+            self.kimodo_missing.pack(anchor="w", pady=(0, 8), before=self.kimodo_top)
             self.status.set("まだ AI のモデルが入っていません。下の「セットアップ」から入れてください")
             return
+        self.kimodo_missing.pack_forget()
         if self.status.get().startswith("まだ AI のモデルが入っていません"):
             self.status.set("MMD でキーを打ってから「生成」を押してください")
 
