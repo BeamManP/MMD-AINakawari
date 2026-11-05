@@ -287,6 +287,20 @@ class Setup:
                                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
         buf = b""
         tail = []
+
+        def emit(line, overwrite):
+            nonlocal tail
+            text = line.decode("utf-8", "replace").rstrip()
+            if not text:
+                return
+            if overwrite or PROGRESS_RE.search(text):
+                self.progress(text[-160:])
+            else:
+                self.log("  " + text)
+                tail = (tail + [text])[-15:]
+
+        # 行の終わり: \n と \r\n は改行（Windows の Python は \r\n で書く）、\r だけは上書きの 1 行（tqdm などの進み具合）。
+        # 11-06: \r を先に見て全部を進み具合にしていたので、Python の子の出力（失敗の理由も）がログに残らなかった
         while True:
             chunk = proc.stdout.read1(65536)
             if not chunk:
@@ -296,15 +310,19 @@ class Setup:
                 cut = min((i for i in (buf.find(b"\n"), buf.find(b"\r")) if i >= 0), default=-1)
                 if cut < 0:
                     break
-                line, end, buf = buf[:cut], buf[cut:cut + 1], buf[cut + 1:]
-                text = line.decode("utf-8", "replace").rstrip()
-                if not text:
-                    continue
-                if end == b"\r" or PROGRESS_RE.search(text):
-                    self.progress(text[-160:])
+                if buf[cut:cut + 1] == b"\r":
+                    if cut + 1 == len(buf):
+                        break   # 次の字が \n かどうか、続きを読んでから決める
+                    if buf[cut + 1:cut + 2] == b"\n":
+                        emit(buf[:cut], False)
+                        buf = buf[cut + 2:]
+                    else:
+                        emit(buf[:cut], True)
+                        buf = buf[cut + 1:]
                 else:
-                    self.log("  " + text)
-                    tail = (tail + [text])[-15:]
+                    emit(buf[:cut], False)
+                    buf = buf[cut + 1:]
+        emit(buf.rstrip(b"\r"), False)   # 最後の改行の無い行
         rc = proc.wait()
         self._proc = None
         if self._stop.is_set():
