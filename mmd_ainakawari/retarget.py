@@ -56,11 +56,10 @@ def conv_q(q):
     return np.array([-q[0], -q[1], q[2], q[3]])
 
 
-def _find(skel, *names):
-    for n in names:
-        if n in skel:
-            return n
-    raise KeyError(f"モデルにボーンがありません: {' / '.join(names)}")
+# 無いと計算が成り立たない骨（体の位置を書き込む先と、SOMA の腰の根っこ）。ほかの SOMA_TO_MMD の骨は、無ければ飛ばす（11-06 マスター
+# 「無いなら無いで無視（ログに警告）」）。脚は左右どちらかの 足・ひざ・足首 がそろっていれば足りる（体格を測る）
+REQUIRED_BONES = ("センター", "下半身")
+LEG_CHAINS = {"左": ("LeftLeg", "LeftShin", "LeftFoot"), "右": ("RightLeg", "RightShin", "RightFoot")}
 
 
 class Retargeter:
@@ -73,19 +72,28 @@ class Retargeter:
         self.sidx = {n: i for i, n in enumerate(self.soma_names)}
         self.J = len(self.soma_names)
 
-        for s, m in SOMA_TO_MMD.items():
-            if m is not None:
-                self.mmd.i(m)  # 無ければここで止める
-        self.ik_names = {side: (_find(mmd_skel, f"{side}足ＩＫ", f"{side}足IK"),
-                                _find(mmd_skel, f"{side}つま先ＩＫ", f"{side}つま先IK")) for side in "左右"}
+        # SOMA の関節 → このモデルの骨（無い骨は None）。無い骨は、MMD → SOMA では親の向きを使い、SOMA → MMD では書かない
+        self.map = {s: (m if m is not None and m in mmd_skel else None) for s, m in SOMA_TO_MMD.items()}
+        self.missing = [m for m in SOMA_TO_MMD.values() if m is not None and m not in mmd_skel]
+        # 上半身2 が無いモデル: 背骨を上半身 1 本で受け持つ。書き戻しでは Chest（背骨の曲がりの合計）の向きを上半身に入れる
+        # （Spine1 の向きだと、胸の曲がりの分だけ首と肩の付け根の位置がずれる）
+        self.chest_on_spine = "上半身2" in self.missing and "上半身" in mmd_skel
+        sides = [side for side, chain in LEG_CHAINS.items() if all(SOMA_TO_MMD[s] in mmd_skel for s in chain)]
+        lacking = [n for n in REQUIRED_BONES if n not in mmd_skel]
+        if not sides:
+            lacking.append("左右どちらかの 足・ひざ・足首")
+        if lacking:
+            raise KeyError(f"モデルにボーンがありません: {'・'.join(lacking)}（体の位置と大きさを決めるのに要ります）")
+        # 腰の位置の基準にする脚の付け根（ある方だけ。両方あれば真ん中）
+        self.leg_roots = [(soma, m) for soma, m in (("LeftLeg", "左足"), ("RightLeg", "右足")) if m in mmd_skel]
 
         # 基準での向きの差 C（Kimodo 座標）
         self.C = [Q.IDENTITY.copy() for _ in range(self.J)]
         rest = self.mmd.rest
         for s, (s_child, m_child) in DIRECTION_PAIRS.items():
             j = self.sidx[s]
-            m = SOMA_TO_MMD[s]
-            if m_child not in self.mmd:
+            m = self.map[s]
+            if m is None or m_child not in self.mmd:
                 continue
             d_soma = self.neutral[self.sidx[s_child]] - self.neutral[j]
             d_mmd = conv_p(rest[self.mmd.i(m_child)] - rest[self.mmd.i(m)])
@@ -101,11 +109,12 @@ class Retargeter:
         # 体格: 脚の長さの比（MMD の単位 → SOMA の m）
         def leg(points):
             return sum(np.linalg.norm(points[k + 1] - points[k]) for k in range(len(points) - 1))
-        soma_leg = leg([self.neutral[self.sidx[n]] for n in ("LeftLeg", "LeftShin", "LeftFoot")])
-        mmd_leg = leg([rest[self.mmd.i(n)] for n in ("左足", "左ひざ", "左足首")])
+        chain = LEG_CHAINS[sides[0]]   # そろっている方の脚で測る（両方あれば左）
+        soma_leg = leg([self.neutral[self.sidx[n]] for n in chain])
+        mmd_leg = leg([rest[self.mmd.i(SOMA_TO_MMD[n])] for n in chain])
         self.scale = soma_leg / mmd_leg
-        # 腰（Hips）から両脚の付け根の真ん中までの差（SOMA の基準）
-        self.legmid_offset = (self.neutral[self.sidx["LeftLeg"]] + self.neutral[self.sidx["RightLeg"]]) / 2 - self.neutral[self.sidx["Hips"]]
+        # 腰（Hips）から脚の付け根（両方あれば真ん中）までの差（SOMA の基準）
+        self.legmid_offset = np.mean([self.neutral[self.sidx[s]] for s, _m in self.leg_roots], axis=0) - self.neutral[self.sidx["Hips"]]
         # SOMA の基準で、腰を原点にした時のつま先の付け根・足首の高さ（床合わせに使う）
         self.toe_rest = self.neutral[self.sidx["LeftToeBase"]][1] - self.neutral[self.sidx["Hips"]][1]
         self.ankle_rest = self.neutral[self.sidx["LeftFoot"]][1] - self.neutral[self.sidx["Hips"]][1]
@@ -122,7 +131,7 @@ class Retargeter:
                    書き戻しの計算中は解かない（届いている前提）。それ以外の IK（目線・機構など）はマスターのキーのまま解く
         """
         sk = self.mmd
-        self.mapped = [m for m in SOMA_TO_MMD.values() if m]
+        self.mapped = [m for m in self.map.values() if m]
         ik_links = {}   # 鎖の骨 → その IK のボーン
         for i, b in enumerate(sk.bones):
             if b["ik"]:
@@ -142,7 +151,8 @@ class Retargeter:
         self.written_bones = set(self.mapped) | set(self.proxies.values()) | set(self.our_iks) | set(self.neutral_bones)
         self.idle_iks = self._idle_iks()
         # IK がどの手足を動かすか: IK のボーンかその目標の基準の位置が、手首・足首の基準の位置に重なるもの（つま先ＩＫなどは当たらない）
-        ends = {"LeftHand": "左手首", "RightHand": "右手首", "LeftFoot": "左足首", "RightFoot": "右足首"}
+        ends = {j: m for j, m in (("LeftHand", "左手首"), ("RightHand", "右手首"), ("LeftFoot", "左足首"), ("RightFoot", "右足首"))
+                if m in sk}
         self.ik_effector = {}
         for k in self.our_iks:
             i = sk.i(k)
@@ -163,7 +173,7 @@ class Retargeter:
         for i, b in enumerate(sk.bones):
             if b["inherit"] and b["flags"] & 0x300:
                 inheritors[b["inherit"][0]].append(i)
-        needed = {sk.i(n) for n in self.written_bones | set(self.mapped) | {"左足", "右足"} if n in sk}
+        needed = {sk.i(n) for n in self.written_bones | set(self.mapped) | {m for _s, m in self.leg_roots} if n in sk}
         needed |= {sk.bones[sk.i(k)]["ik"]["target_index"] for k in self.our_iks}
         idle = []
         for i, b in enumerate(sk.bones):
@@ -210,10 +220,17 @@ class Retargeter:
     def mmd_to_soma(self, G, P):
         """MMD の姿勢（MMDSkeleton.pose の結果）→ SOMA の腰の位置（m・Kimodo 座標）と 30 関節のローカル回転。"""
         Gs = [None] * self.J
-        for s, m in SOMA_TO_MMD.items():
+        for s, m in self.map.items():
             if m is not None:
                 j = self.sidx[s]
                 Gs[j] = Q.normalize(Q.mul(conv_q(G[self.mmd.i(m)]), self.C[j]))
+        # モデルに無い骨の関節は、いちばん近い（ある）祖先の向き（上半身2 が無ければ Chest は上半身＝Spine1 の向き）
+        for s, m in SOMA_TO_MMD.items():
+            if m is not None and self.map[s] is None:
+                a = self.soma_parent[self.sidx[s]]
+                while Gs[a] is None:
+                    a = self.soma_parent[a]
+                Gs[self.sidx[s]] = Gs[a]
         si = self.sidx
         Gs[si["Spine2"]] = Q.slerp(Gs[si["Spine1"]], Gs[si["Chest"]], 0.5)
         Gs[si["Neck2"]] = Q.slerp(Gs[si["Neck1"]], Gs[si["Head"]], 0.5)
@@ -221,7 +238,7 @@ class Retargeter:
             if Gs[j] is None:  # 顎・目・指先・つま先は親と同じ向き
                 Gs[j] = Gs[self.soma_parent[j]]
         local = [Gs[0]] + [Q.normalize(Q.mul(Q.inv(Gs[self.soma_parent[j]]), Gs[j])) for j in range(1, self.J)]
-        legmid = conv_p((P[self.mmd.i("左足")] + P[self.mmd.i("右足")]) / 2) * self.scale
+        legmid = conv_p(np.mean([P[self.mmd.i(m)] for _s, m in self.leg_roots], axis=0)) * self.scale
         hips = legmid - Q.rotate(Gs[0], self.legmid_offset)
         return hips, local
 
@@ -245,9 +262,11 @@ class Retargeter:
         sk = self.mmd
         # 対応する骨の、欲しい全体の向き（MMD 座標）
         targets = {}
-        for s, m in SOMA_TO_MMD.items():
+        for s, m in self.map.items():
             if m is not None:
                 j = self.sidx[s]
+                if s == "Spine1" and self.chest_on_spine:
+                    j = self.sidx["Chest"]   # 上半身2 が無い: 背骨の曲がりの合計を上半身に
                 targets[m] = conv_q(Q.normalize(Q.mul(Gs[j], Q.inv(self.C[j]))))
 
         rots = {n: Q.IDENTITY.copy() for n in self.neutral_bones + self.our_iks}
@@ -265,7 +284,7 @@ class Retargeter:
         G0, P0 = fk(targets)
         c = sk.i("センター")
         pc = sk.parent[c]
-        delta = legmid_target - (P0[sk.i("左足")] + P0[sk.i("右足")]) / 2
+        delta = legmid_target - np.mean([P0[sk.i(m)] for _s, m in self.leg_roots], axis=0)
         pos["センター"] = Q.rotate(Q.inv(G0[pc]), delta) if pc >= 0 else delta
         fk(targets)
         for m in self.mapped:

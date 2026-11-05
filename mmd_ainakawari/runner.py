@@ -130,7 +130,11 @@ def generate(settings, log=print, link=None, previous=None):
     skel = MMDSkeleton(pmx)
     fixed_pos = {vmd.vmd_name(b["name"]) for b in skel.bones if not b["flags"] & 0x0004}
     # 照合は書き戻す骨だけ（それ以外は元のキーをそのまま通しているので、比べても意味が無い）
-    written = {vmd.vmd_name(n) for n in pipeline.body_bone_names(skel, pipeline.Retargeter(skel, paths.soma_json()))}
+    rt = pipeline.Retargeter(skel, paths.soma_json())
+    if rt.missing:   # 無い骨は飛ばして作る（retarget.py の REQUIRED_BONES と脚だけは要る）
+        log(f"注意: モデルに無いボーンは飛ばして作ります: {'・'.join(rt.missing)}"
+            + ("（上半身2 の分の曲がりは上半身に入れます）" if rt.chest_on_spine else ""))
+    written = {vmd.vmd_name(n) for n in pipeline.body_bone_names(skel, rt)}
     rng = (settings.range_start, settings.range_end) if settings.range_start is not None else None
     # 前回の元のキーから作り直すのは、前回と同じ範囲の時だけ。違う範囲で戻すと、前回作った範囲の結果が消えていた
     # （範囲 A を作った後に範囲 B を作ると、B の外の A が元に戻った。11-05 Codex のレビュー）
