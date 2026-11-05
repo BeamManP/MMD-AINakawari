@@ -237,6 +237,10 @@ Kimodo の公式のコード・説明書・デモ、よその連携（Blender Br
   - 窓のプロセスは、セットアップの窓が出ている間は MMD を全部閉じても終わらない（Hub._finish）。済んだら窓の「MotionBricks」タブなどを作り直す（App.refresh_setup）
 - **タブの名前（11-06 マスター）**: 「プロンプトで作る／中割り」を「Kimodo／MotionBricks」にした（右下のパネルの選び方と同じ名前）
 - **窓の記録（11-06）**: `work\app.log`（`applog.py`）。窓のログの行・失敗の traceback・拾われなかった例外（tk・スレッド・pythonw が捨てる stdout/stderr）・セットアップのログ。1MB で 1 世代回す。ログの窓の「記録のフォルダを開く」
+- **まっさらな環境のテスト（11-06 早朝・zip は 1a545e6 の前後）**: MMD の配布 zip を新しく展開した `F:\AINakawari_検証2\`（MME 無し）に AIナカワリの zip を展開し、PATH を Windows の物だけにして（git・Python・uv が見えない）導入 → 同梱の Python でセットアップ（`F:\AINakawari_clean`・MotionBricks 込み・Llama も本当に落とす）→ 検証用の MMD で生成
+  - 結果: 導入・上から展開する更新（「入っています」）・MMD の起動（MMDPlugin・d3dx9_43 の中継・AIナカワリの DLL・同梱の pythonw が --attach）・全 11 段（1 時間 50 分: Kimodo の zip 25 秒・Kimodo の環境 24 分（torch）・骨格 18 秒・Kimodo のモデル 6 分・Llama 56 分・試し 31 秒・MotionBricks の zip 1 秒・LFS 4 分・環境 18 分・試し 66 秒）・Kimodo の生成（0〜90F・66 秒・キーとのずれ 0.0cm）・元に戻す（キー 3542 → 743）・MotionBricks の中割り（12 秒・ずれ 0.0cm）・全部済みの場所を選び直すと 11 段とも飛ばして paths.json を書き直す、が全部通った
+  - 見つけて直した物: 同梱の Python から GitHub の zip が `CERTIFICATE_VERIFY_FAILED`（Windows がまだ取ってきていないルート証明書。少し後には通ったので、まっさらな PC では最初の 1 回に起きうる）→ certifi を窓の部品に足し、Windows の証明書ストアと足し合わせる（`steps.tls_context`）。セットアップが子の Python の出力（`\r\n`）を進み具合（`\r`）と取り違えて、失敗の理由もログに残っていなかった → `\r\n` は改行
+  - Codex のレビュー（c8da5ad..5876c4b・9 件）は全部直した（1a545e6）: 導入は全部確かめてから MME を移す・0.41 の d3dx9_43 の欠けを補う・全部済みでも paths.json を書く・そろった .part と 416・起動の一瞬の中止・ログの切り替えの失敗・MMD の plugin\ の下を断る・入れ替えの退避・zip から手元のパス（direct_url.json）を消し、残っていれば止める
 - **導入（配布）の前の案**: 11-04 マスター判断で「A: MMD の窓にセットアップ画面」。使うのは AI に慣れていない人なので、ボタンで案内し、失敗したらやり直しのボタン。小さい Python（埋め込み版）を同梱して窓は最初から動かす。mmd-mcp はライブラリとして一緒に入れる（MCP のサーバーは立てない。確かめた版に固定）
   - 大きさの実測（マスターの環境）: Llama-3-8B-Instruct 15.0GB・Kimodo の Python 環境 5.3GB（Python 3.10.19・torch 2.11.0+cu128）・Kimodo のモデル 1.1GB・LLM2Vec の LoRA 0.3GB → 約 22GB。最初に置き場所と空き容量を確かめる
   - **Llama-3-8B-Instruct は Hugging Face で gated = manual（Meta への申請・手動承認・トークンが要る）**。窓は申請のページを開いてトークンを貼る欄まで。Kimodo のモデル（NVIDIA Open Model License・商用可）と LLM2Vec の LoRA は同意制ではない。有志の同意制なしの版（`Aero-Ex/KIMODO-Meta3_llm2vec_FP16`・`_NF4` など）は、許諾と中身を確かめるまで使わない
