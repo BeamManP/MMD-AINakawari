@@ -142,7 +142,7 @@ MMD を起動して、メニューバーに「AIナカワリ」、下の段の�
 - MMD 9.32 x64 の日本語版でしか確かめていません（MMD のメモリから直接読む所があるため、ほかの版では動きません）
 
 ## ライセンスとクレジット
-- このリポジトリのコード: （公開前に決めます）
+- このリポジトリのコード: [MIT-0](LICENSE)
 - スクリーンショットのモデル: Tda式初音ミクV4X（Tda さん）。初音ミクは クリプトン・フューチャー・メディア株式会社 のキャラクターです
 - [Kimodo](https://github.com/nv-tlabs/kimodo)（NVIDIA）: コードは Apache-2.0、モデルは [NVIDIA Open Model License](https://huggingface.co/nvidia/Kimodo-SOMA-RP-v1.2)
 - [MotionBricks](https://github.com/NVlabs/motionbricks)（NVIDIA）: コードは Apache-2.0、モデルは NVIDIA Open Model Agreement
