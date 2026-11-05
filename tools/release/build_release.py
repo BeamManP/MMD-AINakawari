@@ -88,7 +88,7 @@ SMOKE = (
 # 組み立て済みの MotionCorrection に組み込まれている物のライセンスの文（prebuilt\ に置く）。版は kimodo の CMakeLists.txt の GIT_TAG
 PREBUILT_LICENSES = (
     ("https://raw.githubusercontent.com/nv-tlabs/kimodo/{kimodo}/LICENSE", "LICENSE_kimodo.txt",
-     "987057aca9b5c6f338cadfcc2666d74a093c43e6fd02173c5d9ed63ec66cc53d"),
+     "d1a7d615ab8eff4de143b1456f46dabf232f54daf0fcf9a70442bb6f637a9e95"),   # GitHub の物（LF）。git で取り出した物は CRLF で値が違う
     ("https://raw.githubusercontent.com/pybind/pybind11/v2.11.1/LICENSE", "LICENSE_pybind11.txt",
      "83965b843b98f670d3a85bd041ed4b372c8ec50d7b4a5995a83ac697ba675dcb"),
     ("https://gitlab.com/libeigen/eigen/-/raw/3.4.0/COPYING.MPL2", "LICENSE_eigen_MPL2.txt",
