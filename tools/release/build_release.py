@@ -78,6 +78,7 @@ SMOKE = (
     " mmd_ainakawari.pipeline, mmd_ainakawari.smooth_stop, mmd_ainakawari.mmd_link, mmd_ainakawari.mmd_memory,"
     " mmd_ainakawari.mmd_skel, mmd_ainakawari.paths, mmd_ainakawari.applog;"
     "import mmd_ainakawari.installer.window, mmd_ainakawari.installer.steps as s;"
+    "import mmd_ainakawari.app as a, os; assert os.path.isfile(a.ICON), a.ICON;"
     "import os, mmd_mcp.bone_selection as b; assert os.path.isfile(b.DLL_PATH), b.DLL_PATH;"
     "assert os.path.isfile(s.REQUIREMENTS) and os.path.isfile(s.FETCH_MODEL), s.REQUIREMENTS;"
     "folder, info = s.motion_correction_info(); assert folder == os.path.join(os.path.dirname(s.paths.HOME), s.PREBUILT), folder;"

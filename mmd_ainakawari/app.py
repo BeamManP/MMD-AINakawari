@@ -803,15 +803,29 @@ def _notify_running(hwnd, message=OPEN_MESSAGE):
     return False
 
 
+ICON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "MMD-AINakawari.ico")   # tools/make_icon.py が描く
+APP_ID = "BeamManP.MMD-AINakawari"   # タスクバーで、pythonw.exe ではなく AIナカワリ としてまとめる名乗り
+
+
+def _new_root():
+    """tk の親の窓を作り、全部の窓（MMD ごとの窓・セットアップ・ログ・知らせの窓）の既定のアイコンを AIナカワリ にする。
+    前は tkinter の既定の羽根だった（11-06 マスター）。"""
+    root = tk.Tk()
+    root.iconbitmap(default=ICON)
+    return root
+
+
 def main():
     ap = argparse.ArgumentParser(description="AIナカワリ の窓（ふつうは MMD のメニューから開く）")
     ap.add_argument("--open", type=int, help="窓を開く MMD の窓（省くと一番手前の MMD）")
     ap.add_argument("--attach", type=int, help="窓を隠したまま作る MMD の窓（MMD の起動時にプラグインが、右下のパネル用に渡す）")
     args = ap.parse_args()
+    # 窓を作る前に名乗る（タスクバーのアイコンが Python の物でなく、窓のアイコンになる）
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
     show = args.attach is None
     hwnd = args.open or args.attach or front_mmd()
     if not hwnd:
-        root = tk.Tk()
+        root = _new_root()
         root.withdraw()
         messagebox.showerror("AIナカワリ", "MMD が起動していません。MMD を起動してから開いてください")
         root.destroy()
@@ -819,13 +833,13 @@ def main():
     mutex = win32event.CreateMutex(None, False, APP_MUTEX)  # 終わるまで持っておく
     if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
         if not _notify_running(hwnd, OPEN_MESSAGE if show else ATTACH_MESSAGE) and show:
-            root = tk.Tk()
+            root = _new_root()
             root.withdraw()
             messagebox.showerror("AIナカワリ", "AIナカワリ はもう起動中ですが、知らせる先が見つかりません。少し待ってからもう一度開いてください")
             root.destroy()
         return
     applog.setup()   # mutex を取ってから（記録を書くのは 1 つのプロセスだけ）
-    root = tk.Tk()
+    root = _new_root()
     applog.hook_tk(root)
     root.withdraw()  # 親の窓は見せない。MMD ごとの窓（Toplevel）だけ出す
     hub = Hub(root)
