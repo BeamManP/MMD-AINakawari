@@ -22,13 +22,13 @@ MMD（MikuMikuDance）で打ったキーとキーの間を、AI が中割りし�
 | | 内容 |
 |---|---|
 | **AI 中割り（MotionBricks）** | プロンプト無しで、キーとキーの間（17〜57 フレーム）をつなぐ。キーごとに止まる／勢いのまま通る、手首だけ普通の補間、を選べる |
-| **プロンプトで作る（Kimodo）** | 英語の文で動きを指定して、キーの間を埋める。区間ごとに違う文も書ける（`run / 45: stop` なら 45F から stop。区間の始まりのすぐ後ろにキーがあると、つながりを保つため 1 つ後ろへ自動でずれる）。詳細の窓では「最後のキーの後ろに続きを足す」「キーのポーズを使わずプロンプトだけで作る」もできる |
-| **選んだキーの間だけ作り直す** | タイムラインで選んだキーの最初から最後までを作り直す。範囲の外の動きは補間曲線ごと保ち（ずれは移動 0.05・回転 0.5° まで。曲線で表せない急な所は、範囲の外にもキーが増えることがある）、範囲の端は外の動きにつながる |
-| **キー以外の手がかり**（Kimodo） | 全ての親だけのキーは「腰がそこを通る」目印、足ＩＫ・腕の IK だけのキーは「手足がそこに来る」目印になる（MotionBricks の中割りでは使わない） |
+| **プロンプトで作る（Kimodo）** | 英語の文で動きを指定して、キーの間を埋める。区間ごとに違う文も書ける（`run / 45: stop` なら 45F から stop）。詳細の窓では、最後のキーの後ろに続きを足すことや、プロンプトだけで作ることもできる |
+| **選んだキーの間だけ作り直す** | タイムラインで選んだキーの最初から最後までを作り直す。範囲の外の動きは補間曲線ごと保ち、範囲の端は外の動きにつながる |
+| **キー以外の手がかり**（Kimodo） | 全ての親だけのキーは「腰がそこを通る」目印、足 IK・腕 IK だけのキーは「手足がそこに来る」目印になる（MotionBricks の中割りでは使わない） |
 | **なめらかに止まる** | 最後のキーでぴたっと止まらず、MotionBricks で自然に減速して止まる |
 | **元に戻す** | 生成の前のモーションに 1 回で戻す |
 | **サンプルのプロンプト** | 英語が苦手でも、「前へ歩く：A person walks forward.」のような一覧から選べる（6 種類・43 個） |
-| **軽い** | VRAM 8GB の GPU・メインメモリ 16GB の PC を目安にしています（文の読み取りは CPU。1 文 0.5 秒ほど） |
+| **軽い** | VRAM 6GB の GPU・メインメモリ 16GB の PC を目安にしています（プロンプトの読み取りは CPU で、1 文 0.5 秒ほど） |
 
 ## 動く環境
 
@@ -37,7 +37,7 @@ MMD（MikuMikuDance）で打ったキーとキーの間を、AI が中割りし�
 | OS | Windows 10／11（64bit） | Windows 11 |
 | MMD | MikuMikuDance 9.32 x64（日本語版） | 9.32 x64 |
 | GPU | NVIDIA の GPU。GTX 16 シリーズ／RTX 20 シリーズ以降、VRAM 6GB 以上。ドライバは新しい物に | RTX 3090（24GB） |
-| メモリ | 16GB 以上（文の読み取りに約 8GB 使う） | 64GB |
+| メモリ | 16GB 以上（プロンプトの読み取りに約 8GB 使う） | 64GB |
 | ランタイム | [Microsoft Visual C++ 再頒布可能パッケージ（x64）](https://aka.ms/vs/17/release/vc_redist.x64.exe)。入っていなければ、セットアップがここへ案内します | |
 | ディスク | 約 21GB（Kimodo 約 15GB・MotionBricks 約 6GB） | |
 | ネット | セットアップの時だけ（約 12GB を落とします） | |
@@ -53,7 +53,7 @@ MMD（MikuMikuDance）で打ったキーとキーの間を、AI が中割りし�
 
 ```
 AIナカワリ導入.cmd
-MMD-AINakawari\          窓の Python とプログラム
+MMD-AINakawari\          AIナカワリ 本体（Python とプログラム）
 plugin\MMD-AINakawari\   MMD に読み込ませる DLL
 ```
 
@@ -95,7 +95,7 @@ MMD の下の段の右に「AIナカワリ簡易操作」が出ていれば、�
 4. 「**生　成**」（またはプロンプト欄で Enter）。下の 1 行に「生成中…」→「できました」と出たら、MMD で再生して確かめます
 5. 気に入らなければ「**元に戻す**」か、プロンプトを変えてもう一度「生成」
 
-- パネルの「生成」は、いつも「キーの間を埋める」で作ります。ほかの作り方や seed などの細かい設定は「**詳　細**」の窓で
+- パネルの「生成」は「キーの間を埋める」で作ります。ほかの作り方や seed などの細かい設定は、「**詳　細**」の窓で選べます
 - 範囲が「選んだキーの間」（既定）の時は、キーを 2 つ以上選ぶまで「生成」は押せません。詳細の窓で範囲を「全部」にすると、パネルも全部のキーで作ります（パネルの字が「全部のキー」になります）
 - プロンプト欄に打っている間は、MMD のショートカットキーは効きません。欄の外（タイムラインなど）を押すか Esc で戻ります
 - カメラ・照明・アクセサリのモードの時は、パネルは出ません
@@ -111,15 +111,16 @@ MMD の下の段の右に「AIナカワリ簡易操作」が出ていれば、�
 | タブ | **Kimodo**（プロンプトで作る）／**MotionBricks**（プロンプト無しの中割り）。右下のパネルの選び方と同じ |
 | やりたいこと | **キーの間を埋める**／**続きを足す**（最後のキーの後ろへ）／**プロンプトだけで作る**（キーのポーズを使わない） |
 | プロンプト | 行ごとに「そのフレームから次の行まで」の動き。「＋ 今のフレームで区切る」で行が増える。「サンプルから選ぶ ▼」もある |
-| 詳しい設定 | 手数・seed・テキストの効き・キーの効き・後処理・センターの動きを使う |
+| 詳しい設定 | 計算の回数・seed・プロンプトの効き・キーの効き・生成した動きをキーに合わせる・センターの動きを使う |
 | 範囲 | **選んだキーの間**（既定）／**全部**（最初のキーから最後のキーまで） |
 
-パネルと詳細の窓は、プロンプトと作り方（Kimodo／MotionBricks）がつながっています。どちらで打っても同じです。
+プロンプトと作り方（Kimodo／MotionBricks）は、パネルと詳細の窓で共通です。どちらで変えても、もう一方にも入ります。
 
 ### うまく作るコツ
 - プロンプトは英語で、「A person ＋ 動詞」の形が効きます（例: `A person waves with their right hand.`）。日本語はほとんど効きません
 - キーは 20 個くらいまでが目安です。多いとキーに縛られて動きが硬くなります
 - Kimodo は 1 区間 300 フレーム（10 秒）まで（範囲の外の勢いをつなぐ数フレームも数えるので、選ぶ範囲はそれより少し短めに）。長い時は範囲を分けて作ります
+- 区間の区切りのすぐ後ろにキーがある時は、つながりを保つため、区切りを 1 フレーム後ろへ自動でずらします
 - 最初の 1 回は、モデルの読み込みで 10〜20 秒ほど余分にかかります。2 回目からは 10〜15 秒前後です
 
 ## 更新・アンインストール
@@ -139,7 +140,7 @@ MMDPlugin（`MMDPlugin.dll`・`d3d9.dll`・`d3dx9_43.dll`・`plugin\MMDPlugin\`�
 | ファイル | 中身 |
 |---|---|
 | `app.log`（と `app.log.1`） | 窓のログ・セットアップのログ・失敗した時のエラーの詳しい場所 |
-| `Kimodo_server.log`・`llama_server.log` など `～_server.log` | 裏で動く Kimodo・文の読み取り（llama.cpp）・MotionBricks の記録（最後に起動した時の分） |
+| `Kimodo_server.log`・`llama_server.log` など、名前が `_server.log` で終わるファイル | 裏で動く Kimodo・プロンプトの読み取り（llama.cpp）・MotionBricks の記録（最後に起動した時の分） |
 
 よくあること:
 - **セットアップの「試しに作る」で止まる**: NVIDIA のドライバを新しくしてから、もう一度「セットアップ」を押してください
@@ -147,9 +148,10 @@ MMDPlugin（`MMDPlugin.dll`・`d3d9.dll`・`d3dx9_43.dll`・`plugin\MMDPlugin\`�
 - **MMD が起動してすぐ落ちる**: `plugin\` の下に、AIナカワリの DLL と ini 以外の物（Python など）を置いていないか見てください。MMDPlugin は `plugin\` の下の DLL を全部読み込もうとします
 
 ## 分かっている制限
-- **PMX のモデルだけ**に対応しています（PMD は非対応）。標準ボーンの名前（センター・上半身・腕・ひじなど）で骨を探します。無いボーン（上半身2・首・片腕など）は飛ばして作り、ログに「注意: モデルに無いボーンは飛ばして作ります」と出します。**センター・下半身と、左右どちらかの足・ひざ・足首**が無いモデルだけは、体の位置と大きさが決まらないので止まります
+- **PMX のモデルだけ**に対応しています（PMD は非対応）。標準ボーンの名前（センター・上半身・腕・ひじなど）でボーンを探します。無いボーン（上半身2・首・片腕など）は飛ばして作り、ログに「注意: モデルに無いボーンは飛ばして作ります」と出します。**センター・下半身と、左右どちらかの足・ひざ・足首**が無いモデルだけは、体の位置と大きさが決まらないので止まります
 - 指・表情・髪などは作りません（MMD の補間のまま）
-- キーのポーズの差が大きいと、前腕・手首が 1 フレームで大きく回ることがあります（中割りなら「手首は普通の補間」で抑えられます）
+- キーのポーズの差が大きいと、前腕・手首が 1 フレームで大きく回ることがあります（中割りなら「手首は MMD の補間にする」で抑えられます）
+- 選んだ範囲だけ作り直す時、範囲の外の動きは、移動 0.05・回転 0.5° までのずれで保ちます。曲線で表せない急な所は、範囲の外にもキーが増えることがあります
 - 物理演算をオフにしたキーは、生成や「元に戻す」でオンに戻ることがあります（未確認）
 - MMD 9.32 x64 の日本語版でしか確かめていません（MMD のメモリから直接読む所があるため、ほかの版では動きません）
 
@@ -158,10 +160,10 @@ MMDPlugin（`MMDPlugin.dll`・`d3d9.dll`・`d3dx9_43.dll`・`plugin\MMDPlugin\`�
 - スクリーンショットのモデル: Tda式初音ミクV4X（Tda さん）。モデルは同梱していません。初音ミクは クリプトン・フューチャー・メディア株式会社 のキャラクターです
 - [Kimodo](https://github.com/nv-tlabs/kimodo)（NVIDIA）: コードは Apache-2.0、モデルは [NVIDIA Open Model License](https://huggingface.co/nvidia/Kimodo-SOMA-RP-v1.2)
 - [MotionBricks](https://github.com/NVlabs/motionbricks)（NVIDIA）: コードは Apache-2.0、モデルは NVIDIA Open Model Agreement
-- [Meta-Llama-3-8B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct)（Meta）: [Meta Llama 3 Community License](https://huggingface.co/fernandotonon/Llama-3-LLM2Vec-8B-Kimodo-TextEncoder-GGUF/blob/main/LICENSE-Llama-3.txt)・[使い方の決まり](https://huggingface.co/fernandotonon/Llama-3-LLM2Vec-8B-Kimodo-TextEncoder-GGUF/blob/main/USE_POLICY-Llama-3.md)（Kimodo が文の読み取りに使う）。**Built with Meta Llama 3**
+- [Meta-Llama-3-8B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct)（Meta）: [Meta Llama 3 Community License](https://huggingface.co/fernandotonon/Llama-3-LLM2Vec-8B-Kimodo-TextEncoder-GGUF/blob/main/LICENSE-Llama-3.txt)・[使い方の決まり](https://huggingface.co/fernandotonon/Llama-3-LLM2Vec-8B-Kimodo-TextEncoder-GGUF/blob/main/USE_POLICY-Llama-3.md)（Kimodo がプロンプトの読み取りに使う）。**Built with Meta Llama 3**
 - [LLM2Vec](https://huggingface.co/McGill-NLP/LLM2Vec-Meta-Llama-3-8B-Instruct-mntp)（McGill-NLP）: MIT
-- [Llama-3-LLM2Vec-8B-Kimodo-TextEncoder-GGUF](https://huggingface.co/fernandotonon/Llama-3-LLM2Vec-8B-Kimodo-TextEncoder-GGUF)（fernandotonon さん）: Llama 3 と LLM2Vec を 8bit（GGUF Q8_0）にした物。文の読み取りはこれを使う（Meta Llama 3 Community License）
-- [llama.cpp](https://github.com/ggml-org/llama.cpp)（ggml-org）: MIT。文の読み取りを CPU で動かす（セットアップが公式の CPU 版を落とす）
+- [Llama-3-LLM2Vec-8B-Kimodo-TextEncoder-GGUF](https://huggingface.co/fernandotonon/Llama-3-LLM2Vec-8B-Kimodo-TextEncoder-GGUF)（fernandotonon さん）: Llama 3 と LLM2Vec を 8bit（GGUF Q8_0）にした物。プロンプトの読み取りはこれを使う（Meta Llama 3 Community License）
+- [llama.cpp](https://github.com/ggml-org/llama.cpp)（ggml-org）: MIT。プロンプトの読み取りを CPU で動かす（セットアップが公式の CPU 版を落とす）
 - [MMDPlugin](https://bowlroll.net/file/121761)（おいがみ さん）: zip に同梱（説明書の「本体の転載は、非商用に限り連絡不要」による）。`d3dx9_43.dll` も MMDPlugin の物です（Microsoft の DirectX の物ではありません）
 - [mmd-mcp](https://github.com/BeamManP/mmd-mcp)（MIT-0 ほか）
 - zip に同梱の Python（python-build-standalone）と uv などのライセンスは、zip の `MMD-AINakawari\THIRD_PARTY.txt` に書いています

@@ -111,7 +111,7 @@ def root_transform(skel, root_track, frame):
         return Q.IDENTITY.copy(), np.zeros(3)
     i = skel.i(ROOT_BONE)
     if skel.parent[i] >= 0:
-        raise ValueError(f"「{ROOT_BONE}」に親のボーンがあります（一番上の骨である前提）")
+        raise ValueError(f"「{ROOT_BONE}」に親のボーンがあります。「{ROOT_BONE}」がいちばん上のボーンのモデルだけに対応しています")
     t, q = sample({ROOT_BONE: root_track}, ROOT_BONE, frame)
     return q, skel.rest[i] + t
 
@@ -153,8 +153,8 @@ def snap_segments(segments, key_frames):
         if near:
             new = max(near) + 1
             if any(new <= k <= new + TRANSITION for k in key_frames):
-                raise ValueError(f"{starts[i]}F の区間の始めのすぐ後ろにキーが続いていて、区間の始めを置けません。"
-                                 f"毎フレームにキーがある時は、先に「元に戻す」をしてください")
+                raise ValueError(f"{starts[i]}F の直後にキーが続いているので、ここでは区間を分けられません。"
+                                 f"毎フレームにキーがある時は、先に「元に戻す」を押してください")
             moves.append((starts[i], new, max(near)))
             starts[i] = new
     out = []

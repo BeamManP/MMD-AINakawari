@@ -150,7 +150,7 @@ def generate(settings, log=print, link=None, previous=None):
         original = vmd.read(backup)
         log(f"  前回の生成結果のままなので、前回の元のキーから作り直します（{backup}）")
     else:
-        log(f"  控え: {backup}")
+        log(f"  バックアップ: {backup}")
 
     mb = settings.engine == "motionbricks"
     job = pipeline.prepare(pmx, original, "inbetween" if mb else settings.prompt, settings.steps, settings.seed,
@@ -170,15 +170,15 @@ def generate(settings, log=print, link=None, previous=None):
                if len(job.anchors) > 1 else f"始まり（{lo}F）の姿勢を MMD から取ってつなぎます（後ろにキーが無いので、終わりは決めません）")
             + f"（外側 {pipeline.RANGE_CONTEXT} フレームの動きも渡します）")
         if settings.length is not None and not mb:
-            log("  範囲を使う時は、長さの欄は使いません（範囲の終わりまで作ります）")
+            log("  範囲の終わりまで作ります（範囲を使う時は、長さの欄は効きません）")
     else:
         shown = f"{job.first}〜{job.first + job.num_frames - 1}F・{job.num_frames} フレーム"
     if not mb:
-        shown += f"・テキストの効き {settings.cfg_text}・キーの効き {settings.cfg_key}"
+        shown += f"・プロンプトの効き {settings.cfg_text}・キーの効き {settings.cfg_key}"
     if settings.use_keys:
         log(f"体のキー {len(real)} 個: {real}（{shown}）")
     else:
-        log(f"完全新規: 体のキーのポーズは使わず、{job.first}F の場所と向きから作ります（{shown}）")
+        log(f"プロンプトだけで作る: {job.first}F の場所と向きから作ります（{shown}）")
     if settings.use_center:
         log(f"センターの動きを使う: {len(job.root_frames)} フレームで腰の位置と高さを目印にします")
     elif job.root_frames:
@@ -197,13 +197,13 @@ def generate(settings, log=print, link=None, previous=None):
             log(f"注意: {s0}F からの区間は {n} フレームしかありません。Kimodo はつなぎに前の区間の 5 フレームを使うので、"
                 f"動きが出きらないことがあります（公式のデモは 1 区間 2 秒以上）")
         if any("぀" <= ch <= "ヿ" or "一" <= ch <= "鿿" for _, _, t in job.segments for ch in t):
-            log("注意: プロンプトに日本語があります。Kimodo は英語の文で学習しているので、日本語はほとんど効きません"
+            log("注意: プロンプトに日本語があります。日本語はほとんど効かないので、英語で書いてください"
                 "（例: A person poses cutely, tilting the head.）")
         if len(real) > pipeline.MANY_KEYS:
             log(f"注意: 体のキーが {len(real)} 個あります。Kimodo の推奨は {pipeline.MANY_KEYS} 個未満です"
                 f"（多いとキーに縛られて動きが硬くなることがあります）")
     if not mb and not any(t.strip() for _, _, t in job.segments):
-        log("プロンプトが空なので、キー（と腰・手足の目印）だけを手がかりに作ります（テキストの効きは使いません）")
+        log("プロンプトが空なので、キー（と腰・手足の目印）だけを手がかりに作ります（プロンプトの効きは関係しません）")
     if len(job.segments) > 1 and not mb:
         for s, n, text in job.segments:
             log(f"  区間 {s}〜{s + n - 1}F: {text}")
@@ -239,7 +239,7 @@ def undo(backup, log=print, link=None):
     """控えておいた元のモーションを読み込み直す。"""
     link = link or MMDLink()
     if not backup or not os.path.exists(backup):
-        raise RuntimeError("戻す控えがありません")
+        raise RuntimeError("元に戻すためのバックアップがありません")
     cursor = link.current_frame()   # 押した時のフレームへ戻す（読めなければ 0F のまま）
     link.load_motion(backup, 0)
     if cursor is not None:

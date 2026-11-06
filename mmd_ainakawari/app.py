@@ -52,10 +52,10 @@ MODES = [("fill", "キーの間を埋める"), ("extend", "続きを足す"), ("
 MODE_NOTES = {
     "fill": "打ったキーのポーズを守って、キーとキーの間を作ります（長さは最後のキーまで）",
     "extend": "打ったキーのポーズを守って、最後のキーの後ろに続きを作ります",
-    "fresh": "キーのポーズは使わず、最初のキーの場所と向きからプロンプトだけで作ります",
+    "fresh": "最初のキーの場所と向きから、プロンプトだけで動きを作ります",
 }
-NAKAWARI_NOTE = ("打ったキーとキーの間を、MotionBricks でつなぎます。プロンプトは使いません。\n"
-                 "キーの間が 17〜57 フレームの所だけ作り、それより短い・長い所は MMD の補間のまま残します。")
+NAKAWARI_NOTE = ("打ったキーとキーの間を、プロンプト無しで MotionBricks がつなぎます。\n"
+                 "作るのはキーの間が 17〜57 フレームの所で、それ以外は MMD の補間を使います。")
 
 def front_mmd():
     """一番手前の MMD の窓。無ければ None。"""
@@ -91,7 +91,7 @@ class Hub:
         mmd = next((w for w in list_windows() if w.hwnd == hwnd), None)
         if mmd is None:
             if show:
-                messagebox.showerror("AIナカワリ", "開こうとした MMD が見つかりません（閉じられた？）")
+                messagebox.showerror("AIナカワリ", "開こうとした MMD が見つかりません。MMD が開いているか確かめてください")
             elif win32gui.IsWindow(hwnd):
                 self.waiting.setdefault(hwnd, time.monotonic() + ATTACH_WAIT)
         else:
@@ -258,7 +258,7 @@ class App:
         lf = ttk.Frame(self.log_win)
         lf.pack(side="bottom", fill="x", padx=4, pady=4)
         ttk.Button(lf, text="記録のフォルダを開く", command=lambda: os.startfile(paths.WORK_DIR)).pack(side="left")
-        ttk.Label(lf, text="困った時は、このフォルダの app.log と ～_server.log を送ってください", foreground="#555").pack(
+        ttk.Label(lf, text="困った時は、このフォルダの app.log と、名前が _server.log で終わるファイルを GitHub の Issues に添えてください", foreground="#555").pack(
             side="left", padx=(8, 0))
         bar = ttk.Scrollbar(self.log_win, orient="vertical")
         bar.pack(side="right", fill="y")
@@ -290,7 +290,7 @@ class App:
             return row
 
         # Kimodo が入っていない時だけ、タブの一番上に出す（refresh_setup。MotionBricks のタブの nakawari_missing と同じ。11-06 マスター）
-        self.kimodo_missing = ttk.Label(t, text="AI のモデル（Kimodo）が入っていません。下の「セットアップ」で入れてください", foreground="#a33")
+        self.kimodo_missing = ttk.Label(t, text="Kimodo がまだ入っていません。下の「セットアップ」で入れてください", foreground="#a33")
         mode_row = line("やりたいこと")
         self.kimodo_top = mode_row
         self.mode = tk.StringVar(value=self.cfg["mode"] if self.cfg["mode"] in MODE_NOTES else "fill")
@@ -309,17 +309,17 @@ class App:
         # キーは「その瞬間にこの姿勢を通る」だけなので、止めないと走りなどは最後のキーを勢いのまま通り過ぎる
         self.stop = tk.BooleanVar(value=self.cfg["stop_at_last_key"])
         stop_row = line("", pady=(4, 0))
-        self.stop_check = ttk.Checkbutton(stop_row, text="最後のキーで止まる（勢いのまま通り過ぎない）", variable=self.stop,
+        self.stop_check = ttk.Checkbutton(stop_row, text="最後のキーで止まる", variable=self.stop,
                                           command=self._stop_changed)
         self.stop_check.pack(side="left")
         # Kimodo だけだとキーの直前で急に止まるので、止まる所を MotionBricks で作り直す（smooth_stop.py）
         self.smooth = tk.BooleanVar(value=self.cfg["smooth_stop"] and smooth_stop.available())
-        self.smooth_check = ttk.Checkbutton(stop_row, text="なめらかに（MotionBricks）", variable=self.smooth)
+        self.smooth_check = ttk.Checkbutton(stop_row, text="なめらかに止まる", variable=self.smooth)
         self.smooth_check.pack(side="left", padx=(12, 0))
         ttk.Separator(t).pack(fill="x", pady=(8, 6))
 
         # プロンプト（区間ごとの行）
-        ttk.Label(t, text="プロンプト（英語・行ごとに、そのフレームから次の行までの動き）").pack(anchor="w")
+        ttk.Label(t, text="プロンプト（英語。1 行が 1 区間の動き）").pack(anchor="w")
         self.prompt_rows = PromptRows(t)
         self.prompt_rows.pack(fill="x", pady=(4, 0))
         self.prompt_rows.load(self.cfg["prompt"])
@@ -335,21 +335,21 @@ class App:
         details = Fold(t, "詳しい設定")
         details.pack(fill="x", pady=(8, 0))
         d, g = details.body, {"padx": 4, "pady": 2}
-        ttk.Label(d, text="手数（少ないほど速い）").grid(row=0, column=0, sticky="w", **g)
+        ttk.Label(d, text="計算の回数（少ないほど速い）").grid(row=0, column=0, sticky="w", **g)
         self.steps = tk.IntVar(value=self.cfg["steps"])
         ttk.Spinbox(d, from_=10, to=100, increment=10, textvariable=self.steps, width=6).grid(row=0, column=1, sticky="w", **g)
-        ttk.Label(d, text="seed（-1 で毎回変える）").grid(row=1, column=0, sticky="w", **g)
+        ttk.Label(d, text="seed（-1 で毎回違う動き）").grid(row=1, column=0, sticky="w", **g)
         self.seed = tk.IntVar(value=self.cfg["seed"])
         ttk.Entry(d, textvariable=self.seed, width=8).grid(row=1, column=1, sticky="w", **g)
         # Kimodo の CFG の重み。テキストを上げるとプロンプトの動きが強く出る（回転なら 8・1 で振り向くほど）
-        ttk.Label(d, text="テキストの効き").grid(row=0, column=2, sticky="e", **g)
+        ttk.Label(d, text="プロンプトの効き").grid(row=0, column=2, sticky="e", **g)
         self.cfg_text = tk.DoubleVar(value=self.cfg["cfg_text"])
         ttk.Spinbox(d, from_=0.5, to=10, increment=0.5, textvariable=self.cfg_text, width=5).grid(row=0, column=3, sticky="w", **g)
         ttk.Label(d, text="キーの効き").grid(row=1, column=2, sticky="e", **g)
         self.cfg_key = tk.DoubleVar(value=self.cfg["cfg_key"])
         ttk.Spinbox(d, from_=0.5, to=10, increment=0.5, textvariable=self.cfg_key, width=5).grid(row=1, column=3, sticky="w", **g)
         self.post = tk.BooleanVar(value=self.cfg["post_processing"])
-        ttk.Checkbutton(d, text="キーに合わせる後処理", variable=self.post).grid(row=2, column=0, columnspan=2, sticky="w", **g)
+        ttk.Checkbutton(d, text="生成した動きをキーに合わせる", variable=self.post).grid(row=2, column=0, columnspan=2, sticky="w", **g)
         # センターの上下などを毎フレームの腰の目印にする（リズムを残して動きを作る。プロンプトだけで作る時と組み合わせる想定）
         self.use_center = tk.BooleanVar(value=self.cfg["use_center"])
         ttk.Checkbutton(d, text="センターの動きを使う", variable=self.use_center).grid(row=2, column=2, columnspan=2, sticky="w", **g)
@@ -369,12 +369,12 @@ class App:
         self.key_stop = tk.BooleanVar(value=self.cfg["key_stop"])
         self.wrist_lerp = tk.BooleanVar(value=self.cfg["wrist_lerp"])
         self.nakawari_checks = [
-            ttk.Checkbutton(t, text="キーごとに止まる（外すと、次のキーへ向かう勢いのまま通る）", variable=self.key_stop),
-            ttk.Checkbutton(t, text="手首は普通の補間（MotionBricks は手首を回しすぎることがある）", variable=self.wrist_lerp),
+            ttk.Checkbutton(t, text="キーごとに止まる（外すと、勢いを保って通る）", variable=self.key_stop),
+            ttk.Checkbutton(t, text="手首は MMD の補間にする（回りすぎを抑える）", variable=self.wrist_lerp),
         ]
         self.nakawari_checks[0].pack(anchor="w", pady=(10, 0))
         self.nakawari_checks[1].pack(anchor="w", pady=(4, 0))
-        self.nakawari_missing = ttk.Label(t, text="MotionBricks が入っていません（下の「セットアップ」で入れられます）", foreground="#a33")
+        self.nakawari_missing = ttk.Label(t, text="MotionBricks がまだ入っていません。下の「セットアップ」で入れてください", foreground="#a33")
 
     def _open_setup(self):
         setup_window.open_window(self.hub.root, self.diagnosis, on_done=self.refresh_setup)
@@ -397,10 +397,10 @@ class App:
         except paths.NotSetUp:
             self.kimodo_ready = False   # パネルの状態の 1 行も赤い案内にする（_sync_panel）
             self.kimodo_missing.pack(anchor="w", pady=(0, 8), before=self.kimodo_top)
-            self.status.set("まだ AI のモデルが入っていません。下の「セットアップ」から入れてください")
+            self.status.set("AI のモデルがまだ入っていません。下の「セットアップ」で入れてください")
             return
         self.kimodo_missing.pack_forget()
-        if self.status.get().startswith("まだ AI のモデルが入っていません"):
+        if self.status.get().startswith("AI のモデルがまだ入っていません"):
             self.status.set("MMD でキーを打ってから「生成」を押してください")
 
     def _mode_changed(self):
@@ -518,7 +518,7 @@ class App:
         if not self.diagnosis.usable:
             block = self.diagnosis.note
         elif self.range_mode.get() == "keys" and keys is None and not self.busy:   # 読めない時も止める（11-05 Codex のレビュー）
-            block = "選んだキーを読めません（MMD の操作の途中？）"
+            block = "選んだキーを読めません。MMD の操作を終えてから選び直してください"
         elif self.range_mode.get() == "keys" and keys is not None and len(keys) < 2 and not self.busy:
             block = "範囲の最初と最後のキーを選んでください"   # パネルの 1 行に収まる長さ
         if block and self._status_before is not None and self.status.get() != block:   # 止める理由が変わった
@@ -594,7 +594,7 @@ class App:
             missing = not self.kimodo_ready
             shown = {
                 panel.RANGE: range_text,
-                panel.STATUS: "詳細からセットアップを実行してください" if missing else self.status.get(),
+                panel.STATUS: "詳細の窓で「セットアップ」を押してください" if missing else self.status.get(),
             }
             for item, text in shown.items():
                 if self._seen.get(("text", item)) != text:
@@ -619,7 +619,7 @@ class App:
     def panel_pressed(self, button):
         """パネルの「生成」「元に戻す」。押す前に、パネルで打った途中のプロンプトなどを窓に写す。"""
         if not self._sync_panel():   # 写せないまま進むと、窓に残った古いプロンプトで作っていた（11-05 Codex のレビュー）
-            self.status.set("MMD が忙しくてパネルを読めませんでした。もう一度押してください")
+            self.status.set("MMD が応答しませんでした。もう一度押してください")
             return
         if button == panel.GENERATE and str(self.gen_btn.cget("state")) == "normal":
             self._generate(fill=True)
@@ -644,7 +644,7 @@ class App:
         in_range = self.range_mode.get() == "keys"   # 範囲を使う時は範囲の終わりまで作るので、長さは使わない
         length = opt_int(self.length.get()) if mode != "fill" and not nakawari and not in_range else None
         if nakawari and not smooth_stop.available():
-            raise ValueError("MotionBricks が入っていません（詳細の窓の下の「セットアップ」で入れてください）")
+            raise ValueError("MotionBricks がまだ入っていません。詳細の窓の下の「セットアップ」で入れてください")
         if not nakawari and mode != "fill" and length is None and not in_range:
             raise ValueError("「続きを足す」「プロンプトだけで作る」では長さを入れてください")
         selection = None
@@ -699,14 +699,14 @@ class App:
         except (ValueError, RuntimeError) as e:
             messagebox.showerror("AIナカワリ", str(e), parent=self.root)
             return
-        except tk.TclError:   # 数字の欄（手数・seed・効き）に数字でないものが入っている
-            messagebox.showerror("AIナカワリ", "「詳しい設定」の手数・seed・効きには数字を入れてください", parent=self.root)
+        except tk.TclError:   # 数字の欄（計算の回数・seed・効き）に数字でないものが入っている
+            messagebox.showerror("AIナカワリ", "「詳しい設定」の計算の回数・seed・効きには数字を入れてください", parent=self.root)
             return
         self._write_log("―" * 20)
         self.status.set("生成中…")
         previous = self.last_run
         self._run(lambda log: runner.generate(s, log, link=self.link, previous=previous),
-                  "できました。MMD で再生して確かめてください（気に入らなければ「元に戻す」か、プロンプト・seed を変えてもう一度）")
+                  "できました。MMD で再生して確かめてください")
 
     def _undo(self):
         backup = self.last_backup
@@ -758,7 +758,7 @@ def main():
         if not _notify_running(hwnd, OPEN_MESSAGE if show else ATTACH_MESSAGE) and show:
             root = _new_root()
             root.withdraw()
-            messagebox.showerror("AIナカワリ", "AIナカワリ はもう起動中ですが、知らせる先が見つかりません。少し待ってからもう一度開いてください")
+            messagebox.showerror("AIナカワリ", "AIナカワリ の起動がまだ終わっていません。少し待ってから、もう一度開いてください")
             root.destroy()
         return
     applog.setup()   # mutex を取ってから（記録を書くのは 1 つのプロセスだけ）

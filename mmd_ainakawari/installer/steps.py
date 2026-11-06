@@ -29,7 +29,7 @@ import urllib.error
 import urllib.request
 import zipfile
 
-from .. import paths
+from .. import __version__, paths
 from . import pins
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -37,6 +37,7 @@ REQUIREMENTS = os.path.join(HERE, "kimodo-requirements.txt")
 FETCH_MODEL = os.path.join(HERE, "fetch_kimodo_model.py")
 TOOLS = os.path.join(paths.HOME, "tools")
 STATE_FILE = "setup_state.json"
+FINISHED = "_finished"   # setup_state.json の中の「最後まで済んだ時の AIナカワリ の版」（段の名前とぶつからない名前）
 # 組み立て済みの部品の置き場所（配布の zip では MMD-AINakawari\prebuilt\。開発版は work\prebuilt\）。
 # kimodo は入れる時に C++ の部品（MotionCorrection。生成の「後処理」が使う）を CMake とコンパイラで組み立てるが、
 # 使う人の PC にコンパイラは無いので、組み立て済みの pyd を配って置く（11-06。試しのセットアップで CMake が無くて止まった）
@@ -81,7 +82,7 @@ def find_uv():
     found = shutil.which("uv")
     if found:
         return found
-    raise Failed(f"uv が見つかりません（{bundled} が無い）。zip の中身を全部展開し直してください")
+    raise Failed(f"セットアップの道具（uv）が見つかりません: {bundled}。zip の中身を全部展開し直してください")
 
 
 def tls_context():
@@ -103,7 +104,7 @@ def motion_correction_info():
         if os.path.isfile(path):
             with open(path, encoding="utf-8") as f:
                 return folder, json.load(f)
-    raise Failed(f"組み立て済みの部品（{PREBUILT}\\{MOTION_CORRECTION_JSON}）がありません。zip の中身を全部展開し直してください")
+    raise Failed(f"zip の中身が足りません（{PREBUILT}\\{MOTION_CORRECTION_JSON} がありません）。zip の中身を全部展開し直してください")
 
 
 def check_vc_runtime():
@@ -123,7 +124,7 @@ def check_folder(dest):
     if not os.path.isdir(drive):
         raise Failed(f"ドライブ {drive} がありません")
     if (os.path.normcase(os.path.abspath(dest)) + os.sep).startswith(os.path.normcase(paths.HOME) + os.sep):
-        raise Failed(f"AIナカワリ の窓のフォルダ（{paths.HOME}）の中には入れられません。別のフォルダにしてください")
+        raise Failed(f"AIナカワリ 本体のフォルダ（{paths.HOME}）の中には入れられません。別のフォルダにしてください")
     # MMD の plugin\ の下は、MMDPlugin が DLL を奥まで全部読み込もうとして MMD が落ちる（11-05 に踏んだ。11-06 Codex のレビュー）
     folder = os.path.abspath(dest)
     while True:
@@ -186,13 +187,13 @@ class Setup:
             ("kimodo_env", "kimodo", "Kimodo の Python の環境を作る（約 5GB）",
              f"{pins.KIMODO_COMMIT}/{pins.KIMODO_PYTHON}/{file_sha256(REQUIREMENTS)}/{self._prebuilt_version()}", 5.5,
              self.kimodo_env),
-            ("skeleton", "kimodo", "骨格を書き出す", file_sha256(os.path.join(TOOLS, "export_skeleton.py")), 0, self.skeleton),
+            ("skeleton", "kimodo", "Kimodo の骨格を用意する", file_sha256(os.path.join(TOOLS, "export_skeleton.py")), 0, self.skeleton),
             ("kimodo_model", "kimodo", "Kimodo のモデルを落とす（約 1GB）", pins.KIMODO_MODEL_REVISION, 1.2, self.kimodo_model),
             # 文の読み取り（11-07 に bf16 の Llama 約 16GB から GGUF Q8_0 約 8GB ＋ llama.cpp に替えた）
-            ("text_gguf", "kimodo", "文の読み取りのモデルを落とす（約 8GB。いちばん長くかかります）",
+            ("text_gguf", "kimodo", "プロンプトを読み取るモデルを落とす（約 8GB。いちばん長くかかります）",
              f"{pins.TEXT_GGUF_REVISION}/{pins.TEXT_GGUF_FILE[1]}", 8.0, self.text_gguf),
-            ("llamacpp", "kimodo", "文の読み取りを動かす llama.cpp を落とす", pins.LLAMACPP_ZIP[1], 0.1, self.llamacpp),
-            ("kimodo_test", "kimodo", "Kimodo が動くか確かめる（試しに 2 秒の動きを作ります）",
+            ("llamacpp", "kimodo", "プロンプトの読み取りに使う llama.cpp を落とす", pins.LLAMACPP_ZIP[1], 0.1, self.llamacpp),
+            ("kimodo_test", "kimodo", "Kimodo が動くか確かめる（2 秒の動きを試しに作る）",
              f"{pins.KIMODO_COMMIT}/{file_sha256(os.path.join(TOOLS, 'gguf_text.py'))}", 0, self.kimodo_test),
         ]
         m = [
@@ -200,7 +201,7 @@ class Setup:
             ("mb_models", "mb", "MotionBricks のモデルを落とす（約 1.1GB）", pins.MOTIONBRICKS_COMMIT, 1.2, self.mb_models),
             ("mb_env", "mb", "MotionBricks の Python の環境を作る（約 3GB）",
              f"{pins.MOTIONBRICKS_COMMIT}/{pins.MOTIONBRICKS_PYTHON}", 3.3, self.mb_env),
-            ("mb_test", "mb", "MotionBricks が動くか確かめる（試しに 1 秒の動きを作ります。GPU に合わせた準備で数分かかります）",
+            ("mb_test", "mb", "MotionBricks が動くか確かめる（1 秒の動きを試しに作る。初回は数分かかる）",
              pins.MOTIONBRICKS_COMMIT, 0.8, self.mb_test),
         ]
         # MotionBricks は選ばせずに必ず入れる（11-06 マスター。前は画面で選べた）
@@ -224,16 +225,37 @@ class Setup:
         state = self.load_state()
         return sum(gb for key, _g, _t, version, gb, _fn in self.steps() if state.get(key) != version)
 
+    def status(self):
+        """この場所の状態と、残りの段 [(名前, 見出し, GB)]。状態は
+        "new"（まだ何も済んでいない）・"partial"（途中で止まった）・"update"（最後まで済んだ後に版が上がった）・"done"（全部済み）。
+        「最後まで済んだ」は FINISHED の印で見る。印を書く前の版（0.1.x）は、最後の段（MotionBricks の試し）が済んでいれば済んだと見る。"""
+        state = self.load_state()
+        steps = self.steps()
+        pending = [(key, title, gb) for key, _g, title, version, gb, _fn in steps if state.get(key) != version]
+        if not pending:
+            return "done", []
+        if not any(key in state for key, *_rest in steps):
+            return "new", pending
+        finished = bool(state.get(FINISHED)) or steps[-1][0] in state
+        return ("update" if finished else "partial"), pending
+
+    def in_use(self):
+        """この窓の paths.json が、この場所の Kimodo を指しているか（別の MMD に入れた AIナカワリ からは、まだ指していない）。"""
+        try:
+            return os.path.normcase(os.path.normpath(paths.load().get("kimodo") or "")) == os.path.normcase(self.kimodo)
+        except paths.NotSetUp:
+            return False
+
     def run(self):
         os.makedirs(self.dest, exist_ok=True)
         need, free = self.remaining_gb(), free_gb(self.dest)
         if free < need:
-            raise Failed(f"空きが足りません。残りの段で約 {need:.0f}GB 使いますが、{os.path.splitdrive(self.dest)[0]} の空きは "
+            raise Failed(f"空きが足りません。残りの手順で約 {need:.0f}GB 使いますが、{os.path.splitdrive(self.dest)[0]} の空きは "
                          f"{free:.0f}GB です。空きを作るか、別のドライブを選んでください")
         check_vc_runtime()
         motion_correction_info()   # 部品が欠けた zip なら、落とし始める前に止める
         self.uv = find_uv()
-        self.log(f"入れる場所: {self.dest}（空き {free:.0f}GB・残りの段で約 {need:.0f}GB）")
+        self.log(f"入れる場所: {self.dest}（空き {free:.0f}GB・残りの手順で約 {need:.0f}GB）")
         self.log(f"uv: {self.uv}")
         state = self.load_state()
         steps = self.steps()
@@ -263,6 +285,8 @@ class Setup:
             self.on_step(key, "done")
             self.log(f"   済み（{time.time() - t0:.0f} 秒）")
         shutil.rmtree(self.downloads, ignore_errors=True)
+        state[FINISHED] = __version__   # 最後まで済んだ印（status の「途中」と「更新あり」を分ける）
+        self.save_state(state)
         self.register()
         self.log("セットアップが終わりました")
 
@@ -272,7 +296,7 @@ class Setup:
         paths.check(self.kimodo, "Kimodo")
         paths.check(self.mb, "MotionBricks")
         paths.save(kimodo=self.kimodo, motionbricks=self.mb)
-        self.log(f"場所を書きました: {paths.PATHS_FILE}")
+        self.log(f"この場所を使うように設定しました（{paths.PATHS_FILE}）")
 
     def cancel(self):
         self._stop.set()
@@ -356,7 +380,7 @@ class Setup:
         if self._stop.is_set():
             raise Cancelled()
         if rc != 0:
-            raise Failed(f"{what} が失敗しました（終了コード {rc}）。\n" + "\n".join(tail[-6:]))
+            raise Failed(f"「{what}」で失敗しました（終了コード {rc}）。\n" + "\n".join(tail[-6:]))
 
     def download(self, url, target, label, digest=None, size=None, retry=True):
         """url を target に落とす。途中の .part があれば続きから（サーバーが応じれば）。digest があれば sha256 で照らす。
@@ -455,7 +479,7 @@ class Setup:
             raise Failed(f"{name} の zip が壊れていました。もう一度押すと落とし直します") from None
         tops = os.listdir(work)
         if len(tops) != 1:
-            raise Failed(f"{name} の zip の形が思っていた物と違います（{tops[:3]}）")
+            raise Failed(f"{name} の zip の中身が正しくありません（{tops[:3]}）")
         top = os.path.join(work, tops[0])
         if os.path.isdir(into):
             os.makedirs(keep_dir, exist_ok=True)
@@ -502,10 +526,10 @@ class Setup:
         """motion_correction の .py（kimodo の zip から）と、組み立て済みの pyd を Kimodo の環境に置いて、読めるか確かめる。"""
         folder, info = motion_correction_info()
         if info.get("kimodo_commit") != pins.KIMODO_COMMIT:
-            raise Failed(f"組み立て済みの部品が、別の版の Kimodo の物です（{info.get('kimodo_commit')}）。zip を落とし直してください")
+            raise Failed(f"zip の中の部品が、別の版の Kimodo 用です（{info.get('kimodo_commit')}）。zip を落とし直してください")
         pyd = os.path.join(folder, info["file"])
         if not os.path.isfile(pyd) or sha256(pyd) != info["sha256"]:
-            raise Failed(f"組み立て済みの部品（{pyd}）が無いか、壊れています。zip を落とし直してください")
+            raise Failed(f"zip の中の部品（{pyd}）が無いか、壊れています。zip を落とし直してください")
         src = os.path.join(self.kimodo, "repo", "MotionCorrection", "python", "motion_correction")
         site = os.path.join(self.kimodo, ".venv", "Lib", "site-packages", "motion_correction")
         shutil.rmtree(site, ignore_errors=True)
@@ -564,7 +588,7 @@ class Setup:
         with zipfile.ZipFile(archive) as z:
             z.extractall(work)
         if not os.path.isfile(os.path.join(work, "llama-server.exe")):
-            raise Failed("llama.cpp の zip の形が思っていた物と違います（llama-server.exe がありません）")
+            raise Failed("llama.cpp の zip の中身が正しくありません（llama-server.exe がありません）")
         shutil.rmtree(into, ignore_errors=True)
         os.replace(work, into)
         self.call([os.path.join(into, "llama-server.exe"), "--version"], "llama.cpp の版を確かめる")
@@ -578,7 +602,7 @@ class Setup:
             json.dump({"prompt": "A person walks forward.", "num_frames": 60, "seed": 0}, f)
         if os.path.exists(out):
             os.remove(out)
-        self.log("  初めての読み込みなので 1〜2 分かかります（文の読み取りのモデル約 8GB をメインメモリに読みます）")
+        self.log("  初めての読み込みなので 1〜2 分かかります（プロンプトを読み取るモデル約 8GB をメインメモリに読みます）")
         self.call([self.kimodo_python(), os.path.join(TOOLS, "kimodo_gen.py"), req, out], "Kimodo の試しの生成", cwd=self.kimodo,
                   HF_HUB_CACHE=os.path.join(self.kimodo, "hf_cache"), LOCAL_CACHE="true", HF_HUB_OFFLINE="1",
                   AINAKAWARI_LLAMA_SERVER=os.path.join(self.kimodo, "llamacpp", "llama-server.exe"),
@@ -589,7 +613,7 @@ class Setup:
             raise Failed(f"Kimodo の試しの生成の結果が空でした（{out}）")
         paths.check(self.kimodo, "Kimodo")
         paths.save(kimodo=self.kimodo)
-        self.log(f"  Kimodo で {frames} フレーム作れました。場所を書きました: {paths.PATHS_FILE}")
+        self.log(f"  Kimodo で {frames} フレーム作れました。この場所を使うように設定しました")
 
     # ---- MotionBricks -------------------------------------------------------------------------------
     def mb_src(self):
@@ -634,7 +658,7 @@ class Setup:
             raise Failed(f"MotionBricks の試しの生成の結果が空でした（{out}）")
         paths.check(self.mb, "MotionBricks")
         paths.save(motionbricks=self.mb)
-        self.log(f"  MotionBricks で {frames} フレーム作れました。場所を書きました: {paths.PATHS_FILE}")
+        self.log(f"  MotionBricks で {frames} フレーム作れました。この場所を使うように設定しました")
 
 
 def main():

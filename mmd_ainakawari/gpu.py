@@ -101,11 +101,13 @@ def diagnose():
                          f"CUDA_VISIBLE_DEVICES={visible!r} で GPU が無効になっています（この設定を外してください）")
     try:
         g = _gpu()
-    except _Unknown as e:   # 調べられない時も窓は開き、試せる
-        return Diagnosis("", 0.0, 0.0, ram, ram_free, True, f"GPU を調べられませんでした（{e}）。試しに作ってみてください")
+    except _Unknown as e:   # 調べられない時も窓は開き、試せる。理由（nvidia-smi の名前など）は記録にだけ書く
+        from . import applog
+        applog.write(f"GPU を調べられませんでした: {e}")
+        return Diagnosis("", 0.0, 0.0, ram, ram_free, True, "GPU を調べられませんでした。「生成」を押して試してください")
     if g is None:
         return Diagnosis("", 0.0, 0.0, ram, ram_free, False,
-                         "NVIDIA の GPU が見つかりません（Kimodo・MotionBricks は NVIDIA の GPU が要ります）")
+                         "NVIDIA の GPU が見つかりません（AIナカワリ に必要です）")
     name, vram, vram_free = g
     ok = vram >= VRAM_GB and ram >= RAM_CHECK_GB
     if ok:

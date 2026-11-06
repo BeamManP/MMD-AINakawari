@@ -1,4 +1,4 @@
-# MMD の右下の「Kimodo操作」パネルの「サンプル」に出すプロンプト（英語が苦手な人向け）。
+# MMD の右下の「AIナカワリ簡易操作」パネルの「サンプルから選ぶ」に出すプロンプト（英語が苦手な人向け）。
 # 書き方: [種類] の行で種類を分け、その下に「動作：英語のプロンプト」を 1 行ずつ。# で始まる行は読み飛ばす。
 # 英語の文は Kimodo のデモの例文と同じく「A person ＋ 今の形の動詞」で、何をするかを具体的に書く
 # （例: A person walks forward.）。パネルはボタンを押すたびにこのファイルを読むので、書き換えたらすぐ反映される。
@@ -13,11 +13,11 @@
 スキップ：A person skips forward happily.
 忍び足：A person sneaks forward on tiptoes.
 階段を上る：A person begins walking up the stairs.
-振り返る：A person walks forward and then turns around.
+歩いて向きを変える：A person walks forward and then turns around.
 
 [止まる・立つ]
 走って止まる：A person runs forward and comes to a stop.
-立ったまま：A person stands still and looks around.
+立って見回す：A person stands still and looks around.
 体重を移す：A person stands and shifts their weight from one leg to the other.
 待つ：A person waits impatiently, tapping their foot.
 

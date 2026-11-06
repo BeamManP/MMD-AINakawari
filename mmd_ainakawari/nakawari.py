@@ -35,7 +35,7 @@ def generate(job, work_dir, key_stop=False, wrist_lerp=False, log=print):
     if len(keys) < 2:
         raise ValueError("中割りには体のキーが 2 つ以上要ります")
     if job.root_frames or job.limb_frames:
-        log("  全ての親だけ・手足の IK だけのキーは、中割りでは使いません（MotionBricks は途中の目印を知らないため）")
+        log("  中割りに使うのは体のキーです（全ての親だけ・手足の IK だけのキーは対象外）")
     poses = [_pose(k) for k in keys]
     frames = [k["frame"] for k in keys]
     gaps = [b - a for a, b in zip(frames, frames[1:])]

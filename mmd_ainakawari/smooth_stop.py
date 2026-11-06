@@ -106,7 +106,7 @@ def apply(job, result, work_dir, log=print):
     if not job.stop_frames:
         return result
     if not available():
-        raise RuntimeError("MotionBricks が入っていません。「なめらかに止まる」を外すか、詳細の窓のセットアップで MotionBricks を入れてください")
+        raise RuntimeError("MotionBricks がまだ入っていません。「なめらかに止まる」を外すか、詳細の窓の「セットアップ」で入れてください")
     stop = job.stop_frames[0] - 1
     kf = stop - job.first
     key = next(k for k in job.request["keys"] if k["frame"] == kf)

@@ -78,8 +78,8 @@ def choose_mmd(start):
 def check_version(mmd):
     from mmd_mcp.bone_state import VERIFIED_SHA256
     if sha256(os.path.join(mmd, EXE)) != VERIFIED_SHA256:
-        raise Stop("この MikuMikuDance.exe は、AIナカワリ が対応している版（MikuMikuDance 9.32 x64・日本語版）ではありません。\n"
-                   "AIナカワリ は MMD の中を読むので、ほかの版では動きません。何も変えずに終わります。")
+        raise Stop("AIナカワリ が使えるのは MikuMikuDance 9.32 x64（日本語版）だけです。\n"
+                   "この MikuMikuDance.exe は別の版なので、ファイルは何も変えずに終わります。")
 
 
 def check_not_running(mmd):
@@ -107,7 +107,7 @@ def copy_plugin(mmd):
 
 
 FOREIGN_D3DX9 = ("MikuMikuDance.exe の横に、MMDPlugin の物ではない d3dx9_43.dll があります。\n"
-                 "MMDPlugin は自前の d3dx9_43.dll（中で Windows の物を呼びます）を同じ場所に置く必要があるので、何も変えずに止めます。\n"
+                 "AIナカワリ を入れると、この d3dx9_43.dll を MMDPlugin の物と入れ替えることになるので、ファイルは何も変えずに止めます。\n"
                  "今の d3dx9_43.dll を別のフォルダへ移してから、もう一度ダブルクリックしてください。")
 
 
@@ -124,7 +124,7 @@ def plan_mme(mmd):
         same = os.path.exists(dst)
         if same and sha256(dst) != sha256(src):
             raise Stop(f"MME を plugin\\mme に移そうとしましたが、{dst} に中身の違う {name} があります。\n"
-                       "どちらを使うか決められないので、何も変えずに止めます。どちらかを片付けてから、もう一度ダブルクリックしてください。")
+                       "どちらを使えばいいか分からないので、ファイルは何も変えずに止めます。いらない方を別のフォルダへ移してから、もう一度ダブルクリックしてください。")
         moves.append((src, dst, same))
     return moves
 
@@ -165,7 +165,7 @@ def place_mmdplugin(mmd):
     moving = {os.path.basename(src).lower() for src, _dst, _same in moves}
     if os.path.isfile(root("d3d9.dll")) and "d3d9.dll" not in moving and not is_ours("d3d9.dll"):
         raise Stop("MikuMikuDance.exe の横に、MME でも MMDPlugin でもない d3d9.dll があります。\n"
-                   "上書きすると今の動きが変わるので、何も変えずに止めます。何の d3d9.dll かを確かめてください。")
+                   "上書きすると、今それを使っているツールが動かなくなるかもしれないので、ファイルは何も変えずに止めます。この d3d9.dll の配布元を確かめてください。")
     if os.path.isfile(d3dx9) and not is_ours("d3dx9_43.dll"):
         raise Stop(FOREIGN_D3DX9)
     # ここから先が変える所
