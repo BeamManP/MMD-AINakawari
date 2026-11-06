@@ -123,11 +123,22 @@ class MMDLink:
         if r.get("status") != "completed":
             raise RuntimeError(f"MMD からモーションを書き出せませんでした: {r.get('status')} {r.get('dialogs', '')}")
 
-    def load_motion(self, path, frame=0):
+    def check_model(self, model):
+        """選ばれているモデルが model（PMX の場所）でなければ止める。キーを消す前・控えを取る前に呼ぶ。"""
+        selected = self.selected_model()
+        if selected is None or os.path.normcase(os.path.abspath(selected["path"])) != os.path.normcase(os.path.abspath(model)):
+            now = selected["name"] if selected else "モデル以外"
+            raise RuntimeError(f"始めた時と違うモデル（{now}）が選ばれています。キーは消していません。"
+                               f"「{os.path.splitext(os.path.basename(model))[0]}」を選んでから、もう一度押してください")
+
+    def load_motion(self, path, frame=0, model=None, restore=None):
         """選択中のモデルのモーションを、VMD の中身でまるごと置き換える。
 
         MMD の読み込みは足し込み（ファイルにあるキーだけ上書きし、他のキーは残す）なので、先に全部のキーを消す。
         読み込みは今のフレームの分ずれるので frame（ふつう 0）へ移ってから読む。
+        model: 読み込む先のモデルの PMX の場所。キーを消す直前に、選ばれているモデルがこれかを確かめ、違えば何も消さずに止める
+               （生成の途中で別のモデルを選ぶと、そのモデルのキーを全部消して前のモデルの動きを入れていた。11-07 Codex のレビュー）。
+        restore: キーを消した後で読み込みに失敗した時に、読み込み直すバックアップ（消したキーを戻す）。
         """
         # 再生中は MMD の場面を編集できない（mmd-mcp が断る）。生成した動きを再生して確かめている途中で「元に戻す」や
         # 「生成」を押すことがあるので、先に止める（11-04 マスター「元に戻すを押すとたまに Stop MMD playback が出る」）
@@ -135,6 +146,8 @@ class MMDLink:
             playback.set_playback(False, hwnd=self.hwnd)
         if not self.state()["model_selected"]:
             raise RuntimeError("MMD でカメラ・照明・アクセサリが選ばれています。モデルを選んでからもう一度押してください")
+        if model is not None:
+            self.check_model(model)
         path = os.path.abspath(path)
         r = timeline.select_range(0, 999999, "全ﾌﾚｰﾑ", self.hwnd)
         if r.get("status") == "completed":
@@ -144,7 +157,15 @@ class MMDLink:
         scene.set_frame(frame, self.hwnd)
         r = files.load_file("motion", path, self.hwnd)
         if r.get("status") != "completed":
-            raise RuntimeError(f"MMD にモーションを読み込めませんでした: {r.get('status')} {r.get('dialogs', '')}")
+            why = f"{r.get('status')} {r.get('dialogs', '')}".strip()
+            if restore is None:
+                raise RuntimeError(f"MMD にモーションを読み込めませんでした: {why}")
+            scene.set_frame(frame, self.hwnd)
+            back = files.load_file("motion", os.path.abspath(restore), self.hwnd)
+            if back.get("status") == "completed":
+                raise RuntimeError(f"MMD にモーションを読み込めませんでした（{why}）。消したキーは、バックアップから戻しました")
+            raise RuntimeError(f"MMD にモーションを読み込めず（{why}）、バックアップも読み込めませんでした。"
+                               f"MMD の「ファイル」→「モーションデータ読込」で、次のファイルを読み込んでください: {os.path.abspath(restore)}")
 
     def set_frame(self, frame):
         scene.set_frame(frame, self.hwnd)

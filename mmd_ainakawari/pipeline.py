@@ -90,8 +90,16 @@ def unwritten_parents(skel, names):
     return out
 
 
+def ik_off_bones(skel, ik_rows, frame):
+    """表示/IK の行（vmd.split_tail）で、frame の時にオフの IK のボーン名（PMX の名前）。VMD の名前は 20 バイトで切れているので、切って比べる。"""
+    off = vmd.ik_off_at(ik_rows, frame)
+    if not off:
+        return set()
+    return {n for n in skel.index if vmd._name(n.encode("cp932", errors="replace")[:20]) in off}
+
+
 def pose_at(skel, tracks, frame, solve_ik=True, skip_ik=()):
-    """skip_ik: 解かない IK（Retargeter.idle_iks。読む骨に効かない髪・ネクタイなど）。"""
+    """skip_ik: 解かない IK（Retargeter.idle_iks。読む骨に効かない髪・ネクタイなど・そのフレームでオフの IK）。"""
     rots, poss = {}, {}
     for name in tracks:
         if name in IGNORED_ROOTS or name not in skel:
@@ -287,9 +295,11 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
 
     poses = {}
     full = set(frames + [first] + list(limb_keys) + before + after)   # 全身の姿勢が要るフレーム（手足の IK まで解く）
+    # MMD で IK をオフにしたフレームは、その IK を解かずに FK のまま読む（前はいつも解いていた。11-07 Codex のレビュー）
+    ik_rows = vmd.split_tail(motion.tail)[1]
     for f in sorted(full | set(root_frames)):
         # 通り道だけのフレームは腰の位置と向きしか使わないので、IK は解かない（腰は脚の IK に左右されない）
-        G, P = pose_at(skel, tracks, f, solve_ik=f in full, skip_ik=rt.idle_iks)
+        G, P = pose_at(skel, tracks, f, solve_ik=f in full, skip_ik=set(rt.idle_iks) | ik_off_bones(skel, ik_rows, f))
         poses[f] = rt.mmd_to_soma(G, P)
 
     job = Job(pmx=pmx, frames=frames, first=first, num_frames=num, root_frames=root_frames,
@@ -478,7 +488,8 @@ def merge(original, generated, job):
                     for f in kept:
                         filled.append(vmd.BoneKey(name, f, *sample(orig_tracks, vn, f)))
     keep = [replace(k, interp=new_interp[id(k)]) if id(k) in new_interp else k for k in keep]
-    return vmd.Motion(model_name=original.model_name, bones=keep + filled + generated.bones, tail=original.tail)
+    return vmd.Motion(model_name=original.model_name, bones=keep + filled + generated.bones, tail=original.tail,
+                      name_raw=original.name_raw)
 
 
 def build_motion(job, result, include_keys=False, workers=None):

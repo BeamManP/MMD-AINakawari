@@ -689,6 +689,12 @@ class App:
                 self.q.put(("done", (True, ok_message)))
             except Exception as e:  # 窓に出して止める（握りつぶさない）。どこで落ちたかは記録にだけ書く
                 applog.exception("失敗した時の traceback:")
+                try:   # 読み込みで止まった時も「元に戻す」で戻せるように、読み込みの前に残した記録を読み直す（11-07 Codex のレビュー）
+                    r = runner.load_last_run(self.link)
+                    if r:
+                        self.last_run, self.last_backup = r, r["backup"]
+                except Exception:   # MMD が閉じられたなど。失敗の知らせはそのまま出す
+                    applog.exception("失敗の後の前回の記録の読み直し:")
                 self.q.put(("log", f"失敗: {e}"))
                 self.q.put(("done", (False, f"失敗: {e}")))
         threading.Thread(target=work, daemon=True).start()
@@ -710,8 +716,9 @@ class App:
 
     def _undo(self):
         backup = self.last_backup
+        model = (self.last_run or {}).get("model")   # バックアップを取ったモデル（違うモデルが選ばれていたら止める）
         self.status.set("元に戻し中…")
-        self._run(lambda log: runner.undo(backup, log, link=self.link), "生成前のモーションに戻しました")
+        self._run(lambda log: runner.undo(backup, log, link=self.link, model=model), "生成前のモーションに戻しました")
 
 
 def _notify_running(hwnd, message=OPEN_MESSAGE):

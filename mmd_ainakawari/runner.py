@@ -61,6 +61,13 @@ def _same_motion(a, b, tol=1e-3, fixed_pos=(), names=None):
     return True
 
 
+def _rebase(current, base, names):
+    """current（今の MMD）のうち、names の骨のキーだけを base（前回の元）の物にしたモーション。表情・表示/IK は current のまま。"""
+    bones = [k for k in current.bones if k.name not in names] + [k for k in base.bones if k.name in names]
+    return vmd.Motion(model_name=current.model_name, bones=bones, tail=current.tail, dropped=list(current.dropped),
+                      name_raw=current.name_raw)
+
+
 LAST_RUN = os.path.join(WORK_DIR, "last_run.json")
 _LAST_RUN_LOCK = threading.Lock()
 
@@ -91,10 +98,10 @@ def _span_key(settings):
     return {"range": None, "use_keys": settings.use_keys, "length": settings.length}
 
 
-def _save_last_run(link, backup, out, span):
+def _save_last_run(link, backup, out, span, model=None):
     with _LAST_RUN_LOCK:   # 窓（MMD ごと）は同じプロセスのスレッドで生成するので、読んで書き戻す間をまとめて守る
         runs = _last_runs()
-        runs[link.key] = {"backup": backup, "output": out, "span": span}
+        runs[link.key] = {"backup": backup, "output": out, "span": span, "model": model}
         # 書き終わってから置き換える（途中で止まっても前のものが残る）。一時ファイルは保存ごとに別の名前
         # （窓と確認用のスクリプトのように別のプロセスが同時に保存すると、同じ名前では片方の置き換えが失敗した。11-04 Codex のレビュー）
         tmp = f"{LAST_RUN}.{os.getpid()}.{threading.get_ident()}.tmp"
@@ -146,9 +153,11 @@ def generate(settings, log=print, link=None, previous=None):
     same_range = previous is not None and previous.get("span") == span
     if same_range and os.path.exists(previous.get("output", "")) and _same_motion(original, vmd.read(previous["output"]),
                                                                                  fixed_pos=fixed_pos, names=written):
-        backup = previous["backup"]
-        original = vmd.read(backup)
-        log(f"  前回の生成結果のままなので、前回の元のキーから作り直します（{backup}）")
+        # 前回の元のキーから取るのは、書き戻す骨だけ。指・表情・全ての親・表示/IK などは今の MMD の物を使う
+        # （前はモーションを丸ごと前回の元に差し替えていて、生成の後に直した指や表情が戻っていた。11-07 Codex のレビュー）
+        original = _rebase(original, vmd.read(previous["backup"]), written)
+        vmd.write(backup, original)
+        log(f"  書き戻す骨は前回の結果のままなので、前回の元のキーから作り直します（ほかの骨・表情は今のまま。バックアップ: {backup}）")
     else:
         log(f"  バックアップ: {backup}")
 
@@ -224,24 +233,31 @@ def generate(settings, log=print, link=None, previous=None):
     vmd.write(out, merged)
     log(f"間のフレームのキー {len(generated.bones)} 個を差し込みました → {out}")
 
+    # 前回の記録は読み込みの前に残す（読み込みで止まっても「元に戻す」でバックアップに戻せるように。11-07 Codex のレビュー）
+    _save_last_run(link, backup, out, span, pmx)
     log("MMD に読み込み中…")
-    link.load_motion(out, 0)
+    # 始めた時のモデルかを確かめてからキーを消す。読み込みに失敗したら、バックアップを読み込み直して消したキーを戻す
+    link.load_motion(out, 0, model=pmx, restore=backup)
     link.set_frame(job.first if cursor is None else cursor)   # 読めなかった時は、作った範囲の始め（前の動き）
     err = result.get("key_max_error_m") or [0]
     root_err = result.get("root_key_error_m") or []
     extra = f"・全ての親のキーとの腰のずれ最大 {max(root_err) * 100:.0f}cm" if root_err else ""
     log(f"できました（{time.time() - t0:.0f} 秒・生成 {result.get('seconds_generate', 0):.1f} 秒・キーとのずれ最大 {max(err) * 100:.1f}cm{extra}）")
-    _save_last_run(link, backup, out, span)
-    return {"backup": backup, "output": out, "job": job, "span": span}
+    return {"backup": backup, "output": out, "job": job, "span": span, "model": pmx}
 
 
-def undo(backup, log=print, link=None):
-    """控えておいた元のモーションを読み込み直す。"""
+def undo(backup, log=print, link=None, model=None):
+    """控えておいた元のモーションを読み込み直す。model: バックアップを取ったモデルの PMX（違うモデルが選ばれていたら止める）。"""
     link = link or MMDLink()
     if not backup or not os.path.exists(backup):
         raise RuntimeError("元に戻すためのバックアップがありません")
     cursor = link.current_frame()   # 押した時のフレームへ戻す（読めなければ 0F のまま）
-    link.load_motion(backup, 0)
+    # 読み込みに失敗した時に戻せるよう、押した時の動きも控えておく
+    now = os.path.join(WORK_DIR, f"before_undo_{time.strftime('%Y%m%d_%H%M%S')}_{link.key.split('-')[0]}.vmd")
+    if model is not None:   # 読む前に確かめる（違うモデルの動きを控えにしないように）
+        link.check_model(model)
+    link.read_motion(now)
+    link.load_motion(backup, 0, model=model, restore=now)
     if cursor is not None:
         link.set_frame(cursor)
     log(f"元に戻しました（{backup}）")
