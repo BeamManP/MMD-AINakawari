@@ -13,6 +13,21 @@ KIMODO_PYTHON = "3.10.19"
 KIMODO_MODEL_REPO = "nvidia/Kimodo-SOMA-RP-v1.2"
 KIMODO_MODEL_REVISION = "0e3c89024d896064b6851201373f7834784a386b"
 
+# 文の読み取り（LLM2Vec ＋ Llama 3 8B を GGUF Q8_0 にした物。Meta Llama 3 Community License・LLM2Vec のアダプタは MIT）。
+# 第三者（fernandotonon さん）のリポジトリなので、コミットで固定する（11-07 マスター判断。消えたら写しを置くか考える）
+TEXT_GGUF_REPO = "fernandotonon/Llama-3-LLM2Vec-8B-Kimodo-TextEncoder-GGUF"
+TEXT_GGUF_REVISION = "d9931ecb2e20c7f0fd6c86284cd00eb83154bdf9"
+TEXT_GGUF_URL = "https://huggingface.co/{repo}/resolve/{revision}/{name}"
+TEXT_GGUF_FILE = ("Llama-3-LLM2Vec-8B-Kimodo-TextEncoder-Q8_0.gguf",
+                  "332f86e0b7f5eb022795bd00507245d2efe12f5b5057cedcce678d8a32ad4ce6", 7982601376)
+# 一緒に置くライセンスの文（コミットで中身が決まるので照らさない）
+TEXT_GGUF_LICENSES = ("LICENSE-Llama-3.txt", "USE_POLICY-Llama-3.md", "NOTICE-Llama-3.txt", "LICENSE-LLM2Vec-MIT.txt", "README.md")
+
+# llama.cpp（MIT）の CPU 版。文の読み取りの llama-server だけを使う。2026-11-06 のビルド（GitHub の記録の sha256 と照らした）
+LLAMACPP_BUILD = "b12170"
+LLAMACPP_ZIP = (f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMACPP_BUILD}/llama-{LLAMACPP_BUILD}-bin-win-cpu-x64.zip",
+                "29ca39fe6ac853b735738cf28aabfe9a9af6bf502f34f52d43c1a24d61d69450", 24745645)
+
 # MotionBricks（NVIDIA・コードは Apache-2.0、モデルは NVIDIA Open Model Agreement）。2026-10-23 のコミット
 MOTIONBRICKS_COMMIT = "54fc563aeaaf819a753d72cc9fdc6713989cdd43"
 MOTIONBRICKS_ZIP = f"https://github.com/NVlabs/motionbricks/archive/{MOTIONBRICKS_COMMIT}.zip"

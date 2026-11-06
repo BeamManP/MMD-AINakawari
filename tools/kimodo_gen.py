@@ -1,19 +1,18 @@
 """Kimodo の橋渡し（Kimodo の Python で動かす）。依頼（プロンプト・コマ数・キー）→ SOMA 30 関節の結果。
 
     F:\\kimodo\\.venv\\Scripts\\python.exe tools\\kimodo_gen.py 依頼.json 結果.json     1 回だけ（毎回モデルを読み込む）
-    F:\\kimodo\\.venv\\Scripts\\python.exe tools\\kimodo_gen.py --serve 9553 cpu         常駐・低負荷（テキストの読み取りは CPU）
-    F:\\kimodo\\.venv\\Scripts\\python.exe tools\\kimodo_gen.py --serve 9551 api         常駐・高速（テキストの読み取りはサーバー）
+    F:\\kimodo\\.venv\\Scripts\\python.exe tools\\kimodo_gen.py --serve 9553             常駐
 
 座標はすべて Kimodo の座標（Y が上・+Z が前・+X が体の左・メートル）。
 回転は標準 T ポーズ基準のローカル回転（四元数 x,y,z,w を関節順に平らに並べる）。
 元は F:\\kimodo\\tools\\unity_gen.py（Unity の KimodoLink 用に書いたもの）。11-04 にここへ移し、常駐できるようにした。
 1 回の生成は 3 秒ほどだが、torch と Kimodo のモデルの読み込みに 25 秒かかっていた。
 
-常駐はテキストの読み取り（LLM2Vec・Llama-3-8B）の置き場所を決めて読み込む（Kimodo の既定 auto は、サーバーが無い時に
-Llama 約 16GB を GPU に読み込むので、8GB の GPU では落ちる）:
-  cpu: 低負荷モード。Llama はメインメモリ（約 15GB）。VRAM は Kimodo 本体の 1.3GB だけ。1 文の読み取りに 3 秒ほど（11-04・i7-12700F）
-  api: 高速モード。テキスト読み取りサーバー（127.0.0.1:9550・VRAM 約 16.8GB）に頼む
-どちらも読み取り結果を work/text_cache/<cpu|api> にためて使い回す（公式デモの CachedTextEncoder。同じ文は 2 回目から読み取らない）。
+文の読み取り（LLM2Vec・Llama-3-8B）は、GGUF Q8_0 を llama.cpp の llama-server（CPU・メインメモリ約 7.6GB）で行う（tools/gguf_text.py）。
+場所は環境変数で渡す: AINAKAWARI_LLAMA_SERVER（llama-server.exe）・AINAKAWARI_TEXT_GGUF（.gguf）・AINAKAWARI_LOG_DIR（記録）。
+11-07 までは低負荷（bf16 の Llama を CPU・約 15GB）と高速（GPU のサーバー・VRAM 約 16.8GB）の 2 つのモードがあったが、
+GGUF で読み取りが 1 文 0.5 秒ほどになり、高速モードの意味が無くなったのでまとめた。
+常駐は読み取り結果を work/text_cache/gguf にためて使い回す（公式デモの CachedTextEncoder。同じ文は 2 回目から読み取らない）。
 """
 import json
 import os
@@ -86,25 +85,38 @@ def _skip_when_empty(c):
 
 MODEL = "kimodo-soma-rp"
 AUTHKEY = b"AINakawari.resident.v1"   # mmd_ainakawari/resident.py と同じ
-TEXT_CACHE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "work", "text_cache")
+WORK = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "work")
+TEXT_CACHE = os.path.join(WORK, "text_cache", "gguf")
 IDLE_SECONDS = 30 * 60               # 常駐で、これだけ頼まれなければ終わる
+
+
+def text_encoder():
+    """文の読み取り（tools/gguf_text.py の LlamaServerEncoder）を起こす。場所は環境変数から（無ければ止める）。"""
+    from gguf_text import LlamaServerEncoder
+
+    missing = [k for k in ("AINAKAWARI_LLAMA_SERVER", "AINAKAWARI_TEXT_GGUF") if not os.environ.get(k)]
+    if missing:
+        raise RuntimeError(f"文の読み取りの場所が渡されていません（{', '.join(missing)}）")
+    log = os.path.join(os.environ.get("AINAKAWARI_LOG_DIR") or WORK, "llama_server.log")
+    enc = LlamaServerEncoder(os.environ["AINAKAWARI_LLAMA_SERVER"], os.environ["AINAKAWARI_TEXT_GGUF"], log)
+    print(f"text encoder ready (llama-server port={enc.port} load={enc.seconds_load:.1f}s)", flush=True)
+    return enc
 
 
 def load(name=MODEL):
     from kimodo import load_model
 
-    model = load_model(name, device="cuda")
+    model = load_model(name, device="cuda", text_encoder=text_encoder())
     if model.skeleton.nbjoints != J:
         raise RuntimeError(f"skeleton has {model.skeleton.nbjoints} joints, expected {J}")
     return model
 
 
-def cache_text(model, text):
-    """読み取り結果を TEXT_CACHE/<text> にためて使い回す（公式デモの CachedTextEncoder）。
+def cache_text(model):
+    """読み取り結果を TEXT_CACHE にためて使い回す（公式デモの CachedTextEncoder）。
 
     kimodo.demo から読み込むとデモの画面一式まで読み込むので、embedding_cache.py だけを直接読む。
-    置き場所はモードごとに分ける。中身の鍵は読み取りの部品ごとに分かれるが、目次（index.json）は 1 つのフォルダに 1 つで、
-    プロセスをまたぐ守りが無いので、低負荷と高速の常駐が同時に書くと壊れうる（11-04 Codex のレビュー）。
+    前の bf16 の読み取り結果（work/text_cache/cpu・api）とは 1.7% ほど違うので、混ぜないようにフォルダを分けた。
     """
     import importlib.util
 
@@ -114,7 +126,7 @@ def cache_text(model, text):
     spec = importlib.util.spec_from_file_location("kimodo_embedding_cache", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    model.text_encoder = module.CachedTextEncoder(model.text_encoder, model_name=MODEL, base_dir=os.path.join(TEXT_CACHE, text))
+    model.text_encoder = module.CachedTextEncoder(model.text_encoder, model_name=MODEL, base_dir=TEXT_CACHE)
 
 
 def generate(model, req, t_load=0.0):
@@ -258,28 +270,28 @@ def generate(model, req, t_load=0.0):
     return result, line
 
 
-def serve(port, text):
+def _code_mtime():
+    """このファイルと文の読み取りの部品の、新しい方の更新時刻。"""
+    here = os.path.dirname(os.path.abspath(__file__))
+    return max(os.path.getmtime(os.path.join(here, f)) for f in ("kimodo_gen.py", "gguf_text.py"))
+
+
+def serve(port):
     """モデルを読み込んだまま、127.0.0.1:port で依頼を待つ。1 つずつ順に作る。IDLE_SECONDS 頼まれなければ終わる。
 
-    text: テキストの読み取りの置き場所（"cpu" か "api"。上の説明）。{"shutdown": True} を頼まれたら終わる（モードの切り替えで片付ける）。
+    {"shutdown": True} を頼まれたら終わる。文の読み取りの llama-server は子なので、一緒に終わる（tools/gguf_text.py のジョブ）。
     """
     from multiprocessing import AuthenticationError
     from multiprocessing.connection import Listener
 
     # このファイルが書き換わったら、古いコードのまま作らずに終わる（resident.py が立ち上げ直す）。読み込む前に取る
     # （読み込みの途中で書き換わった時も気づけるように。11-04 Codex のレビュー）
-    born = os.path.getmtime(__file__)
-    if text == "cpu":
-        os.environ.update(TEXT_ENCODER_MODE="local", TEXT_ENCODER_DEVICE="cpu")
-    elif text == "api":
-        os.environ["TEXT_ENCODER_MODE"] = "api"
-    else:
-        raise ValueError(f"テキストの読み取りの置き場所は cpu か api です（{text}）")
+    born = _code_mtime()
     os.environ["LOCAL_CACHE"] = "true"   # 読み込みのたびに Hugging Face へ問い合わせない（モデルは入れてある）
     listener = Listener(("127.0.0.1", port), authkey=AUTHKEY)   # 口がふさがっていれば（もう常駐がいれば）ここで落ちる
     t0 = time.time()
     model = load()
-    cache_text(model, text)
+    cache_text(model)
     print(f"ready port={port} load={time.time() - t0:.1f}s", flush=True)
     last = [time.time()]
 
@@ -303,7 +315,7 @@ def serve(port, text):
                 conn.close()
                 print("shutdown", flush=True)
                 os._exit(0)
-            if os.path.getmtime(__file__) != born:
+            if _code_mtime() != born:
                 conn.send({"ok": False, "stale": True})
                 conn.close()
                 print("stale exit", flush=True)
@@ -325,7 +337,7 @@ def serve(port, text):
 
 def main():
     if sys.argv[1] == "--serve":
-        serve(int(sys.argv[2]), sys.argv[3])
+        serve(int(sys.argv[2]))
         return
     req = json.load(open(sys.argv[1], encoding="utf-8"))
     t0 = time.time()

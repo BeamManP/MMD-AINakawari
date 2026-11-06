@@ -64,10 +64,9 @@ APP_FILES = (
     "mmd_ainakawari/",
     "tools/export_skeleton.py",
     "tools/install_plugin.py",
+    "tools/gguf_text.py",
     "tools/kimodo_gen.py",
     "tools/mb_gen.py",
-    "tools/prepare_text_encoder.py",
-    "tools/start_textencoder.cmd",
 )
 # 窓で読み込んで確かめる物（mmd_ainakawari の部品と、それが使う mmd-mcp の部品）
 SMOKE = (

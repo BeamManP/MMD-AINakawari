@@ -28,7 +28,7 @@ MMD（MikuMikuDance）で打ったキーとキーの間を、AI が中割りし�
 | **なめらかに止まる** | 最後のキーでぴたっと止まらず、MotionBricks で自然に減速して止まる |
 | **元に戻す** | 生成の前のモーションに 1 回で戻す |
 | **サンプルのプロンプト** | 英語が苦手でも、「前へ歩く：A person walks forward.」のような一覧から選べる（6 種類・43 個） |
-| **低負荷モード** | VRAM 8GB の GPU でも動く（文の読み取りを CPU で行う）。VRAM 20GB 以上なら高速モードも選べる |
+| **軽い** | VRAM 8GB の GPU・メインメモリ 16GB の PC を目安にしています（文の読み取りは CPU。1 文 0.5 秒ほど） |
 
 ## 動く環境
 
@@ -36,11 +36,11 @@ MMD（MikuMikuDance）で打ったキーとキーの間を、AI が中割りし�
 |---|---|---|
 | OS | Windows 10／11（64bit） | Windows 11 |
 | MMD | MikuMikuDance 9.32 x64（日本語版） | 9.32 x64 |
-| GPU | NVIDIA の GPU。GTX 16 シリーズ／RTX 20 シリーズ以降、VRAM 6GB 以上（高速モードは 20GB 以上）。ドライバは新しい物に | RTX 3090（24GB） |
-| メモリ | 32GB 推奨（低負荷モードは文の読み取りに約 15GB 使う） | 64GB |
+| GPU | NVIDIA の GPU。GTX 16 シリーズ／RTX 20 シリーズ以降、VRAM 6GB 以上。ドライバは新しい物に | RTX 3090（24GB） |
+| メモリ | 16GB 以上（文の読み取りに約 8GB 使う） | 64GB |
 | ランタイム | [Microsoft Visual C++ 再頒布可能パッケージ（x64）](https://aka.ms/vs/17/release/vc_redist.x64.exe)。入っていなければ、セットアップがここへ案内します | |
-| ディスク | 約 29GB（Kimodo 約 23GB・MotionBricks 約 6GB） | |
-| ネット | セットアップの時だけ（約 20GB を落とします） | |
+| ディスク | 約 21GB（Kimodo 約 15GB・MotionBricks 約 6GB） | |
+| ネット | セットアップの時だけ（約 12GB を落とします） | |
 
 プラグインの土台の [MMDPlugin](https://bowlroll.net/file/121761)（ver0.41 64bit・おいがみ さん）は zip に入っています。MME もそのまま使えます。
 詳細の窓の「Kimodo」タブの下に、この PC の GPU とメモリで動くかの判定が出ます。
@@ -72,7 +72,7 @@ plugin\MMD-AINakawari\   MMD に読み込ませる DLL
 3. 入れる場所を決めます（最初は、空きのいちばん多いドライブの `\AINakawari`）。半角の英数字だけのフォルダにしてください
 4. ライセンスを読んで「同意して入れます」に印を付け、「**セットアップを始める**」を押します
 
-Kimodo・MotionBricks・それを動かす Python を落として入れ、最後に試しに 1 回ずつ作って確かめます。落とす量は約 20GB です。
+Kimodo・MotionBricks・それを動かす Python を落として入れ、最後に試しに 1 回ずつ作って確かめます。落とす量は約 12GB です。
 
 - 途中で止まっても（失敗・中止・PC の再起動）、もう一度「セットアップ」を押せば、止まった段から続きます
 - セットアップの窓は、閉じても裏で進みます。もう一度「セットアップ」を押すと出てきます
@@ -108,7 +108,6 @@ MMD の下の段の右に「AIナカワリ簡易操作」が出ていれば、�
 
 | 欄 | 中身 |
 |---|---|
-| 右上の動作モード | **低負荷モード**（既定・VRAM 8GB の GPU でも動く）／**高速モード**（VRAM 20GB 以上。テキスト読み取りサーバーを先に起動） |
 | タブ | **Kimodo**（プロンプトで作る）／**MotionBricks**（プロンプト無しの中割り）。右下のパネルの選び方と同じ |
 | やりたいこと | **キーの間を埋める**／**続きを足す**（最後のキーの後ろへ）／**プロンプトだけで作る**（キーのポーズを使わない） |
 | プロンプト | 行ごとに「そのフレームから次の行まで」の動き。「＋ 今のフレームで区切る」で行が増える。「サンプルから選ぶ ▼」もある |
@@ -121,7 +120,7 @@ MMD の下の段の右に「AIナカワリ簡易操作」が出ていれば、�
 - プロンプトは英語で、「A person ＋ 動詞」の形が効きます（例: `A person waves with their right hand.`）。日本語はほとんど効きません
 - キーは 20 個くらいまでが目安です。多いとキーに縛られて動きが硬くなります
 - Kimodo は 1 区間 300 フレーム（10 秒）まで（範囲の外の勢いをつなぐ数フレームも数えるので、選ぶ範囲はそれより少し短めに）。長い時は範囲を分けて作ります
-- 最初の 1 回は、モデルの読み込みで 40〜60 秒ほど余分にかかります（低負荷モード）。2 回目からは 10〜15 秒前後です
+- 最初の 1 回は、モデルの読み込みで 10〜20 秒ほど余分にかかります。2 回目からは 10〜15 秒前後です
 
 ## 更新・アンインストール
 
@@ -140,7 +139,7 @@ MMDPlugin（`MMDPlugin.dll`・`d3d9.dll`・`d3dx9_43.dll`・`plugin\MMDPlugin\`�
 | ファイル | 中身 |
 |---|---|
 | `app.log`（と `app.log.1`） | 窓のログ・セットアップのログ・失敗した時のエラーの詳しい場所 |
-| `Kimodo（低負荷）_server.log` など `～_server.log` | 裏で動く Kimodo・MotionBricks の記録（最後に起動した時の分） |
+| `Kimodo_server.log`・`llama_server.log` など `～_server.log` | 裏で動く Kimodo・文の読み取り（llama.cpp）・MotionBricks の記録（最後に起動した時の分） |
 
 よくあること:
 - **セットアップの「試しに作る」で止まる**: NVIDIA のドライバを新しくしてから、もう一度「セットアップ」を押してください
@@ -159,13 +158,15 @@ MMDPlugin（`MMDPlugin.dll`・`d3d9.dll`・`d3dx9_43.dll`・`plugin\MMDPlugin\`�
 - スクリーンショットのモデル: Tda式初音ミクV4X（Tda さん）。モデルは同梱していません。初音ミクは クリプトン・フューチャー・メディア株式会社 のキャラクターです
 - [Kimodo](https://github.com/nv-tlabs/kimodo)（NVIDIA）: コードは Apache-2.0、モデルは [NVIDIA Open Model License](https://huggingface.co/nvidia/Kimodo-SOMA-RP-v1.2)
 - [MotionBricks](https://github.com/NVlabs/motionbricks)（NVIDIA）: コードは Apache-2.0、モデルは NVIDIA Open Model Agreement
-- [Meta-Llama-3-8B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct)（Meta）: [Meta Llama 3 Community License](https://huggingface.co/NousResearch/Meta-Llama-3-8B-Instruct/blob/main/LICENSE)・[使い方の決まり](https://huggingface.co/NousResearch/Meta-Llama-3-8B-Instruct/blob/main/USE_POLICY.md)（Kimodo が文の読み取りに使う）。**Built with Meta Llama 3**
+- [Meta-Llama-3-8B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct)（Meta）: [Meta Llama 3 Community License](https://huggingface.co/fernandotonon/Llama-3-LLM2Vec-8B-Kimodo-TextEncoder-GGUF/blob/main/LICENSE-Llama-3.txt)・[使い方の決まり](https://huggingface.co/fernandotonon/Llama-3-LLM2Vec-8B-Kimodo-TextEncoder-GGUF/blob/main/USE_POLICY-Llama-3.md)（Kimodo が文の読み取りに使う）。**Built with Meta Llama 3**
 - [LLM2Vec](https://huggingface.co/McGill-NLP/LLM2Vec-Meta-Llama-3-8B-Instruct-mntp)（McGill-NLP）: MIT
+- [Llama-3-LLM2Vec-8B-Kimodo-TextEncoder-GGUF](https://huggingface.co/fernandotonon/Llama-3-LLM2Vec-8B-Kimodo-TextEncoder-GGUF)（fernandotonon さん）: Llama 3 と LLM2Vec を 8bit（GGUF Q8_0）にした物。文の読み取りはこれを使う（Meta Llama 3 Community License）
+- [llama.cpp](https://github.com/ggml-org/llama.cpp)（ggml-org）: MIT。文の読み取りを CPU で動かす（セットアップが公式の CPU 版を落とす）
 - [MMDPlugin](https://bowlroll.net/file/121761)（おいがみ さん）: zip に同梱（説明書の「本体の転載は、非商用に限り連絡不要」による）。`d3dx9_43.dll` も MMDPlugin の物です（Microsoft の DirectX の物ではありません）
 - [mmd-mcp](https://github.com/BeamManP/mmd-mcp)（MIT-0 ほか）
 - zip に同梱の Python（python-build-standalone）と uv などのライセンスは、zip の `MMD-AINakawari\THIRD_PARTY.txt` に書いています
 
-AI のモデル（Kimodo・MotionBricks・Llama 3・LLM2Vec）は zip にもこのリポジトリにも入っていません。セットアップが、それぞれの配布元から落とします（セットアップの画面でライセンスに同意してから）。
+AI のモデル（Kimodo・MotionBricks・Llama 3・LLM2Vec）と llama.cpp は、zip にもこのリポジトリにも入っていません。セットアップが、それぞれの配布元から落とします（セットアップの画面でライセンスに同意してから）。
 
 ## 開発者向け
 リポジトリから動かす時は、[mmd-mcp](https://github.com/BeamManP/mmd-mcp) の Python 環境（`pip install -e . numpy` と `scripts\build_native.cmd`。Visual Studio 2022 の C++ が要ります）で窓を動かします。

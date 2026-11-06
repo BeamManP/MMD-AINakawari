@@ -25,7 +25,7 @@ scenepic>=1.1.0
 pillow>=9.0
 av>=16.1.0
 bvhio
-# 文の読み取りを落とす（tools/prepare_text_encoder.py）・Kimodo のモデルを落とす（セットアップ）
+# Kimodo のモデルを落とす（セットアップの fetch_kimodo_model.py）
 huggingface_hub
 # kimodo を zip から入れる時の組み立て（--no-build-isolation で使う。uv がネットから別に取りに行かないように）
 setuptools

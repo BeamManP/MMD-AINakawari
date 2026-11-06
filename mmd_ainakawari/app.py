@@ -11,8 +11,6 @@ import ctypes
 import json
 import os
 import queue
-import socket
-import subprocess
 import threading
 import time
 import tkinter as tk
@@ -47,12 +45,9 @@ DEFAULTS = {
     "prompt": "A person moves naturally between poses.",
     "steps": 100, "seed": -1, "post_processing": True, "cfg_text": 2.0, "cfg_key": 2.0, "use_center": False,
     "stop_at_last_key": True, "smooth_stop": True, "key_stop": False, "wrist_lerp": False,
-    "perf_mode": "low",
 }
-OLD_KEYS = ("use_keys", "range_start", "range_end", "pmx")   # 前の窓の保存にあった項目（読む時に変換して捨てる）
+OLD_KEYS = ("use_keys", "range_start", "range_end", "pmx", "perf_mode")   # 前の窓の保存にあった項目（読む時に変換して捨てる。perf_mode は 11-07 まであった動作モード）
 TABS = [("kimodo", "Kimodo"), ("nakawari", "MotionBricks")]   # 右下のパネルの選び方と同じ名前（11-06 マスター。前は「プロンプトで作る／中割り」）
-# 動作モード（pipeline.PERF_MODES）。既定は低負荷（VRAM 8GB の GPU でも動く）。高速は GPU 診断で使える時だけ
-PERF_MODES = [("low", "低負荷モード"), ("fast", "高速モード")]
 MODES = [("fill", "キーの間を埋める"), ("extend", "続きを足す"), ("fresh", "プロンプトだけで作る")]
 MODE_NOTES = {
     "fill": "打ったキーのポーズを守って、キーとキーの間を作ります（長さは最後のキーまで）",
@@ -61,14 +56,6 @@ MODE_NOTES = {
 }
 NAKAWARI_NOTE = ("打ったキーとキーの間を、MotionBricks でつなぎます。プロンプトは使いません。\n"
                  "キーの間が 17〜57 フレームの所だけ作り、それより短い・長い所は MMD の補間のまま残します。")
-
-def server_up(port=9550):
-    try:
-        with socket.create_connection(("127.0.0.1", port), timeout=0.05):
-            return True
-    except OSError:
-        return False
-
 
 def front_mmd():
     """一番手前の MMD の窓。無ければ None。"""
@@ -178,7 +165,7 @@ class App:
         self.q = queue.Queue()
         self.busy = False
         self.selected_keys = None    # MMD のタイムラインで選んでいるキーのフレーム（_read_mmd が 1 秒ごとに読む。読めなければ None）
-        self._status_before = None   # 生成できない知らせ（GPU が無い・サーバー待ち）を出す前の 1 行（出していない時は None）
+        self._status_before = None   # 生成できない知らせ（GPU が無い・キーを選んでいない）を出す前の 1 行（出していない時は None）
         self._model_ticks = 1   # MMD の読み取り（モデル・今のフレーム・範囲選択）は 2 回に 1 回（1 秒ごと）。最初はすぐ読む
         self.last_run = runner.load_last_run(self.link)   # この MMD での前回の生成（作り直しと「元に戻す」に使う）。窓を開き直しても残る
         self.last_backup = self.last_run["backup"] if self.last_run else None
@@ -206,7 +193,7 @@ class App:
     # ---------------- 画面 ----------------
 
     def _build(self):
-        """上（モデル・サーバー）と下（範囲・生成・状態）は固定し、真ん中のタブだけを伸び縮みさせる。
+        """上（モデル）と下（範囲・生成・状態）は固定し、真ん中のタブだけを伸び縮みさせる。
 
         tkinter は入りきらない分を下から黙って切るので、生成を一番下寄りに積んでいた前の並びでは、窓を低くすると生成が消えていた。
         タブの中身は ScrollFrame に入れ、入りきらなければスクロールする。タブを切り替えても窓の大きさは変えない。
@@ -217,23 +204,12 @@ class App:
         f.columnconfigure(0, weight=1)
         f.rowconfigure(1, weight=1)
 
-        # 上: MMD のモデル欄で選んだモデルに効く。テキスト読み取りサーバーの印（Kimodo だけが使う）
+        # 上: MMD のモデル欄で選んだモデルに効く
         head = ttk.Frame(f)
         head.grid(row=0, column=0, sticky="we", **pad)
         self.model_text = tk.StringVar(value="選択中のモデル：（読み取り中）")
         ttk.Label(head, textvariable=self.model_text).pack(side="left")
-        # 動作モード。高速モードの時だけ、テキスト読み取りサーバーの印を横に出す
-        self.head_server = ttk.Label(head, text="")
-        self.head_server.pack(side="right", padx=(6, 0))
         self.diagnosis = gpu.diagnose()
-        names = dict(PERF_MODES)
-        mode = self.cfg["perf_mode"] if self.cfg["perf_mode"] in names else "low"
-        if mode == "fast" and not self.diagnosis.fast_ok:   # 保存は高速でも、この PC では使えない
-            mode = "low"
-        self.perf = tk.StringVar(value=names[mode])
-        box = ttk.Combobox(head, textvariable=self.perf, values=[n for _, n in PERF_MODES], state="readonly", width=12)
-        box.pack(side="right")
-        box.bind("<<ComboboxSelected>>", lambda _e: self._perf_changed())
 
         # 真ん中: やり方ごとのタブ
         self.tabs = ttk.Notebook(f)
@@ -291,7 +267,6 @@ class App:
         self.log.pack(fill="both", expand=True)
         bar.configure(command=self.log.yview)
         self._mode_changed()
-        self._perf_changed()
         self.refresh_setup()
 
         # 窓の高さの下限: 上と下の段と、タブの見出し＋中身 3 行ほど。これより低くできないので、生成と状態は必ず見える
@@ -378,27 +353,14 @@ class App:
         # センターの上下などを毎フレームの腰の目印にする（リズムを残して動きを作る。プロンプトだけで作る時と組み合わせる想定）
         self.use_center = tk.BooleanVar(value=self.cfg["use_center"])
         ttk.Checkbutton(d, text="センターの動きを使う", variable=self.use_center).grid(row=2, column=2, columnspan=2, sticky="w", **g)
-        # GPU 診断と動作モードの説明。テキスト読み取りサーバーは高速モードの Kimodo だけが使うので、このタブの中に置く
+        # GPU 診断（この PC で足りるか）
         d = self.diagnosis
         bg = ttk.Style().lookup("TFrame", "background")
         if d.gpu:   # GPU の情報と判定は行を分ける（1 行にすると判定の途中で折り返していた）
             tk.Label(t, text=d.summary(), foreground="#556", background=bg, anchor="w").pack(fill="x", pady=(8, 0))
-        # 低負荷モードでも足りない・GPU が無い時は赤で目立たせる（普段の説明と同じ灰色だと読み飛ばす）
-        tk.Label(t, text=("→ " if d.gpu else "") + d.note, foreground="#556" if d.low_ok else "#c22", background=bg,
+        # 足りない・GPU が無い時は赤で目立たせる（普段の説明と同じ灰色だと読み飛ばす）
+        tk.Label(t, text=("→ " if d.gpu else "") + d.note, foreground="#556" if d.ok else "#c22", background=bg,
                  wraplength=500, anchor="w", justify="left").pack(fill="x", pady=(0 if d.gpu else 8, 0))
-        self.perf_note = tk.StringVar()
-        tk.Label(t, textvariable=self.perf_note, foreground="#556", background=ttk.Style().lookup("TFrame", "background"),
-                 wraplength=500, anchor="w", justify="left").pack(fill="x")
-        sf = ttk.Frame(t)
-        sf.pack(fill="x", pady=(4, 0))
-        self.server_dot = ttk.Label(sf, text="")
-        self.server_dot.pack(side="left")
-        self.server_label = ttk.Label(sf, text="", foreground="#556")
-        self.server_label.pack(side="left", padx=(6, 0))
-        self.server_btn = ttk.Button(sf, text="サーバーを起動", command=self._start_server)
-        self.server_btn.pack(side="right")
-        sf.configure(height=self.server_btn.winfo_reqheight())   # 低負荷でボタンを隠しても、行の高さ（窓の高さ）を変えない
-        sf.pack_propagate(False)
 
     def _build_nakawari(self, t):
         """「MotionBricks」タブ（プロンプト無しの中割り）。"""
@@ -440,18 +402,6 @@ class App:
         self.kimodo_missing.pack_forget()
         if self.status.get().startswith("まだ AI のモデルが入っていません"):
             self.status.set("MMD でキーを打ってから「生成」を押してください")
-
-    def _perf_mode(self):
-        return next(k for k, n in PERF_MODES if n == self.perf.get())
-
-    def _perf_changed(self):
-        if self._perf_mode() == "fast" and not self.diagnosis.fast_ok:
-            messagebox.showinfo("AIナカワリ", f"この PC では高速モードは使えません（{self.diagnosis.note}）。低負荷モードで作ります",
-                                parent=self.root)
-            self.perf.set(dict(PERF_MODES)["low"])
-        self.perf_note.set("低負荷モード: 文の読み取りを CPU で行います（VRAM 約 2.5GB・メインメモリ約 15GB。1 文 3 秒ほど。同じ文は 2 回目から速い）"
-                           if self._perf_mode() == "low" else
-                           "高速モード: 文の読み取りを GPU のサーバーで行います（VRAM 約 18GB。下の「サーバーを起動」が必要）")
 
     def _mode_changed(self):
         mode = self.mode.get()
@@ -560,19 +510,8 @@ class App:
                 self.status.set(msg)
                 if not ok:
                     messagebox.showerror("AIナカワリ", msg, parent=self.root)
-        up = server_up()
-        self.server_dot.configure(text="●" if up else "○", foreground="#2a7" if up else "#a33")
-        fast = self._perf_mode() == "fast"
-        self.head_server.configure(text=("● サーバー" if up else "○ サーバー停止中") if fast else "",
-                                   foreground="#2a7" if up else "#a33")
-        self.server_label.configure(text="テキスト読み取りサーバー起動中" if up else "テキスト読み取りサーバー停止中（高速モードで要ります）")
-        self.server_btn.configure(state="disabled" if up else "normal")
-        if fast and not self.server_btn.winfo_manager():   # 低負荷モードはサーバーを使わないので、起動ボタンを隠す
-            self.server_btn.pack(side="right")
-        elif not fast and self.server_btn.winfo_manager():
-            self.server_btn.pack_forget()
         # 生成できない時は、押してからエラーにせず、押せなくして下の 1 行で知らせる。
-        # GPU が無い時はどちらのタブも（MotionBricks も GPU が要る）。高速モードのプロンプトで作るは 9550 も要る（中割りは使わない）
+        # GPU が無い時はどちらのタブも（MotionBricks も GPU が要る）
         # 「選んだキーの間」でキーを 2 つ以上選んでいない時も（11-05 マスター。選んでいない時に全部を作り直さないように）
         block = None
         keys = self.selected_keys
@@ -582,8 +521,6 @@ class App:
             block = "選んだキーを読めません（MMD の操作の途中？）"
         elif self.range_mode.get() == "keys" and keys is not None and len(keys) < 2 and not self.busy:
             block = "範囲の最初と最後のキーを選んでください"   # パネルの 1 行に収まる長さ
-        elif fast and not up and not self.busy and TABS[self.tabs.index("current")][0] == "kimodo":
-            block = "テキスト読み取りサーバーを起動してください（「サーバーを起動」か、右上で低負荷モードに）"
         if block and self._status_before is not None and self.status.get() != block:   # 止める理由が変わった
             self.status.set(block)
         if block and self._status_before is None:
@@ -718,9 +655,8 @@ class App:
                 raise ValueError("MMD のタイムラインで、作り直す範囲の最初と最後のキーを選んでください（2 つ以上のフレーム）")
             selection = (keys[0], keys[-1])
         common = dict(range_start=selection[0] if selection else None, range_end=selection[1] if selection else None,
-                      key_stop=bool(self.key_stop.get()), wrist_lerp=bool(self.wrist_lerp.get()), perf_mode=self._perf_mode())
-        self.cfg.update(tab=tab, range_mode=self.range_mode.get(), key_stop=common["key_stop"], wrist_lerp=common["wrist_lerp"],
-                        perf_mode=common["perf_mode"])
+                      key_stop=bool(self.key_stop.get()), wrist_lerp=bool(self.wrist_lerp.get()))
+        self.cfg.update(tab=tab, range_mode=self.range_mode.get(), key_stop=common["key_stop"], wrist_lerp=common["wrist_lerp"])
         if nakawari:
             # 中割りは、隠れている「Kimodo」タブの欄を読まない（入力の途中や誤りで中割りが止まっていた。11-04 Codex のレビュー）
             s = runner.Settings(prompt="", engine="motionbricks", **common)
@@ -776,19 +712,6 @@ class App:
         backup = self.last_backup
         self.status.set("元に戻し中…")
         self._run(lambda log: runner.undo(backup, log, link=self.link), "生成前のモーションに戻しました")
-
-    def _start_server(self):
-        try:
-            cmd = paths.server_cmd()
-            paths.check_text_encoders()
-        except paths.NotSetUp as e:
-            messagebox.showerror("AIナカワリ", str(e), parent=self.root)
-            return
-        if not os.path.exists(cmd):
-            messagebox.showerror("AIナカワリ", f"サーバーの起動バッチがありません: {cmd}", parent=self.root)
-            return
-        subprocess.Popen(["cmd.exe", "/c", cmd], creationflags=subprocess.CREATE_NEW_CONSOLE)
-        self.status.set("サーバーを起動しました（黒い窓）。10〜20 秒で ● になります")
 
 
 def _notify_running(hwnd, message=OPEN_MESSAGE):

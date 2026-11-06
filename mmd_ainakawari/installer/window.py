@@ -12,15 +12,15 @@ import webbrowser
 from tkinter import filedialog, messagebox, ttk
 
 from .. import applog, paths
-from . import steps
+from . import pins, steps
 
-LICENSES = [
-    ("Meta Llama 3 Community License（文の読み取りに使う Llama 3）",
-     "https://huggingface.co/NousResearch/Meta-Llama-3-8B-Instruct/blob/main/LICENSE"),
-    ("Llama 3 の使い方の決まり（Acceptable Use Policy）",
-     "https://huggingface.co/NousResearch/Meta-Llama-3-8B-Instruct/blob/main/USE_POLICY.md"),
+_GGUF = f"https://huggingface.co/{pins.TEXT_GGUF_REPO}/blob/{pins.TEXT_GGUF_REVISION}"
+LICENSES = [   # 文の読み取りは、落とす GGUF のリポジトリに付いている文（版で固定）を見せる
+    ("Meta Llama 3 Community License（文の読み取りに使う Llama 3）", f"{_GGUF}/LICENSE-Llama-3.txt"),
+    ("Llama 3 の使い方の決まり（Acceptable Use Policy）", f"{_GGUF}/USE_POLICY-Llama-3.md"),
     ("NVIDIA Open Model License（Kimodo のモデル）", "https://huggingface.co/nvidia/Kimodo-SOMA-RP-v1.2"),
     ("NVIDIA Open Model Agreement（MotionBricks のモデル）", "https://github.com/NVlabs/motionbricks"),
+    ("MIT（文の読み取りを動かす llama.cpp）", "https://github.com/ggml-org/llama.cpp/blob/master/LICENSE"),
 ]
 MARKS = {"todo": "・", "skip": "✓", "done": "✓", "run": "▶", "fail": "✗"}
 COLORS = {"todo": "#888", "skip": "#2a7", "done": "#2a7", "run": "#15c", "fail": "#c33"}
@@ -118,15 +118,15 @@ class SetupWindow:
     # ---- 表示 ----
     @staticmethod
     def _show_environment(f, d):
-        """一番上の「現在の環境: GPU・メインメモリ → MotionBricks ○ Kimodo 低負荷モード ○ Kimodo 高速モード ○」（11-06 マスター）。
-        使える物は緑の ○、使えない物は赤の ×。GPU を調べられなかった時は、どれも橙の ？（低負荷モードで試せる。gpu.diagnose）。
+        """一番上の「現在の環境: GPU・メインメモリ → MotionBricks ○ Kimodo ○」（11-06 マスター。11-07 に動作モードの 2 つを 1 つに）。
+        使える物は緑の ○、使えない物は赤の ×。GPU を調べられなかった時は、どれも橙の ？（試せる。gpu.diagnose）。
         赤がある時は、理由（gpu.diagnose の一言）を下に小さく出す。"""
-        unknown = not d.gpu and d.low_ok
+        unknown = not d.gpu and d.ok
         row = ttk.Frame(f)
         row.pack(anchor="w", fill="x")
         hardware = d.summary() if d.gpu else f"{'GPU を調べられませんでした' if unknown else 'NVIDIA の GPU が見つかりません'}・メインメモリ {d.ram_gb:.0f}GB"
         ttk.Label(row, text=f"現在の環境：{hardware}　→").pack(side="left")
-        marks = [("MotionBricks", bool(d.gpu)), ("Kimodo 低負荷モード", d.low_ok and bool(d.gpu)), ("Kimodo 高速モード", d.fast_ok)]
+        marks = [("MotionBricks", bool(d.gpu)), ("Kimodo", d.ok and bool(d.gpu))]
         for name, ok in marks:
             mark, color = ("？", "#c70") if unknown else ("○", "#2a7") if ok else ("×", "#c33")
             tk.Label(row, text=f"{name} {mark}", foreground=color, font=("", 9, "bold"),
@@ -207,7 +207,7 @@ class SetupWindow:
         self.setup = setup
         self.start_btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
-        self.status.set("入れています（落とす量は約 20GB）。この窓は閉じても裏で進みます")
+        self.status.set("入れています（落とす量は約 12GB）。この窓は閉じても裏で進みます")
 
         def work():
             try:

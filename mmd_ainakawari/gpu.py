@@ -1,7 +1,8 @@
-"""GPU とメインメモリの診断。高速モード（テキストの読み取りも GPU）が使えるか、低負荷モード（テキストの読み取りは CPU）で足りるかを決める。
+"""GPU とメインメモリの診断。Kimodo・MotionBricks で足りるかを決める。
 
 窓（app.py）の Python には torch が無いので、nvidia-smi とWindows の関数で読む。
-目安の数字は 11-04 に RTX 3090・メインメモリ 64GB で測った値から（README の「動作モード」）。
+目安の数字は 11-04・11-07 に RTX 3090・メインメモリ 64GB で測った値から（docs/DEVELOPMENT.md の「文の読み取り」）。
+11-07 まで高速モード（VRAM 20GB 以上）と低負荷モード（メインメモリ 24GB 以上）の 2 段だったが、文の読み取りを GGUF にして 1 段にした。
 """
 import ctypes
 import os
@@ -9,12 +10,12 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 
-# 高速モード: テキストの読み取り（Llama-3-8B・bfloat16）約 16.8GB ＋ Kimodo ＋ MotionBricks
-FAST_VRAM_GB = 20.0
-# 低負荷モード: Kimodo 1.5GB ＋ MotionBricks 1.0GB（常駐を片付けた時の差。11-04）。MMD の描画と Windows の分を見て 6GB
-LOW_VRAM_GB = 6.0
-# 低負荷モードのメインメモリ: テキストの読み取りと Kimodo の常駐で約 15.3GB（11-04）＋ MMD・Windows の分
-LOW_RAM_GB = 24.0
+# VRAM: Kimodo 1.5GB ＋ MotionBricks 1.0GB（常駐を片付けた時の差。11-04）。MMD の描画と Windows の分を見て 6GB
+VRAM_GB = 6.0
+# メインメモリ: 文の読み取り（llama-server・GGUF Q8_0）約 7.6GB（11-07）＋ Kimodo の常駐 ＋ MMD・Windows の分で 16GB。
+# 16GB の PC は Windows が 15.8GB ほどと数えるので、判定は 15GB 以上にする。16GB の PC での実地は未確認
+RAM_GB = 16.0
+RAM_CHECK_GB = 15.0
 
 
 @dataclass
@@ -24,14 +25,13 @@ class Diagnosis:
     vram_free_gb: float # 今空いている VRAM
     ram_gb: float       # メインメモリの合計
     ram_free_gb: float  # 今空いているメインメモリ
-    fast_ok: bool       # 高速モードが使える
-    low_ok: bool        # 低負荷モードが使える
+    ok: bool            # 目安を満たす（GPU を調べられない時も、試せるので True）
     note: str           # 窓に出す一言
 
     @property
     def usable(self):
         """生成できる見込みがある。GPU が無い・無効にされている時だけ False（調べられない時は試せる。足りないかもしれない時も試せる）。"""
-        return bool(self.gpu) or self.low_ok
+        return bool(self.gpu) or self.ok
 
     def summary(self):
         if not self.gpu:
@@ -97,27 +97,24 @@ def diagnose():
     ram, ram_free = _ram()
     visible = os.environ.get("CUDA_VISIBLE_DEVICES")
     if visible is not None and visible.split(",")[0].strip() in ("", "-1"):   # GPU を見せない設定。どちらのモードも動かない
-        return Diagnosis("", 0.0, 0.0, ram, ram_free, False, False,
+        return Diagnosis("", 0.0, 0.0, ram, ram_free, False,
                          f"CUDA_VISIBLE_DEVICES={visible!r} で GPU が無効になっています（この設定を外してください）")
     try:
         g = _gpu()
-    except _Unknown as e:   # 調べられない時も窓は開く。高速は選べず、低負荷で試せる
-        return Diagnosis("", 0.0, 0.0, ram, ram_free, False, True, f"GPU を調べられませんでした（{e}）。低負荷モードで試せます")
+    except _Unknown as e:   # 調べられない時も窓は開き、試せる
+        return Diagnosis("", 0.0, 0.0, ram, ram_free, True, f"GPU を調べられませんでした（{e}）。試しに作ってみてください")
     if g is None:
-        return Diagnosis("", 0.0, 0.0, ram, ram_free, False, False,
+        return Diagnosis("", 0.0, 0.0, ram, ram_free, False,
                          "NVIDIA の GPU が見つかりません（Kimodo・MotionBricks は NVIDIA の GPU が要ります）")
     name, vram, vram_free = g
-    fast_ok = vram >= FAST_VRAM_GB
-    low_ok = vram >= LOW_VRAM_GB and ram >= LOW_RAM_GB
-    if fast_ok:
-        note = "高速モードも使えます"
-    elif low_ok:
-        note = f"低負荷モードで動きます（高速モードは VRAM {FAST_VRAM_GB:.0f}GB 以上）"
-    elif vram < LOW_VRAM_GB:
-        note = f"VRAM が足りないかもしれません（低負荷モードの目安 {LOW_VRAM_GB:.0f}GB 以上）"
+    ok = vram >= VRAM_GB and ram >= RAM_CHECK_GB
+    if ok:
+        note = "この PC で動きます"
+    elif vram < VRAM_GB:
+        note = f"VRAM が足りないかもしれません（目安 {VRAM_GB:.0f}GB 以上）"
     else:
-        note = f"メインメモリが足りないかもしれません（低負荷モードの目安 {LOW_RAM_GB:.0f}GB 以上）"
-    return Diagnosis(name, vram, vram_free, ram, ram_free, fast_ok, low_ok, note)
+        note = f"メインメモリが足りないかもしれません（目安 {RAM_GB:.0f}GB 以上）"
+    return Diagnosis(name, vram, vram_free, ram, ram_free, ok, note)
 
 
 if __name__ == "__main__":

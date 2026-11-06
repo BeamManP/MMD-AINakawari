@@ -1,8 +1,8 @@
 """セットアップの本体（画面は window.py）。Kimodo（と MotionBricks）を 1 つのフォルダに入れて、work\\paths.json に書く。
 
 入れる形（<場所> はセットアップで選んだフォルダ。半角の英数字のパスだけ）:
-    <場所>\\kimodo\\         .venv・repo（GitHub の zip）・hf_cache（Kimodo のモデル）・text_encoders（Llama 3 ＋ LLM2Vec）・
-                           tools\\somaskel30.json・start_textencoder.cmd   … paths.py の Kimodo の形
+    <場所>\\kimodo\\         .venv・repo（GitHub の zip）・hf_cache（Kimodo のモデル）・text_encoder（文の読み取りの GGUF）・
+                           llamacpp（llama.cpp の CPU 版）・tools\\somaskel30.json   … paths.py の Kimodo の形
     <場所>\\motionbricks\\   GitHub の zip の中身・LFS の 3 ファイル・.venv（uv sync）・.trt-cache（TensorRT の準備）
     <場所>\\uv\\             uv の控え（cache）と uv が落とした Python（python）
     <場所>\\hf_home\\        セットアップ中の huggingface_hub の置き場所（ユーザーのフォルダに物を作らない）
@@ -12,8 +12,8 @@
 ある段をやり直したら、同じ組（Kimodo・MotionBricks）の後ろの段の印も消す（前の段の作り直しで、後ろの段の物が壊れうるため）。
 git・Python・Hugging Face のアカウントは要らない（uv は zip に同梱。Python は uv が落とす）。
 
-手で回す時（窓と同じ Python で。--reuse-hf-cache は開発用: Llama の重みが入ったキャッシュから写す）:
-    python -m mmd_ainakawari.installer.steps D:\\AINakawari [--reuse-hf-cache F:\\kimodo\\hf_cache]
+手で回す時（窓と同じ Python で。--reuse-text-gguf は開発用: 手元の GGUF を照らしてから写し、8GB を落とし直さない）:
+    python -m mmd_ainakawari.installer.steps D:\\AINakawari [--reuse-text-gguf F:\\kimodo\\text_encoder\\<名前>.gguf]
 """
 import argparse
 import hashlib
@@ -163,13 +163,13 @@ class Setup:
     on_step(段の名前, "skip" | "run" | "done" | "fail"): 段の印を画面に出す。
     """
 
-    def __init__(self, dest, log=print, progress=None, on_step=None, reuse_hf_cache=None):
+    def __init__(self, dest, log=print, progress=None, on_step=None, reuse_text_gguf=None):
         check_folder(dest)
         self.dest = dest
         self.log = log
         self.progress = progress or (lambda _text: None)
         self.on_step = on_step or (lambda _key, _state: None)
-        self.reuse_hf_cache = reuse_hf_cache
+        self.reuse_text_gguf = reuse_text_gguf
         self.kimodo = os.path.join(dest, "kimodo")
         self.mb = os.path.join(dest, "motionbricks")
         self.downloads = os.path.join(dest, "downloads")
@@ -188,11 +188,12 @@ class Setup:
              self.kimodo_env),
             ("skeleton", "kimodo", "骨格を書き出す", file_sha256(os.path.join(TOOLS, "export_skeleton.py")), 0, self.skeleton),
             ("kimodo_model", "kimodo", "Kimodo のモデルを落とす（約 1GB）", pins.KIMODO_MODEL_REVISION, 1.2, self.kimodo_model),
-            ("text_encoder", "kimodo", "文の読み取りのモデルを落とす（約 16GB。いちばん長くかかります）",
-             file_sha256(os.path.join(TOOLS, "prepare_text_encoder.py")), 15.6, self.text_encoder),
-            ("server_cmd", "kimodo", "高速モードの起動バッチを置く", file_sha256(os.path.join(TOOLS, "start_textencoder.cmd")), 0,
-             self.server_cmd),
-            ("kimodo_test", "kimodo", "Kimodo が動くか確かめる（試しに 2 秒の動きを作ります）", pins.KIMODO_COMMIT, 0, self.kimodo_test),
+            # 文の読み取り（11-07 に bf16 の Llama 約 16GB から GGUF Q8_0 約 8GB ＋ llama.cpp に替えた）
+            ("text_gguf", "kimodo", "文の読み取りのモデルを落とす（約 8GB。いちばん長くかかります）",
+             f"{pins.TEXT_GGUF_REVISION}/{pins.TEXT_GGUF_FILE[1]}", 8.0, self.text_gguf),
+            ("llamacpp", "kimodo", "文の読み取りを動かす llama.cpp を落とす", pins.LLAMACPP_ZIP[1], 0.1, self.llamacpp),
+            ("kimodo_test", "kimodo", "Kimodo が動くか確かめる（試しに 2 秒の動きを作ります）",
+             f"{pins.KIMODO_COMMIT}/{file_sha256(os.path.join(TOOLS, 'gguf_text.py'))}", 0, self.kimodo_test),
         ]
         m = [
             ("mb_src", "mb", "MotionBricks の本体を落とす", pins.MOTIONBRICKS_COMMIT, 0.2, self.mb_src),
@@ -523,17 +524,53 @@ class Setup:
         self.call([self.kimodo_python(), FETCH_MODEL, cache, pins.KIMODO_MODEL_REPO, pins.KIMODO_MODEL_REVISION],
                   "Kimodo のモデルを落とす", HF_HUB_CACHE=cache)
 
-    def text_encoder(self):
-        args = [self.kimodo_python(), os.path.join(TOOLS, "prepare_text_encoder.py"), os.path.join(self.kimodo, "text_encoders")]
-        if self.reuse_hf_cache:
-            args += ["--reuse", self.reuse_hf_cache]
-        self.call(args, "文の読み取りのモデルを落とす")
+    def text_gguf(self):
+        """文の読み取りの GGUF（約 8GB）とライセンスの文を <kimodo>\\text_encoder に置く。GGUF は sha256 で照らしてから名前を付ける。"""
+        folder = os.path.join(self.kimodo, "text_encoder")
+        name, digest, size = pins.TEXT_GGUF_FILE
+        target = os.path.join(folder, name)
+        url = lambda n: pins.TEXT_GGUF_URL.format(repo=pins.TEXT_GGUF_REPO, revision=pins.TEXT_GGUF_REVISION, name=n)
+        os.makedirs(folder, exist_ok=True)
+        if os.path.isfile(target) and os.path.getsize(target) == size:
+            self.progress(f"{name}: 中身を確かめています")
+            if sha256(target, self._stop) == digest:
+                self.log(f"  もう置いてありました: {name}")
+                target = None
+        if target and self.reuse_text_gguf:   # 開発用: 手元の物を照らしてから写す（同じドライブならハードリンク）
+            self.progress(f"{self.reuse_text_gguf}: 中身を確かめています")
+            if sha256(self.reuse_text_gguf, self._stop) != digest:
+                raise Failed(f"写す元の GGUF の中身が違います（{self.reuse_text_gguf}）")
+            try:
+                os.link(self.reuse_text_gguf, target)
+            except OSError:
+                shutil.copyfile(self.reuse_text_gguf, target)
+            self.log(f"  写しました: {self.reuse_text_gguf}")
+            target = None
+        if target:
+            self.download(url(name), target, name, digest=digest, size=size)
+            self.log(f"  落としました: {name}")
+        for n in pins.TEXT_GGUF_LICENSES:   # Llama 3 のライセンスの文などを、モデルの横に置く（ライセンスの決まり）
+            self.download(url(n), os.path.join(folder, n), n)
 
-    def server_cmd(self):
-        shutil.copyfile(os.path.join(TOOLS, "start_textencoder.cmd"), os.path.join(self.kimodo, "start_textencoder.cmd"))
+    def llamacpp(self):
+        """llama.cpp の CPU 版の zip（sha256 で照らす）を <kimodo>\\llamacpp に展開する。使うのは llama-server.exe だけ。"""
+        url, digest, size = pins.LLAMACPP_ZIP
+        archive = os.path.join(self.downloads, os.path.basename(url))
+        self.download(url, archive, "llama.cpp の zip", digest=digest, size=size)
+        into = os.path.join(self.kimodo, "llamacpp")
+        work = into + ".extract"
+        shutil.rmtree(work, ignore_errors=True)
+        self.progress("llama.cpp の zip を展開しています")
+        with zipfile.ZipFile(archive) as z:
+            z.extractall(work)
+        if not os.path.isfile(os.path.join(work, "llama-server.exe")):
+            raise Failed("llama.cpp の zip の形が思っていた物と違います（llama-server.exe がありません）")
+        shutil.rmtree(into, ignore_errors=True)
+        os.replace(work, into)
+        self.call([os.path.join(into, "llama-server.exe"), "--version"], "llama.cpp の版を確かめる")
 
     def kimodo_test(self):
-        """低負荷モードと同じ置き方（文の読み取りは CPU）で 1 回作る。通ったら paths.json に書く。"""
+        """常駐と同じ置き方（文の読み取りは llama-server の GGUF）で 1 回作る。通ったら paths.json に書く。"""
         work = os.path.join(self.dest, "setup_test")
         os.makedirs(work, exist_ok=True)
         req, out = os.path.join(work, "kimodo_request.json"), os.path.join(work, "kimodo_result.json")
@@ -541,10 +578,11 @@ class Setup:
             json.dump({"prompt": "A person walks forward.", "num_frames": 60, "seed": 0}, f)
         if os.path.exists(out):
             os.remove(out)
-        self.log("  初めての読み込みなので 1〜3 分かかります（文の読み取りのモデル約 15GB をメインメモリに読みます）")
+        self.log("  初めての読み込みなので 1〜2 分かかります（文の読み取りのモデル約 8GB をメインメモリに読みます）")
         self.call([self.kimodo_python(), os.path.join(TOOLS, "kimodo_gen.py"), req, out], "Kimodo の試しの生成", cwd=self.kimodo,
-                  HF_HUB_CACHE=os.path.join(self.kimodo, "hf_cache"), TEXT_ENCODERS_DIR=os.path.join(self.kimodo, "text_encoders"),
-                  LOCAL_CACHE="true", TEXT_ENCODER_MODE="local", TEXT_ENCODER_DEVICE="cpu", HF_HUB_OFFLINE="1")
+                  HF_HUB_CACHE=os.path.join(self.kimodo, "hf_cache"), LOCAL_CACHE="true", HF_HUB_OFFLINE="1",
+                  AINAKAWARI_LLAMA_SERVER=os.path.join(self.kimodo, "llamacpp", "llama-server.exe"),
+                  AINAKAWARI_TEXT_GGUF=os.path.join(self.kimodo, "text_encoder", pins.TEXT_GGUF_FILE[0]), AINAKAWARI_LOG_DIR=work)
         with open(out, encoding="utf-8") as f:
             frames = json.load(f).get("num_frames")
         if not frames:
@@ -602,11 +640,11 @@ class Setup:
 def main():
     parser = argparse.ArgumentParser(description="AIナカワリ のセットアップ（ふつうは詳細の窓の「セットアップ」から）")
     parser.add_argument("dest", nargs="?", help="入れる場所（省くと空きのいちばん多いドライブの \\AINakawari）")
-    parser.add_argument("--reuse-hf-cache", help="開発用: Llama の重みが入った Hugging Face のキャッシュから写す")
+    parser.add_argument("--reuse-text-gguf", help="開発用: 手元の文の読み取りの GGUF を照らしてから写す（8GB を落とし直さない）")
     args = parser.parse_args()
     try:
         setup = Setup(args.dest or default_folder(), log=lambda line: print(line, flush=True),
-                      on_step=lambda key, state: print(f"[{state}] {key}", flush=True), reuse_hf_cache=args.reuse_hf_cache)
+                      on_step=lambda key, state: print(f"[{state}] {key}", flush=True), reuse_text_gguf=args.reuse_text_gguf)
         setup.run()
     except (Failed, Cancelled) as e:
         print(f"止まりました: {e}", file=sys.stderr)

@@ -38,7 +38,6 @@ class Settings:
     engine: str = "kimodo"          # "motionbricks" ならキーの間を MotionBricks だけで埋める（中割り・プロンプト無し。nakawari.py）
     key_stop: bool = False          # 中割りで、キーごとに止まる（オフなら次のキーへの速さで通る）
     wrist_lerp: bool = False        # 中割りで、手首だけキーの間を補間でつなぐ（MotionBricks は手首を回しすぎることがある）
-    perf_mode: str = "low"          # 動作モード。"low" はテキストの読み取りを CPU（VRAM 8GB 向け）、"fast" は GPU（pipeline.PERF_MODES）
 
 
 def _same_motion(a, b, tol=1e-3, fixed_pos=(), names=None):
@@ -214,8 +213,8 @@ def generate(settings, log=print, link=None, previous=None):
         result = nakawari.generate(job, os.path.join(WORK_DIR, "motionbricks"), key_stop=settings.key_stop,
                                    wrist_lerp=settings.wrist_lerp, log=log)
     else:
-        log(f"Kimodo で生成中（{'高速' if settings.perf_mode == 'fast' else '低負荷'}モード）…")
-        result = pipeline.run_kimodo(job, os.path.join(WORK_DIR, "kimodo"), on_line=lambda l: log("  " + l), mode=settings.perf_mode)
+        log("Kimodo で生成中…")
+        result = pipeline.run_kimodo(job, os.path.join(WORK_DIR, "kimodo"), on_line=lambda l: log("  " + l))
     if settings.smooth_stop and job.stop_frames:
         log("MotionBricks で止まり方を作り直し中…")
         result = smooth_stop.apply(job, result, os.path.join(WORK_DIR, "motionbricks"), log=log)

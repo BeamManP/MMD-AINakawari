@@ -1,7 +1,7 @@
 """Kimodo・MotionBricks の置き場所。セットアップ（詳細の窓）が work/paths.json に書き、ここから全部の場所を組み立てる。
 
 置き場所の中の形（セットアップが作る形・11-05 までの手作業の F:\\kimodo・F:\\motionbricks と同じ）:
-    Kimodo:        .venv\\Scripts\\python.exe・hf_cache\\・text_encoders\\・tools\\somaskel30.json・start_textencoder.cmd
+    Kimodo:        .venv\\Scripts\\python.exe・hf_cache\\・text_encoder\\（GGUF）・llamacpp\\llama-server.exe・tools\\somaskel30.json
     MotionBricks:  .venv\\Scripts\\python.exe（中身は GitHub の motionbricks そのまま）
 
 設定が無い時に、決まった場所を探しに行ったりはしない（11-05 まで F:\\ に決め打ちだった）。Kimodo が無ければ生成の時に
@@ -82,27 +82,28 @@ def kimodo_hf_cache():
     return os.path.join(kimodo_dir(), "hf_cache")
 
 
-def text_encoders():
-    """文の読み取り（LLM2Vec ＋ Llama 3）の置き場所。tools/prepare_text_encoder.py が置き、Kimodo の TEXT_ENCODERS_DIR で読ませる。"""
-    return os.path.join(kimodo_dir(), "text_encoders")
+def text_gguf():
+    """文の読み取り（LLM2Vec ＋ Llama 3 の GGUF Q8_0）。セットアップの「文の読み取りのモデルを落とす」が置く。"""
+    from .installer.pins import TEXT_GGUF_FILE
+    return os.path.join(kimodo_dir(), "text_encoder", TEXT_GGUF_FILE[0])
 
 
-def check_text_encoders():
-    """文の読み取りが全部置けているか（tools/prepare_text_encoder.py が最後に READY を置く）。途中で止まった物は使わない。
-    低負荷の生成と、高速モードのサーバーの起動の前に見る（tools/start_textencoder.cmd も同じ印を見る）。"""
-    folder = text_encoders()
-    if not os.path.isfile(os.path.join(folder, "READY")):
-        raise NotSetUp(f"文の読み取りのモデルが {folder} に置けていません（途中で止まったかもしれません）。{SETUP_HINT}")
+def llama_server():
+    """文の読み取りを動かす llama.cpp の llama-server（CPU 版）。セットアップの「llama.cpp を落とす」が置く。"""
+    return os.path.join(kimodo_dir(), "llamacpp", "llama-server.exe")
+
+
+def check_text_encoder():
+    """文の読み取りの 2 つ（GGUF・llama-server）が置けているか。GGUF は照らしてから名前を付けるので、あれば全部そろっている。
+    Kimodo で生成する前に見る（11-07 まで bf16 の Llama 約 16GB の text_encoders フォルダを見ていた）。"""
+    for path, what in ((text_gguf(), "文の読み取りのモデル"), (llama_server(), "llama.cpp")):
+        if not os.path.isfile(path):
+            raise NotSetUp(f"{what}が {path} にありません（前の版で入れた時は、入れ直しが要ります）。{SETUP_HINT}")
 
 
 def soma_json():
     """Kimodo の骨格（tools/export_skeleton.py が書き出す）。"""
     return os.path.join(kimodo_dir(), "tools", "somaskel30.json")
-
-
-def server_cmd():
-    """高速モードのテキスト読み取りサーバーの起動バッチ（tools/start_textencoder.cmd を置いた物）。"""
-    return os.path.join(kimodo_dir(), "start_textencoder.cmd")
 
 
 def motionbricks_dir():
