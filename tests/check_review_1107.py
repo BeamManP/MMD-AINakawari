@@ -131,6 +131,8 @@ def fake_link(selected, calls):
     def load_file(kind, path, hwnd=None):
         ok = calls.load_ok.pop(0) if calls.load_ok else True
         calls.log.append(("load", os.path.basename(path), ok))
+        if ok == "raise":   # mmd-mcp はファイルが無い時などに例外を投げる
+            raise ValueError("MMD has a modal dialog open.")
         return {"status": "completed" if ok else "failed"}
     mmd_link.files.load_file = load_file
     return link
@@ -155,6 +157,16 @@ except (RuntimeError, TypeError) as e:
 restored = ("load", "backup0.vmd", True) in calls.log
 check("3. 読み込みが失敗したら、バックアップを読み込み直す", restored, str(calls.log))
 check("3. 失敗は知らせる（黙って成功にしない）", bool(msg) and "TypeError" not in type(msg).__name__)
+
+calls = Calls(load_ok=("raise", True))
+link = fake_link(PMX, calls)
+try:
+    link.load_motion(out0, 0, model=PMX, restore=backup0)
+    msg = ""
+except RuntimeError as e:
+    msg = str(e)
+check("3. 読み込みが例外を投げても、バックアップを読み込み直す", ("load", "backup0.vmd", True) in calls.log and "戻しました" in msg,
+      str(calls.log))
 
 
 # ---- 4. IK をオフにしたフレームの姿勢 --------------------------------------------------------------

@@ -149,23 +149,58 @@ class MMDLink:
         if model is not None:
             self.check_model(model)
         path = os.path.abspath(path)
+        if not os.path.isfile(path):   # 消す前に確かめる
+            raise RuntimeError(f"読み込むファイルがありません。キーは消していません: {path}")
         r = timeline.select_range(0, 999999, "全ﾌﾚｰﾑ", self.hwnd)
         if r.get("status") == "completed":
             r = edit_actions.perform(["delete_keys"], self.hwnd)
         if r.get("status") != "completed":
             raise RuntimeError(f"MMD で今のキーを消せませんでした: {r.get('status')} {r.get('dialogs', '')}")
         scene.set_frame(frame, self.hwnd)
-        r = files.load_file("motion", path, self.hwnd)
+        r = self._load_vmd(path)
         if r.get("status") != "completed":
-            why = f"{r.get('status')} {r.get('dialogs', '')}".strip()
+            # MMD が「このファイルは Vocaloid Motion Data file ではありません」などの窓を出していると、閉じるまで操作できず、
+            # 戻しの読み込みも止まる（11-07 本物の MMD で、壊れた VMD を読ませて確かめた）。ボタン 1 つのお知らせの窓だけ閉じる
+            notices = self._dismiss_notices(r)
+            why = "・".join(notices) or f"{r.get('status')} {r.get('dialogs', '')}".strip()
             if restore is None:
                 raise RuntimeError(f"MMD にモーションを読み込めませんでした: {why}")
             scene.set_frame(frame, self.hwnd)
-            back = files.load_file("motion", os.path.abspath(restore), self.hwnd)
+            back = self._load_vmd(os.path.abspath(restore))
             if back.get("status") == "completed":
                 raise RuntimeError(f"MMD にモーションを読み込めませんでした（{why}）。消したキーは、バックアップから戻しました")
             raise RuntimeError(f"MMD にモーションを読み込めず（{why}）、バックアップも読み込めませんでした。"
                                f"MMD の「ファイル」→「モーションデータ読込」で、次のファイルを読み込んでください: {os.path.abspath(restore)}")
+
+    @staticmethod
+    def _dismiss_notices(result, timeout=3.0):
+        """mmd-mcp の返事（dialog_requires_action）にある、ボタンが 1 つだけのお知らせの窓を閉じて、その文を返す。ほかの窓は触らない。"""
+        import time
+
+        import win32gui
+        texts, closing = [], []
+        for d in result.get("dialogs") or []:
+            if not isinstance(d, dict):
+                continue
+            controls = d.get("controls") or []
+            buttons = [c for c in controls if c.get("class") == "Button"]
+            if len(buttons) != 1 or any(c.get("class") == "Edit" for c in controls):
+                continue
+            texts += [c["text"] for c in controls if c.get("class") == "Static" and c.get("text")]
+            win32gui.PostMessage(buttons[0]["hwnd"], 0xF5, 0, 0)   # BM_CLICK
+            closing.append(d["hwnd"])
+        deadline = time.monotonic() + timeout
+        while closing and time.monotonic() < deadline:
+            closing = [h for h in closing if win32gui.IsWindow(h) and win32gui.IsWindowVisible(h)]
+            time.sleep(0.1)
+        return texts
+
+    def _load_vmd(self, path):
+        """mmd-mcp で VMD を読み込む。例外（ファイルが無い・MMD の画面が読めないなど）も失敗の返事にする（キーを消した後の戻しを通すため）。"""
+        try:
+            return files.load_file("motion", path, self.hwnd)
+        except Exception as e:
+            return {"status": type(e).__name__, "dialogs": str(e)}
 
     def set_frame(self, frame):
         scene.set_frame(frame, self.hwnd)
