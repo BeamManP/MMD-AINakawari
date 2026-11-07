@@ -4,7 +4,7 @@
 生成は裏で回すので窓は固まらない。「元に戻す」で生成前のモーションに戻せる。
 窓は MMD ごとに 1 つで、その MMD の持ち物（MMD の上に出て、MMD と一緒に隠れる）。× は隠すだけで、MMD のメニューからまた開ける。
 プロセスは 1 つだけ。プラグインは、動いていれば見えない窓（AINakawari.Hub）に「この MMD の窓を開いて」と知らせ、
-動いていなければ --open <MMD の窓> 付きで起動する。全部の MMD が閉じたら終わる。
+動いていなければ --open <MMD の窓> 付きで起動する。全部の MMD が閉じたら、常駐（resident.py）も終わらせて終わる。
 """
 import argparse
 import ctypes
@@ -24,7 +24,7 @@ import winerror
 
 from mmd_mcp.windows import list_windows
 
-from . import applog, gpu, panel, paths, pipeline, runner, samples, smooth_stop
+from . import applog, gpu, panel, paths, pipeline, resident, runner, samples, smooth_stop
 from .installer import window as setup_window
 from .message_window import MessageWindow, register_message
 from . import vmd
@@ -856,7 +856,20 @@ def main():
             root.mainloop()
     finally:
         hub.close()
+        _stop_residents()
         del mutex
+
+
+def _stop_residents():
+    """MMD が全部閉じて窓のプロセスが終わる時に、常駐（Kimodo と文の読み取りの llama-server・MotionBricks）を終わらせる。
+    前はアイドルの 30 分まで残り、ほかの作業の間も約 8GB をつかんでいた（11-08 マスター）。2 つ並べて止め、待つのは長くて約 10 秒。
+    窓のプロセスは 1 つだけ（APP_MUTEX）なので、入れ物が 2 つあっても、ほかの窓が使っている常駐を止めることはない。"""
+    jobs = [threading.Thread(target=lambda n=n, p=p: applog.write(f"常駐の {n} を終わらせました") if resident.stop(n, p) else None)
+            for n, p in ((pipeline.KIMODO_NAME, pipeline.KIMODO_PORT), ("MotionBricks", smooth_stop.MB_PORT))]
+    for job in jobs:
+        job.start()
+    for job in jobs:
+        job.join()
 
 
 if __name__ == "__main__":

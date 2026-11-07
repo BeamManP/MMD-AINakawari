@@ -37,7 +37,7 @@ MMD（MikuMikuDance）で打ったキーとキーの間を、AI が中割りし�
 | OS | Windows 10／11（64bit） | Windows 11 |
 | MMD | MikuMikuDance 9.32 x64（日本語版） | 9.32 x64 |
 | GPU | NVIDIA の GPU。GTX 16 シリーズ／RTX 20 シリーズ以降、VRAM 6GB 以上。ドライバは新しい物に | RTX 3090（24GB） |
-| メモリ | 16GB 以上（プロンプトの読み取りに約 8GB 使う） | 64GB |
+| メモリ | 16GB 以上（プロンプトの読み取りに約 8GB 使う。MMD を全部閉じるか、5 分使わなければ空けます） | 64GB |
 | ランタイム | [Microsoft Visual C++ 再頒布可能パッケージ（x64）](https://aka.ms/vs/17/release/vc_redist.x64.exe)。入っていなければ、セットアップがここへ案内します | |
 | ディスク | 約 21GB（Kimodo 約 15GB・MotionBricks 約 6GB） | |
 | ネット | セットアップの時だけ（約 12GB を落とします） | |

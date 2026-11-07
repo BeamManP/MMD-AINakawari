@@ -87,7 +87,7 @@ MODEL = "kimodo-soma-rp"
 AUTHKEY = b"AINakawari.resident.v1"   # mmd_ainakawari/resident.py と同じ
 WORK = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "work")
 TEXT_CACHE = os.path.join(WORK, "text_cache", "gguf")
-IDLE_SECONDS = 30 * 60               # 常駐で、これだけ頼まれなければ終わる
+IDLE_SECONDS = 5 * 60                # 常駐で、これだけ頼まれなければ終わる（作り直しを続ける間は速く、手を止めたら約 8GB を空ける。11-08 マスター）
 
 
 def text_encoder():

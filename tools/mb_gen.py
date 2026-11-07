@@ -41,7 +41,7 @@ from motionbricks.model.soma.engine import MotionBricksSOMAEngine
 
 MIN_TOKENS, MAX_TOKENS = 6, 16   # 1 回で 4k-6 フレーム（両端込み）＝ 18〜58
 AUTHKEY = b"AINakawari.resident.v1"   # mmd_ainakawari/resident.py と同じ
-IDLE_SECONDS = 30 * 60               # 常駐で、これだけ頼まれなければ終わる
+IDLE_SECONDS = 5 * 60                # 常駐で、これだけ頼まれなければ終わる（tools/kimodo_gen.py と同じ）
 
 
 class Rig:

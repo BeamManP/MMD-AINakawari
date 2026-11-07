@@ -1,8 +1,9 @@
 """常駐の生成サーバー（tools/kimodo_gen.py・tools/mb_gen.py の --serve）に頼む。いなければ立ち上げる。
 
 モデルの読み込み（Kimodo は torch 込みで 25 秒・MotionBricks は 3 秒）を 1 回で済ませるため。
-常駐は 127.0.0.1 の決まった口で待ち、しばらく頼まれなければ自分で終わる。窓（app.py）とは別のプロセスなので、
-窓を閉じても残り、次に開いた窓からも使える。記録は work/<名前>_server.log。
+常駐は 127.0.0.1 の決まった口で待ち、5 分頼まれなければ自分で終わる。窓（app.py）とは別のプロセスで、
+MMD が全部閉じて窓のプロセスが終わる時に stop() で終わらせる（使っていない間に約 8GB をつかみ続けないように。11-08 マスター）。
+記録は work/<名前>_server.log。
 
 窓は MMD ごとに同じプロセスのスレッドで生成するので、同じ常駐の立ち上げは口ごとのロックで 1 つずつにする。
 つなぐ・答えを待つには期限を付ける（口をほかのプログラムが使っていて黙っている時に、窓が戻らなくならないように）。
@@ -153,6 +154,28 @@ def shutdown(server):
         _send(conn, server, {"shutdown": True})
         _wait_closed(server)
         return True
+
+
+def stop(name, port, wait=10.0):
+    """窓のプロセスが終わる時に、口 port の常駐がいれば終わらせる。終わらせたら True。
+
+    例外は出さない（窓の終わりを止めない）。生成の途中や読み込み中で wait 秒のうちに答えない時はあきらめる。
+    その時は常駐が、作り終わってから自分のアイドルの時間（5 分）で終わる。
+    """
+    server = Server(name, port, "", "", "", {})
+    lock = _start_locks[port]
+    if not lock.acquire(timeout=wait):   # 生成のスレッドが立ち上げている途中
+        return False
+    try:
+        conn = _connect(server, timeout=wait)
+        if conn is None:
+            return False
+        _send(conn, server, {"shutdown": True})
+        return True
+    except Exception:   # いない・ほかのプログラム・答えない
+        return False
+    finally:
+        lock.release()
 
 
 def _wait_closed(server, seconds=10):
