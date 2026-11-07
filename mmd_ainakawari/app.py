@@ -45,16 +45,20 @@ SETTINGS_PATH = os.path.join(runner.WORK_DIR, "settings.json")
 DEFAULTS = {
     "tab": "kimodo", "mode": "fill", "range_mode": "keys", "length": "",   # 範囲は選んだキーの間から（11-05 マスター）
     "prompt": "A person moves naturally between poses.",
-    "steps": 100, "seed": -1, "post_processing": True, "cfg_text": 2.0, "cfg_key": 2.0, "use_center": False,
+    "steps": 100, "seed": -1, "post_processing": True, "cfg_text": 2.0, "cfg_key": 2.0,
     "stop_at_last_key": True, "smooth_stop": True, "key_stop": False, "wrist_lerp": False,
 }
-OLD_KEYS = ("use_keys", "range_start", "range_end", "pmx", "perf_mode")   # 前の窓の保存にあった項目（読む時に変換して捨てる。perf_mode は 11-07 まであった動作モード）
+# 前の窓の保存にあった項目（読む時に変換して捨てる。perf_mode は 11-07 まであった動作モード・use_center は 11-07 までのチェック）
+OLD_KEYS = ("use_keys", "range_start", "range_end", "pmx", "perf_mode", "use_center")
 TABS = [("kimodo", "Kimodo"), ("nakawari", "MotionBricks")]   # 右下のパネルの選び方と同じ名前（11-06 マスター。前は「プロンプトで作る／中割り」）
-MODES = [("fill", "キーの間を埋める"), ("extend", "続きを足す"), ("fresh", "プロンプトだけで作る")]
+MODES = [("fill", "キーの間を埋める"), ("extend", "続きを足す"), ("fresh", "プロンプトだけで作る"),
+         ("center", "センターに合わせて作る")]
 MODE_NOTES = {
     "fill": "打ったキーのポーズを守って、キーとキーの間を作ります（長さは最後のキーまで）",
     "extend": "範囲の終わり（「全部」なら最後のキー）の後ろに、長さの分だけ続きを足します。それより前の動きは変えません",
     "fresh": "最初のキーの場所と向きから、プロンプトだけで動きを作ります",
+    # 11-07 まで「詳しい設定」のチェック（センターの動きを使う）だった。キーの間を埋めるのと同じ範囲で、キーのポーズは使わない
+    "center": "腰の位置・高さだけをセンター（キーと補間）に合わせ、ポーズと動きはプロンプトから作ります（長さは最後のキーまで）",
 }
 NAKAWARI_NOTE = ("打ったキーとキーの間を、プロンプト無しで MotionBricks がつなぎます。\n"
                  "作るのはキーの間が 17〜57 フレームの所で、それ以外は MMD の補間を使います。")
@@ -161,6 +165,9 @@ class App:
             saved = {}
         if "mode" not in saved and saved.get("use_keys") is False:   # 前の窓の「打ったキーのポーズを守る」オフ
             saved["mode"] = "fresh" if saved.get("length") else "fill"
+        # 「センターの動きを使う」のチェック（11-07 まで）は、プロンプトだけで作る時と組み合わせる物だった。やりたいことの 4 つ目にした
+        if saved.get("use_center") and saved.get("mode") == "fresh":
+            saved["mode"] = "center"
         self.cfg.update({k: v for k, v in saved.items() if k not in OLD_KEYS})
         if self.cfg["mode"] == "nakawari":   # 中割りがモードの 1 つだった時の保存（11-04 の昼）
             self.cfg.update(tab="nakawari", mode="fill")
@@ -360,9 +367,6 @@ class App:
         ttk.Spinbox(d, from_=0.5, to=10, increment=0.5, textvariable=self.cfg_key, width=5).grid(row=1, column=3, sticky="w", **g)
         self.post = tk.BooleanVar(value=self.cfg["post_processing"])
         ttk.Checkbutton(d, text="仕上補正（足すべり・姿勢）", variable=self.post).grid(row=2, column=0, columnspan=2, sticky="w", **g)
-        # センターの上下などを毎フレームの腰の目印にする（リズムを残して動きを作る。プロンプトだけで作る時と組み合わせる想定）
-        self.use_center = tk.BooleanVar(value=self.cfg["use_center"])
-        ttk.Checkbutton(d, text="腰の位置をセンターに追従させる", variable=self.use_center).grid(row=2, column=2, columnspan=2, sticky="w", **g)
         # GPU 診断（この PC で足りるか）
         d = self.diagnosis
         bg = ttk.Style().lookup("TFrame", "background")
@@ -421,7 +425,7 @@ class App:
         elif self.range_mode.get() == "keys":
             self.length_entry.configure(state="disabled")
             self.length_note.set("F（範囲の終わりまで）")
-        elif mode == "fill":
+        elif mode in ("fill", "center"):   # センターに合わせて作るのも、埋めると同じ範囲
             self.length_entry.configure(state="disabled")
             self.length_note.set("F（最後のキーまで）")
         else:
@@ -735,12 +739,14 @@ class App:
             s = runner.Settings(prompt=self.prompt_rows.text(),
                                 steps=int(self.steps.get()), seed=int(self.seed.get()), post_processing=bool(self.post.get()),
                                 cfg_text=float(self.cfg_text.get()), cfg_key=float(self.cfg_key.get()),
-                                length=length, extend=extend, use_keys=mode != "fresh", use_center=bool(self.use_center.get()),
+                                # センターに合わせて作る: 埋めると同じ範囲で、キーのポーズは使わず、毎フレームの腰をセンターに合わせる
+                                length=length, extend=extend, use_keys=mode not in ("fresh", "center"),
+                                use_center=mode == "center",
                                 stop_at_last_key=mode == "fill" and bool(self.stop.get()),
                                 smooth_stop=bool(self.smooth.get()) and smooth_stop.available(), engine="kimodo", **common)
             self.cfg.update(mode=self.mode.get(), length=self.length.get(), prompt=s.prompt, steps=s.steps, seed=s.seed,
                             post_processing=s.post_processing, cfg_text=s.cfg_text, cfg_key=s.cfg_key,
-                            use_center=bool(self.use_center.get()), stop_at_last_key=bool(self.stop.get()),
+                            stop_at_last_key=bool(self.stop.get()),
                             smooth_stop=bool(self.smooth.get()))
         os.makedirs(runner.WORK_DIR, exist_ok=True)
         json.dump(self.cfg, open(SETTINGS_PATH, "w", encoding="utf-8"), ensure_ascii=False, indent=1)

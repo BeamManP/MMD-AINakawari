@@ -206,10 +206,14 @@ def generate(settings, log=print, link=None, previous=None):
         shown += f"・プロンプトの効き {settings.cfg_text}・キーの効き {settings.cfg_key}"
     if settings.use_keys:
         log(f"体のキー {len(real)} 個: {real}（{shown}）")
+    elif settings.use_center:
+        log(f"センターに合わせて作る: キーのポーズは使わず、{len(job.root_frames)} フレームで腰の位置と高さを"
+            f"センター（キーと補間）に合わせます。ポーズと動きはプロンプトから作ります（{shown}）")
     else:
         log(f"プロンプトだけで作る: {job.first}F の場所と向きから作ります（{shown}）")
-    if settings.use_center:
-        log(f"腰の位置をセンターに追従させる: {len(job.root_frames)} フレームで腰の位置と高さを目印にします")
+    if settings.use_center:   # 腰の目印は毎フレーム（全ての親のキーとは別。前は use_keys の時だけ出し、ほかは全ての親のキーと出していた）
+        if settings.use_keys:
+            log(f"腰の位置をセンターに合わせる: {len(job.root_frames)} フレームで腰の位置と高さを目印にします")
     elif job.root_frames:
         log(f"全ての親だけのキー {len(job.root_frames)} 個: {job.root_frames}（腰がそこを通るように作る）")
     if job.stop_frames:
