@@ -359,10 +359,10 @@ class App:
         self.cfg_key = tk.DoubleVar(value=self.cfg["cfg_key"])
         ttk.Spinbox(d, from_=0.5, to=10, increment=0.5, textvariable=self.cfg_key, width=5).grid(row=1, column=3, sticky="w", **g)
         self.post = tk.BooleanVar(value=self.cfg["post_processing"])
-        ttk.Checkbutton(d, text="生成した動きをキーに合わせる", variable=self.post).grid(row=2, column=0, columnspan=2, sticky="w", **g)
+        ttk.Checkbutton(d, text="仕上補正（足すべり・姿勢）", variable=self.post).grid(row=2, column=0, columnspan=2, sticky="w", **g)
         # センターの上下などを毎フレームの腰の目印にする（リズムを残して動きを作る。プロンプトだけで作る時と組み合わせる想定）
         self.use_center = tk.BooleanVar(value=self.cfg["use_center"])
-        ttk.Checkbutton(d, text="センターの動きを使う", variable=self.use_center).grid(row=2, column=2, columnspan=2, sticky="w", **g)
+        ttk.Checkbutton(d, text="腰の位置をセンターに追従させる", variable=self.use_center).grid(row=2, column=2, columnspan=2, sticky="w", **g)
         # GPU 診断（この PC で足りるか）
         d = self.diagnosis
         bg = ttk.Style().lookup("TFrame", "background")

@@ -46,7 +46,7 @@ class Job:
     limb_frames: list = field(default_factory=list)   # 手足の IK だけにキーのあるフレーム（手足の目印）
     segments: list = field(default_factory=list)      # 区間ごとのプロンプト [(開始フレーム, 長さ, プロンプト)]
     segment_moves: list = field(default_factory=list) # 区間の始めをキーの次へずらした [(元の開始, ずらした開始, キー)]（MMD のフレーム）
-    hip_targets: dict = field(default_factory=dict)   # センターの動きを使う時の、フレームごとの腰の目印（世界・Kimodo 座標・m）
+    hip_targets: dict = field(default_factory=dict)   # 腰の位置をセンターに追従させる時の、フレームごとの腰の目印（世界・Kimodo 座標・m）
     ref_pos: np.ndarray = None    # 最初のキーの腰の XZ（Kimodo 座標・m）
     ref_yaw: float = 0.0          # 最初のキーの腰の向き（ラジアン）。Kimodo には +Z 向き・原点で渡す
     ground_lift: float = 0.0      # 足が床に着くように上げ下げした量（m）
@@ -248,7 +248,7 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
                 走りなどは勢いを残して通り過ぎる。キーの後ろ STOP_HOLD フレームに「腰はキーの位置から動かない」目印を足すと、
                 Kimodo はキーの手前で減速して止まる（11-04 実験: 走って 60F のキーに着く動きで、行き過ぎ 1.55m → 0.08m・跳び無し）。
                 作る範囲がそのキーで終わる時は、裏で余分に作らせる（書き戻すのは元の範囲だけ）。
-                キーの後ろに全ての親・手足の目印がある（その先も動かす）時と、センターの動きを使う時は止めない。
+                キーの後ろに全ての親・手足の目印がある（その先も動かす）時と、腰の位置をセンターに追従させる時は止めない。
     frame_range: (始まり, 終わり) の MMD のフレーム。その範囲を作り直す。始まりの姿勢（MMD の補間込み）はいつもキーにし、
                 終わりの姿勢は後ろにもキーがある（外の動きが続く）時だけキーにする。長さ（length）は使わない。
                 範囲の中のキーも通る（完全新規なら使わない）。範囲の端の外側 RANGE_CONTEXT フレームの姿勢も使い、外の勢いをつなぐ。
@@ -360,7 +360,7 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
     job.limb_frames = sorted(limb_keys)
     # 全ての親を回している（回転のキーがある）時は、全ての親だけのキーで腰の向きも合わせる。
     # 回していない時（スラロームなど）に向きまで固定すると、毎回正面を向かされるので位置だけにする
-    # センターの動きを使う時は、センターの回転も向きとして扱う
+    # 腰の位置をセンターに追従させる時は、センターの回転も向きとして扱う
     turning = job.root_track + (list(tracks.get("センター", [])) if use_center else [])
     use_heading = any(abs(k.rot[3]) < 0.9999 for k in turning)
     root_keys, root_y_keys = [], []
@@ -395,7 +395,7 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
             job.stop_frames = hold
             pad = max(0, hold[-1] - last)
     job.segments = prompt_segments(prompt, first, num)
-    if len(job.segments) > 1 and not use_center:   # センターの動きを使う時は毎フレームが目印なので、ずらせない
+    if len(job.segments) > 1 and not use_center:   # 腰の位置をセンターに追従させる時は毎フレームが目印なので、ずらせない
         # 止まるための腰の目印（キーの後ろ STOP_HOLD フレーム）は、キーの場所にじっとしているだけで区間のつなぎとぶつからないので数えない
         # （数えると、区間の始めがキーと同じ時に「すぐ後ろに目印が続いて置けない」で止まっていた。11-04 MMD で確認）
         constrained = sorted({f for f in frames + root_frames + list(limb_keys)})
@@ -578,7 +578,7 @@ def _build_frames(args):
         rots, poss = rt.soma_to_mmd(hips, loc, fixed)
         target = job.hip_targets.get(job.first + k)
         if target is not None:
-            # センターの動きを使う時: 腰の高さを目印ぴったりに。足ＩＫは動かさないので、差は MMD の IK が膝の曲げで吸収する
+            # 腰の位置をセンターに追従させる時: 腰の高さを目印ぴったりに。足ＩＫは動かさないので、差は MMD の IK が膝の曲げで吸収する
             target_local, _ = to_root_local(rt, target, Q.IDENTITY, root_q, root_p)
             poss["センター"] = poss["センター"] + np.array([0.0, (target_local[1] - hips[1]) / rt.scale, 0.0])
         for name, q in rots.items():

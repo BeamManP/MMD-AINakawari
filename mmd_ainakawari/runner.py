@@ -209,7 +209,7 @@ def generate(settings, log=print, link=None, previous=None):
     else:
         log(f"プロンプトだけで作る: {job.first}F の場所と向きから作ります（{shown}）")
     if settings.use_center:
-        log(f"センターの動きを使う: {len(job.root_frames)} フレームで腰の位置と高さを目印にします")
+        log(f"腰の位置をセンターに追従させる: {len(job.root_frames)} フレームで腰の位置と高さを目印にします")
     elif job.root_frames:
         log(f"全ての親だけのキー {len(job.root_frames)} 個: {job.root_frames}（腰がそこを通るように作る）")
     if job.stop_frames:
