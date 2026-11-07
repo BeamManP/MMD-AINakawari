@@ -123,6 +123,7 @@ def fake_link(selected, calls):
     link = mmd_link.MMDLink(hwnd=1)
     link.state = lambda: {"model_selected": True, "model": os.path.basename(selected)}
     link.selected_model = lambda: {"path": selected, "name": os.path.basename(selected)}
+    link.current_frame = lambda: 0
     mmd_link.playback.get = lambda hwnd=None: {"playing": False}
     mmd_link.timeline.select_range = lambda *a, **k: (calls.log.append("select"), {"status": "completed"})[1]
     mmd_link.edit_actions.perform = lambda *a, **k: (calls.log.append("delete"), {"status": "completed"})[1]
@@ -167,6 +168,72 @@ except RuntimeError as e:
     msg = str(e)
 check("3. 読み込みが例外を投げても、バックアップを読み込み直す", ("load", "backup0.vmd", True) in calls.log and "戻しました" in msg,
       str(calls.log))
+
+
+# ---- 11-07 夜: フレームを移す所が、読み込みの直後のタイミングで落ちる（マスター） -------------------
+def flaky(fails):
+    """最初の fails 回は mmd-mcp と同じ RuntimeError を投げ、その後は通る set_frame。"""
+    state = {"n": 0}
+
+    def set_frame(*a, **k):
+        state["n"] += 1
+        if state["n"] <= fails:
+            raise RuntimeError("MMD did not display the requested frame in the same model context.")
+    return set_frame, state
+
+
+calls = Calls()
+link = fake_link(PMX, calls)
+mmd_link.scene.set_frame, st = flaky(1)
+link.set_frame(30, wait=0)
+check("フレームを移す所が 1 回落ちても、やり直して通る", st["n"] == 2, f"{st['n']} 回")
+
+calls = Calls()
+link = fake_link(PMX, calls)
+link.current_frame = lambda: 5   # 消した後で、フレームが 0F からずれていた
+mmd_link.scene.set_frame, st = flaky(0)
+real_set = link.set_frame
+moves = []
+
+
+def set_after_delete(frame, **k):
+    moves.append(frame)
+    if "delete" in calls.log:   # 消した後で移ろうとした時だけ、何度やっても落ちる
+        raise RuntimeError("MMD did not display the requested frame in the same model context.")
+    return real_set(frame, wait=0)
+
+
+link.set_frame = set_after_delete
+try:
+    link.load_motion(out0, 0, model=PMX, restore=backup0)
+    msg = ""
+except RuntimeError as e:
+    msg = str(e)
+check("消した後でフレームを移せなくても、戻しの手順に入って知らせる（黙って消えたままにしない）",
+      "delete" in calls.log and moves[0] == 0 and "バックアップ" in msg, f"{calls.log}・{msg[:60]}")
+
+lines = []
+s3 = runner.Settings(prompt="A person walks forward.", smooth_stop=False)   # MotionBricks は呼ばない
+
+
+class ReturnFails(FakeLink):
+    def return_to(self, frame):
+        return "MMD did not display the requested frame in the same model context."
+
+
+rf = ReturnFails(vmd.read(DEMO))
+real_run = pipeline.run_kimodo
+real_build = pipeline.build_motion
+pipeline.run_kimodo = lambda job, *a, **k: {"key_max_error_m": [0.0]}
+pipeline.build_motion = lambda job, result, *a, **k: vmd.Motion(model_name=demo.model_name, bones=[])
+try:
+    r = runner.generate(s3, log=lines.append, link=rf, previous={})
+    ok = r is not None and any("戻せませんでした" in l for l in lines) and any(l.startswith("できました") for l in lines)
+except Exception as e:
+    ok, lines = False, [f"{type(e).__name__}: {e}"]
+finally:
+    pipeline.run_kimodo, pipeline.build_motion = real_run, real_build
+check("最後に押した時のフレームへ戻せなくても、生成は失敗にしない（ログで知らせる）", ok, lines[-1][:80] if lines else "")
 
 
 # ---- 4. IK をオフにしたフレームの姿勢 --------------------------------------------------------------

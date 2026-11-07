@@ -258,7 +258,10 @@ def generate(settings, log=print, link=None, previous=None):
     log("MMD に読み込み中…")
     # 始めた時のモデルかを確かめてからキーを消す。読み込みに失敗したら、バックアップを読み込み直して消したキーを戻す
     link.load_motion(out, 0, model=pmx, restore=backup)
-    link.set_frame(job.first if cursor is None else cursor)   # 読めなかった時は、作った範囲の始め（前の動き）
+    back = job.first if cursor is None else cursor   # 読めなかった時は、作った範囲の始め（前の動き）
+    why = link.return_to(back)
+    if why:   # 動きは入っているので失敗にしない（11-07 マスター。前はエラーの窓で「失敗」と出て、うまくいったのに失敗に見えた）
+        log(f"注意: {back}F へ戻せませんでした（MMD は 0F のままです）: {why}")
     err = result.get("key_max_error_m") or [0]
     root_err = result.get("root_key_error_m") or []
     extra = f"・全ての親のキーとの腰のずれ最大 {max(root_err) * 100:.0f}cm" if root_err else ""
@@ -278,9 +281,10 @@ def undo(backup, log=print, link=None, model=None):
         link.check_model(model)
     link.read_motion(now)
     link.load_motion(backup, 0, model=model, restore=now)
-    if cursor is not None:
-        link.set_frame(cursor)
+    why = link.return_to(cursor) if cursor is not None else None
     log(f"元に戻しました（{backup}）")
+    if why:
+        log(f"注意: {cursor}F へ戻せませんでした（MMD は 0F のままです）: {why}")
 
 
 if __name__ == "__main__":

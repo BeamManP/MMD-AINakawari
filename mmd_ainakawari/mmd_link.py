@@ -155,13 +155,20 @@ class MMDLink:
         path = os.path.abspath(path)
         if not os.path.isfile(path):   # 消す前に確かめる
             raise RuntimeError(f"読み込むファイルがありません。キーは消していません: {path}")
+        # 読み込むフレームへは、消す前に移る（消した後で移れずに止まると、戻しが走らずキーが消えたままになっていた。11-07）
+        self.set_frame(frame)
         r = timeline.select_range(0, 999999, "全ﾌﾚｰﾑ", self.hwnd)
         if r.get("status") == "completed":
             r = edit_actions.perform(["delete_keys"], self.hwnd)
         if r.get("status") != "completed":
             raise RuntimeError(f"MMD で今のキーを消せませんでした: {r.get('status')} {r.get('dialogs', '')}")
-        scene.set_frame(frame, self.hwnd)
-        r = self._load_vmd(path)
+        try:   # 消した後は、何で止まっても下の戻しを通す
+            if self.current_frame() != frame:
+                self.set_frame(frame)
+        except Exception as e:
+            r = {"status": type(e).__name__, "dialogs": str(e)}
+        else:
+            r = self._load_vmd(path)
         if r.get("status") != "completed":
             # MMD が「このファイルは Vocaloid Motion Data file ではありません」などの窓を出していると、閉じるまで操作できず、
             # 戻しの読み込みも止まる（11-07 本物の MMD で、壊れた VMD を読ませて確かめた）。ボタン 1 つのお知らせの窓だけ閉じる
@@ -169,8 +176,12 @@ class MMDLink:
             why = "・".join(notices) or f"{r.get('status')} {r.get('dialogs', '')}".strip()
             if restore is None:
                 raise RuntimeError(f"MMD にモーションを読み込めませんでした: {why}")
-            scene.set_frame(frame, self.hwnd)
-            back = self._load_vmd(os.path.abspath(restore))
+            try:
+                self.set_frame(frame)
+            except Exception as e:
+                back = {"status": type(e).__name__, "dialogs": str(e)}
+            else:
+                back = self._load_vmd(os.path.abspath(restore))
             if back.get("status") == "completed":
                 raise RuntimeError(f"MMD にモーションを読み込めませんでした（{why}）。消したキーは、バックアップから戻しました")
             raise RuntimeError(f"MMD にモーションを読み込めず（{why}）、バックアップも読み込めませんでした。"
@@ -206,12 +217,33 @@ class MMDLink:
         except Exception as e:
             return {"status": type(e).__name__, "dialogs": str(e)}
 
-    def set_frame(self, frame):
-        scene.set_frame(frame, self.hwnd)
+    def set_frame(self, frame, tries=3, wait=0.5):
+        """MMD の今のフレームを frame にする。
+
+        mmd-mcp はフレームの欄に数字を入れてすぐ読み直し、数字とモデルの欄が合わないと止める。モーションを読み込んだ直後は
+        MMD が忙しく、合わないことがある（11-07 マスター。生成の最後で「MMD did not display the requested frame in the same
+        model context.」）。合わない時（RuntimeError）だけ、少し待ってやり直す。再生中などの止め（ValueError）はそのまま上げる。
+        """
+        import time
+        for i in range(tries):
+            try:
+                return scene.set_frame(frame, self.hwnd)
+            except RuntimeError:
+                if i == tries - 1:
+                    raise
+                time.sleep(wait)
+
+    def return_to(self, frame):
+        """押した時のフレームへ戻す。動きはもう入っているので、戻せなくても止めない。戻せなかった時は理由の文を返す。"""
+        try:
+            self.set_frame(frame)
+        except Exception as e:
+            return str(e)
+        return None
 
     def bone_value(self, name, frame):
         """あるフレームでの骨の表示値（位置 x,y,z・回転の度）。骨の選択が変わる。"""
-        scene.set_frame(frame, self.hwnd)
+        self.set_frame(frame)
         select_bone(name, None, self.hwnd)
         t = get_selected_bone_transform(self.hwnd)
         p = t["position"]
