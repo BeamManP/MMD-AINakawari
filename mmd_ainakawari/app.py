@@ -24,10 +24,12 @@ import winerror
 
 from mmd_mcp.windows import list_windows
 
-from . import applog, gpu, panel, paths, runner, samples, smooth_stop
+from . import applog, gpu, panel, paths, pipeline, runner, samples, smooth_stop
 from .installer import window as setup_window
 from .message_window import MessageWindow, register_message
+from . import vmd
 from .mmd_link import MMDLink
+from .mmd_skel import MMDSkeleton
 from .widgets import Fold, PromptRows, ScrollFrame
 
 APP_MUTEX = "Local\\AINakawari.App.v1"
@@ -51,7 +53,7 @@ TABS = [("kimodo", "Kimodo"), ("nakawari", "MotionBricks")]   # 右下のパネ�
 MODES = [("fill", "キーの間を埋める"), ("extend", "続きを足す"), ("fresh", "プロンプトだけで作る")]
 MODE_NOTES = {
     "fill": "打ったキーのポーズを守って、キーとキーの間を作ります（長さは最後のキーまで）",
-    "extend": "打ったキーのポーズを守って、最後のキーの後ろに続きを作ります",
+    "extend": "範囲の終わり（「全部」なら最後のキー）の後ろに、長さの分だけ続きを足します。それより前の動きは変えません",
     "fresh": "最初のキーの場所と向きから、プロンプトだけで動きを作ります",
 }
 NAKAWARI_NOTE = ("打ったキーとキーの間を、プロンプト無しで MotionBricks がつなぎます。\n"
@@ -165,6 +167,9 @@ class App:
         self.q = queue.Queue()
         self.busy = False
         self.selected_keys = None    # MMD のタイムラインで選んでいるキーのフレーム（_read_mmd が 1 秒ごとに読む。読めなければ None）
+        # 「続きを足す」の時だけ読む: 骨（VMD の名前）→ キーのフレーム と、選択中のモデルの書き戻す骨（PMX ごとに覚える）
+        self._key_frames = self._body_names = None
+        self._body_cache = {}
         self._status_before = None   # 生成できない知らせ（GPU が無い・キーを選んでいない）を出す前の 1 行（出していない時は None）
         self._model_ticks = 1   # MMD の読み取り（モデル・今のフレーム・範囲選択）は 2 回に 1 回（1 秒ごと）。最初はすぐ読む
         self.last_run = runner.load_last_run(self.link)   # この MMD での前回の生成（作り直しと「元に戻す」に使う）。窓を開き直しても残る
@@ -306,6 +311,11 @@ class App:
         self.length_entry.pack(side="left")
         self.length_note = tk.StringVar()
         ttk.Label(length_row, textvariable=self.length_note, foreground="#556").pack(side="left", padx=(6, 0))
+        self.length.trace_add("write", lambda *_: self._extend_changed())
+        # 「続きを足す」で、足す所に体のキーがある時の赤い注意（11-07 マスター）。無い時も 1 行の高さを取り、下の段をずらさない
+        self.extend_warn = tk.StringVar()
+        tk.Label(line(""), textvariable=self.extend_warn, foreground="#c22", background=ttk.Style().lookup("TFrame", "background"),
+                 wraplength=420, anchor="w", justify="left").pack(side="left", fill="x")
         # キーは「その瞬間にこの姿勢を通る」だけなので、止めないと走りなどは最後のキーを勢いのまま通り過ぎる
         self.stop = tk.BooleanVar(value=self.cfg["stop_at_last_key"])
         stop_row = line("", pady=(4, 0))
@@ -406,7 +416,9 @@ class App:
     def _mode_changed(self):
         mode = self.mode.get()
         self.mode_note.set(MODE_NOTES[mode])
-        if self.range_mode.get() == "keys":
+        if mode == "extend":   # 足す長さ。範囲を選んでいても使う（前は範囲の時に欄が効かず、埋めると同じになっていた。11-07 マスター）
+            self.length_entry.configure(state="normal")
+        elif self.range_mode.get() == "keys":
             self.length_entry.configure(state="disabled")
             self.length_note.set("F（範囲の終わりまで）")
         elif mode == "fill":
@@ -414,13 +426,64 @@ class App:
             self.length_note.set("F（最後のキーまで）")
         else:
             self.length_entry.configure(state="normal")
-            self.length_note.set("F（最初のキーから。必須）" if mode == "fresh" else "F（最初のキーから。最後のキーより長く）")
-        self.stop_check.configure(state="disabled" if mode == "fresh" else "normal")   # プロンプトだけで作る時は止める位置のキーが無い
+            self.length_note.set("F（最初のキーから数えた全部の長さ。必須）")
+        # 止める位置のキーが無い: プロンプトだけで作る時・続きを足す時（続きの終わりにキーは無い）
+        self.stop_check.configure(state="normal" if mode == "fill" else "disabled")
         self._stop_changed()
+        self._extend_changed()
 
     def _stop_changed(self):
-        usable = self.mode.get() != "fresh" and self.stop.get() and smooth_stop.available()
+        usable = self.mode.get() == "fill" and self.stop.get() and smooth_stop.available()
         self.smooth_check.configure(state="normal" if usable else "disabled")
+
+    def _body_of(self, pmx):
+        """モデルの書き戻す骨（VMD の名前）。PMX ごとに 1 回だけ読む。読めない（Kimodo が無い・PMX でない）時は None。"""
+        if pmx not in self._body_cache:
+            try:
+                skel = MMDSkeleton(pmx)
+                names = {vmd.vmd_name(n) for n in pipeline.body_bone_names(skel, pipeline.Retargeter(skel, paths.soma_json()))}
+            except Exception:   # 注意を出せないだけ。生成の時に同じ理由で止まって知らせる
+                return None
+            self._body_cache[pmx] = names
+        return self._body_cache[pmx]
+
+    def _extend_plan(self):
+        """「続きを足す」の (始まり, 終わり, 上書きされる体のキー)。分からない時（長さが空・MMD を読めない）は None。"""
+        try:
+            add = int(self.length.get().strip())
+        except ValueError:
+            return None
+        if add < 1 or self._key_frames is None or self._body_names is None:
+            return None
+        keys = self.selected_keys
+        if self.range_mode.get() == "keys":
+            if not keys or len(keys) < 2:
+                return None
+            start = keys[-1]
+        else:
+            start = None
+        try:
+            return pipeline.extend_plan(self._key_frames, self._body_names, start, add)
+        except ValueError:
+            return None
+
+    def _extend_changed(self):
+        """「続きを足す」の長さの横の説明（作る所）と、上書きされるキーの赤い注意を出し直す。"""
+        if not hasattr(self, "range_mode"):   # 窓を作っている途中
+            return
+        warn = ""
+        if self.mode.get() == "extend" and self.tabs.index("current") == 0:
+            plan = self._extend_plan()
+            if plan is None:
+                self.length_note.set("F 足す（範囲の終わりの後ろに）" if self.range_mode.get() == "keys" else "F 足す（最後のキーの後ろに）")
+            else:
+                start, end, hit = plan
+                self.length_note.set(f"F 足す（{start + 1}〜{end}F を作ります）")
+                if hit:
+                    shown = "・".join(map(str, hit[:6])) + ("…" if len(hit) > 6 else "")
+                    warn = f"範囲内に上書きされるキーフレームがあります（{shown}F の体のキー）"
+        if self.extend_warn.get() != warn:
+            self.extend_warn.set(warn)
 
     def _show_samples(self, button):
         """「サンプルから選ぶ」: 種類ごとの「動作：英語」の一覧を出し、選んだ英語の文を最後に打っていた行に入れる。
@@ -467,14 +530,18 @@ class App:
             text = f"選択中のモデル：（読み取れません: {e}）"
         else:
             text = f"選択中のモデル：{model['name']}" if model else "選択中のモデル：（なし。MMD のモデル欄でモデルを選んでください）"
+        extending = self.mode.get() == "extend" and self.tabs.index("current") == 0
         try:
-            keys = self.link.selected_key_frames() if model else []
+            keys, frames = self.link.key_scan(with_names=extending) if model else ([], None)
             picked = (f"選んだキーの間（{keys[0]}〜{keys[-1]}F）" if len(keys) > 1 else
                       f"選んだキーの間（{keys[0]}F だけ。2 つ以上選んでください）" if keys else "選んだキーの間（キーを選んでいません）")
             self.selected_keys = keys
+            self._key_frames = frames
         except Exception:   # 選び替えの途中などで鎖が読めない時は、次の読み取りで直る
             picked = "選んだキーの間（読み取れません）"
-            self.selected_keys = None
+            self.selected_keys = self._key_frames = None
+        self._body_names = self._body_of(model["path"]) if extending and model else None
+        self._extend_changed()
         updates = [(self.model_text, text),
                    (self.split_text, f"＋ 今のフレーム（{frame}F）で区切る" if frame is not None else "＋ 今のフレームで区切る"),
                    (self.range_text, picked)]
@@ -641,12 +708,16 @@ class App:
         tab = TABS[self.tabs.index("current")][0]
         mode = "fill" if fill else self.mode.get()
         nakawari = tab == "nakawari"
-        in_range = self.range_mode.get() == "keys"   # 範囲を使う時は範囲の終わりまで作るので、長さは使わない
-        length = opt_int(self.length.get()) if mode != "fill" and not nakawari and not in_range else None
+        in_range = self.range_mode.get() == "keys"   # 範囲を使う時は範囲の終わりまで作るので、長さは使わない（続きを足す時を除く）
+        length = opt_int(self.length.get()) if mode == "fresh" and not nakawari and not in_range else None
+        # 続きを足す: 長さは「範囲の終わり（全部なら最後のキー）の後ろに足すフレーム数」（11-07 マスター）
+        extend = opt_int(self.length.get()) if mode == "extend" and not nakawari else None
         if nakawari and not smooth_stop.available():
             raise ValueError("MotionBricks がまだ入っていません。詳細の窓の下の「セットアップ」で入れてください")
-        if not nakawari and mode != "fill" and length is None and not in_range:
-            raise ValueError("「続きを足す」「プロンプトだけで作る」では長さを入れてください")
+        if not nakawari and mode == "extend" and (extend is None or extend < 1):
+            raise ValueError("「続きを足す」では、足す長さ（フレーム数）を入れてください")
+        if not nakawari and mode == "fresh" and length is None and not in_range:
+            raise ValueError("「プロンプトだけで作る」では長さを入れてください")
         selection = None
         if in_range:
             # 選んだキーの最初から最後までを作り直す（どのボーンのキーでも。範囲の中のキーは選んでいなくても通る）
@@ -664,8 +735,8 @@ class App:
             s = runner.Settings(prompt=self.prompt_rows.text(),
                                 steps=int(self.steps.get()), seed=int(self.seed.get()), post_processing=bool(self.post.get()),
                                 cfg_text=float(self.cfg_text.get()), cfg_key=float(self.cfg_key.get()),
-                                length=length, use_keys=mode != "fresh", use_center=bool(self.use_center.get()),
-                                stop_at_last_key=mode != "fresh" and bool(self.stop.get()),
+                                length=length, extend=extend, use_keys=mode != "fresh", use_center=bool(self.use_center.get()),
+                                stop_at_last_key=mode == "fill" and bool(self.stop.get()),
                                 smooth_stop=bool(self.smooth.get()) and smooth_stop.available(), engine="kimodo", **common)
             self.cfg.update(mode=self.mode.get(), length=self.length.get(), prompt=s.prompt, steps=s.steps, seed=s.seed,
                             post_processing=s.post_processing, cfg_text=s.cfg_text, cfg_key=s.cfg_key,

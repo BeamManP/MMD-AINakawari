@@ -86,10 +86,15 @@ class MotionReader:
         return [raw[i * bone_state.BONE_STRIDE:i * bone_state.BONE_STRIDE + 20].split(b"\0", 1)[0] for i in range(count)]
 
     def selected_frames(self):
-        """タイムラインで選んでいるボーンのキーのフレーム（昇順・重なりなし）。どのボーンのキーでも数える。
+        """タイムラインで選んでいるボーンのキーのフレーム（昇順・重なりなし）。どのボーンのキーでも数える。"""
+        return self.scan()[0]
+
+    def scan(self, with_names=False):
+        """(選んでいるキーのフレーム（昇順・重なりなし）, 骨の名前（VMD の形）→ キーのフレームの昇順。with_names が False なら None)。
 
         キーの最後の 4 バイトが選択の印（11-04、90・120F のキーを選んで 734 個中 110 個が 1）。
         窓が 1 秒ごとに読むので、1024 件ずつまとめて読む（1 件ずつだとキーの多いモーションで窓が重くなる）。
+        骨ごとのフレームは「続きを足す」で上書きされるキーを窓に出すのに使う（11-07 マスター）。
         """
         m = self.m
         model = self._model()
@@ -110,7 +115,14 @@ class MotionReader:
                 data, off = cache[c], (i % block) * BONE_KEY_SIZE
             return struct.unpack_from("<3i", data, off) + struct.unpack_from("<i", data, off + 56)
 
-        return sorted({e[0] for i in range(count) for e in _chain(entry, i) if e[3]})
+        chains = [_chain(entry, i) for i in range(count)]
+        selected = sorted({e[0] for chain in chains for e in chain if e[3]})
+        if not with_names:
+            return selected, None
+        frames = {}
+        for raw, chain in zip(self.bone_names(model, count), chains):   # 同じ名前（先頭 15 バイト）の骨は 1 つにまとめる
+            frames.setdefault(vmd._name(raw[:15]), set()).update(e[0] for e in chain)
+        return selected, {n: sorted(f) for n, f in frames.items()}
 
     def read(self, morph_names, ik_names):
         """選択中のモデルのモーション。morph_names・ik_names は PMX の並び（read_pmx_names）。"""

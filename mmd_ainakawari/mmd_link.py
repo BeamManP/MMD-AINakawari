@@ -90,9 +90,13 @@ class MMDLink:
         「選んだキーの間」の範囲に使う。前は MMD の範囲選択の欄（タイムラインの下の開始〜終了フレーム）を読んでいたが、
         場所が分かりにくく、キーを選ぶ方が MMD の操作として自然なので替えた（11-04 マスター）。
         """
+        return self.key_scan()[0]
+
+    def key_scan(self, with_names=False):
+        """(選んでいるキーのフレーム, 骨の名前 → キーのフレーム。with_names が False なら None)。mmd_memory.MotionReader.scan。"""
         reader = mmd_memory.MotionReader(self.hwnd)
         try:
-            return reader.selected_frames()
+            return reader.scan(with_names)
         finally:
             reader.close()
 

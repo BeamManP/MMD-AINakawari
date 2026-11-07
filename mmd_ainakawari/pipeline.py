@@ -90,6 +90,28 @@ def unwritten_parents(skel, names):
     return out
 
 
+def extend_plan(frames_by_name, body, start, add):
+    """「続きを足す」で作る区間と、そこで上書きされる体のキー。窓の赤い注意と生成で同じ決め方にする（11-07 マスター）。
+
+    frames_by_name: VMD の骨の名前 → キーのフレーム。body: 書き戻す骨（VMD の名前）。
+    start: 続きの始まり（範囲の終わり）。None なら体（と全ての親）の最後のキー。add: 足すフレーム数。
+    返り値: (始まり, 終わり, 上書きされる体のキーのフレーム)。始まりの姿勢は MMD から取って続け、その後ろ add フレームを作る。
+    終わりより後ろにもキーがあれば、終わりの姿勢は MMD のまま（つなぐ）ので、終わりのキーは上書きしない。
+    """
+    if add is None or add < 1:
+        raise ValueError("足す長さは 1 フレーム以上にしてください")
+    anchor = body | {ROOT_BONE}
+    if start is None:
+        keyed = [f for n in anchor for f in frames_by_name.get(n, ())]
+        if not keyed:
+            raise ValueError("キーが 1 つもありません（0F にキーを打ってください）")
+        start = max(keyed)
+    end = start + add
+    later = any(f > end for n in anchor for f in frames_by_name.get(n, ()))
+    hit = sorted({f for n in body for f in frames_by_name.get(n, ()) if start < f < end or (f == end and not later)})
+    return start, end, hit
+
+
 def ik_off_bones(skel, ik_rows, frame):
     """表示/IK の行（vmd.split_tail）で、frame の時にオフの IK のボーン名（PMX の名前）。VMD の名前は 20 バイトで切れているので、切って比べる。"""
     off = vmd.ik_off_at(ik_rows, frame)
@@ -213,7 +235,8 @@ def prompt_segments(prompt, first, num):
 
 
 def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame_range=None, cfg=(2.0, 2.0),
-            length=None, use_keys=True, use_center=False, stop_at_last_key=False, max_frames=MAX_FRAMES, context_keys=True):
+            length=None, use_keys=True, use_center=False, stop_at_last_key=False, max_frames=MAX_FRAMES, context_keys=True,
+            extend=False):
     """cfg: (テキストの効き, キーの効き)。Kimodo の既定は (2, 2)。テキストを上げるとプロンプトの動きが強く出る（回転は 8・1 で振り向くほど）。
 
     length: 作るフレーム数（最初のキーから数える）。None なら最後のキーまで。最後のキーより長くすると、その先は続きを作る。
@@ -229,6 +252,8 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
     frame_range: (始まり, 終わり) の MMD のフレーム。その範囲を作り直す。始まりの姿勢（MMD の補間込み）はいつもキーにし、
                 終わりの姿勢は後ろにもキーがある（外の動きが続く）時だけキーにする。長さ（length）は使わない。
                 範囲の中のキーも通る（完全新規なら使わない）。範囲の端の外側 RANGE_CONTEXT フレームの姿勢も使い、外の勢いをつなぐ。
+    extend: True なら frame_range は「続きを足す」区間（extend_plan）。始まりの姿勢から続けて作り、区間の中の体・手足の IK のキーは
+            目印に使わずに上書きする（全ての親のキーは書き戻さない骨なので、そのまま目印にする）。
     context_keys: True なら端の外側の姿勢もキーとして渡し、作る長さに含める（Kimodo。書き戻さない）。
                   False なら姿勢だけ job.context_before・context_after に入れる（中割りの MotionBricks の文脈）。
     """
@@ -259,6 +284,9 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
         # 全ての親のキーが抜けて、戻らない動きになっていた。11-04 マスター）。姿勢のキーにした端は、その姿勢で決まるので外す
         limb_frames = [f for f in limb_frames if a < f <= b and f not in anchors]
         root_all = [f for f in root_all if a < f <= b and f not in anchors]
+        if extend:   # 足す所の中の体のキーは上書きする（始まりの姿勢だけ守る）
+            pose_frames = [f for f in pose_frames if f <= a]
+            limb_frames = []
         if not context_keys:   # 文脈は姿勢だけ取る（MotionBricks の手前の文脈・通り抜ける先）
             first, last = a, b
         else:   # 文脈もキーとして渡し、勢いをつなぐ。書き戻すのは範囲の中だけ（mmd_frames）

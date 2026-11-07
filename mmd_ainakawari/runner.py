@@ -30,7 +30,8 @@ class Settings:
     range_end: int = None
     cfg_text: float = 2.0       # テキストの効き（Kimodo の既定 2）
     cfg_key: float = 2.0        # キーの効き（Kimodo の既定 2）
-    length: int = None          # 作るフレーム数（最初のキーから）。None なら最後のキーまで
+    length: int = None          # 作るフレーム数（最初のキーから）。None なら最後のキーまで。プロンプトだけで作る時（範囲が全部）に使う
+    extend: int = None          # 「続きを足す」: 範囲の終わり（範囲が無ければ最後の体のキー）の後ろに足すフレーム数（pipeline.extend_plan）
     use_keys: bool = True       # False なら体のキーのポーズを使わない（完全新規）
     use_center: bool = False    # True なら毎フレームの腰の位置（センターの上下など）を目印にする
     stop_at_last_key: bool = True   # 最後の体のキーで止まる（キーの後ろに腰を止める目印を足す）
@@ -92,7 +93,10 @@ def load_last_run(link):
 
 def _span_key(settings):
     """作る区間を決める設定。範囲（選んだキーの間）ならその範囲、全部ならキーを使うかと長さ（作り方で区間の終わりが変わる）。
-    Kimodo か MotionBricks かは入れない（同じ区間を別の作り方で作り直す時も、前回の元のキーに戻したいので）。"""
+    Kimodo か MotionBricks かは入れない（同じ区間を別の作り方で作り直す時も、前回の元のキーに戻したいので）。
+    続きを足す時は、足す長さを入れない（長さを変えて作り直したら、前回足した所を元に戻してから足し直す）。"""
+    if settings.extend is not None:
+        return {"extend_after": settings.range_end}   # 範囲の終わり。全部なら None（最後のキー）
     if settings.range_start is not None:
         return {"range": [settings.range_start, settings.range_end]}
     return {"range": None, "use_keys": settings.use_keys, "length": settings.length}
@@ -144,7 +148,6 @@ def generate(settings, log=print, link=None, previous=None):
         log(f"注意: モデルに無いボーンは飛ばして作ります: {'・'.join(rt.missing)}"
             + ("（上半身2 の分の曲がりは上半身に入れます）" if rt.chest_on_spine else ""))
     written = {vmd.vmd_name(n) for n in pipeline.body_bone_names(skel, rt)}
-    rng = (settings.range_start, settings.range_end) if settings.range_start is not None else None
     # 前回の元のキーから作り直すのは、前回と同じ範囲の時だけ。違う範囲で戻すと、前回作った範囲の結果が消えていた
     # （範囲 A を作った後に範囲 B を作ると、B の外の A が元に戻った。11-05 Codex のレビュー）
     # 区間を決める設定（範囲・全部の時はキーを使うかと長さ）が前回と同じ時だけ。前の形の記録（span が無い）は戻さない
@@ -162,16 +165,33 @@ def generate(settings, log=print, link=None, previous=None):
         log(f"  バックアップ: {backup}")
 
     mb = settings.engine == "motionbricks"
+    extend = settings.extend is not None and not mb
+    overwritten = []
+    if extend:   # 区間は、前回の元に戻した後の動きで決める（作り直しで、前回足した所の後ろにさらに足さないように）
+        frames_by_name = {n: [k.frame for k in keys] for n, keys in original.tracks().items()}
+        rng = pipeline.extend_plan(frames_by_name, written, settings.range_end, settings.extend)
+        overwritten = rng[2]
+        rng = rng[:2]
+    else:
+        rng = (settings.range_start, settings.range_end) if settings.range_start is not None else None
     job = pipeline.prepare(pmx, original, "inbetween" if mb else settings.prompt, settings.steps, settings.seed,
                            settings.post_processing, frame_range=rng, cfg=(settings.cfg_text, settings.cfg_key),
-                           length=settings.length, use_keys=settings.use_keys, use_center=settings.use_center,
-                           stop_at_last_key=settings.stop_at_last_key and not mb,
+                           length=None if extend else settings.length, use_keys=settings.use_keys,
+                           use_center=settings.use_center, extend=extend,
+                           stop_at_last_key=settings.stop_at_last_key and not mb and not extend,   # 続きの終わりにキーは無い
                            max_frames=None if mb else pipeline.MAX_FRAMES,   # 中割りはキーの間ごとに作るので上限なし
                            context_keys=not mb)   # 中割りは範囲の手前の動きを MotionBricks の文脈にする
     # マスターが打った体のキー（外側の文脈と、キーの無いフレームに置いた範囲の端を除く。選んだキーの間なら端も本物のキー）
     keyed = set(original.key_frames())
     real = [f for f in job.frames if f not in job.mmd_frames and (f not in job.anchors or f in keyed)]
-    if rng:
+    if extend:
+        shown = f"{rng[0] + 1}〜{rng[1]}F・{rng[1] - rng[0]} フレーム"
+        log(f"{rng[0]}F の姿勢から続けて、後ろに {settings.extend} フレーム（{rng[0] + 1}〜{rng[1]}F）を足します"
+            + (f"。{rng[1]}F の姿勢は MMD のまま（後ろの動きにつなぎます）" if len(job.anchors) > 1 else "")
+            + f"（手前 {pipeline.RANGE_CONTEXT} フレームの動きも渡します）")
+        if overwritten:
+            log(f"注意: 足す所にあった体のキー（{'・'.join(map(str, overwritten))}F）は上書きしました（指・表情などのキーはそのまま）")
+    elif rng:
         lo, hi = (job.anchors[0], job.anchors[-1]) if len(job.anchors) > 1 else (rng[0], rng[1])
         shown = f"{rng[0]}〜{rng[1]}F・{rng[1] - rng[0] + 1} フレーム"
         log(f"範囲 {rng[0]}〜{rng[1]}F を作り直します: "
