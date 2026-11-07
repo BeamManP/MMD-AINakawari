@@ -109,12 +109,16 @@ THIRD_PARTY = """AIナカワリ の zip に同梱している物
   中に pybind11 v2.11.1（BSD-3-Clause。prebuilt\\LICENSE_pybind11.txt）と Eigen 3.4.0（MPL-2.0。prebuilt\\LICENSE_eigen_MPL2.txt。
   ソースは https://gitlab.com/libeigen/eigen/-/tree/3.4.0）を含む
 
-AI のモデル（Kimodo・MotionBricks・Meta Llama 3・LLM2Vec）と、それを動かす Python の部品は同梱していない。
+AI のモデル（Kimodo・MotionBricks・Llama 3・LLM2Vec）と llama.cpp、それを動かす Python の部品は同梱していない。
 詳細の窓の「セットアップ」が、使う人がライセンスに同意してから、それぞれの配布元から落とす:
 - Kimodo（NVIDIA）: コードは Apache-2.0、モデルは NVIDIA Open Model License
 - MotionBricks（NVIDIA）: コードは Apache-2.0、モデルは NVIDIA Open Model Agreement
-- Meta-Llama-3-8B-Instruct（Meta）: Meta Llama 3 Community License・Acceptable Use Policy。Built with Meta Llama 3
-- LLM2Vec（McGill-NLP）: MIT
+- プロンプトの読み取り: Llama-3-LLM2Vec-8B-Kimodo-TextEncoder-GGUF（fernandotonon さん。
+  https://huggingface.co/fernandotonon/Llama-3-LLM2Vec-8B-Kimodo-TextEncoder-GGUF）の Q8_0。
+  Meta-Llama-3-8B-Instruct（Meta）と LLM2Vec（McGill-NLP）を 8bit にした物
+  - Meta Llama 3: Meta Llama 3 Community License・Acceptable Use Policy。Built with Meta Llama 3
+  - LLM2Vec: MIT
+- llama.cpp（ggml-org）: MIT。公式の CPU 版を落とし、llama-server.exe だけ使う
 """
 
 
