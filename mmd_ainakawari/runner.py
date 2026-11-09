@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from . import nakawari, paths, pipeline, smooth_stop, thin, vmd
+from . import nakawari, paths, pipeline, resident, smooth_stop, thin, vmd
 from .mmd_link import MMDLink
 from .mmd_skel import MMDSkeleton
 
@@ -116,8 +116,18 @@ def _save_last_run(link, backup, out, span, model=None):
         os.replace(tmp, LAST_RUN)
 
 
-def generate(settings, log=print, link=None, previous=None):
-    """previous: 前回の generate の戻り値（省くと last_run.json）。MMD の中身が前回の結果のままなら、前回の元のキーから作り直す。"""
+def generate(settings, log=print, link=None, previous=None, cancel=None, on_commit=None):
+    """previous: 前回の generate の戻り値（省くと last_run.json）。MMD の中身が前回の結果のままなら、前回の元のキーから作り直す。
+
+    cancel: 中断の印（threading.Event）。立つと、MMD に書き戻す前の切れ目で resident.Cancelled を出して止まる
+    （作っている途中の常駐にも知らせる）。MMD のキーは触っていない。書き戻しを始めたら最後までやる（途中で止めるとキーが消えたままになる）。
+    on_commit: 書き戻しを始める直前に呼ぶ（ここから先は中断できない、と窓に知らせる）。
+    """
+    with resident.cancellable(cancel):
+        return _generate(settings, log, link, previous, on_commit)
+
+
+def _generate(settings, log, link, previous, on_commit):
     t0 = time.time()
     link = link or MMDLink()
     previous = previous or load_last_run(link)
@@ -253,6 +263,7 @@ def generate(settings, log=print, link=None, previous=None):
         for s, n, text in job.segments:
             log(f"  区間 {s}〜{s + n - 1}F: {text}")
 
+    resident.check_cancel()
     if mb:
         log("MotionBricks で中割り中…")
         result = nakawari.generate(job, os.path.join(WORK_DIR, "motionbricks"), key_stop=settings.key_stop,
@@ -261,9 +272,11 @@ def generate(settings, log=print, link=None, previous=None):
         log("Kimodo で生成中…")
         result = pipeline.run_kimodo(job, os.path.join(WORK_DIR, "kimodo"), on_line=lambda l: log("  " + l),
                                      use_llama=settings.use_llama)
+    resident.check_cancel()
     if settings.smooth_stop and job.stop_frames:
         log("MotionBricks で止まり方を作り直し中…")
         result = smooth_stop.apply(job, result, os.path.join(WORK_DIR, "motionbricks"), log=log)
+    resident.check_cancel()
     generated = pipeline.build_motion(job, result)
     merged = pipeline.merge(original, generated, job)
     out = os.path.join(WORK_DIR, f"kimodo_{stamp}.vmd")
@@ -276,6 +289,10 @@ def generate(settings, log=print, link=None, previous=None):
                 f"手足や頭のずれ最大 {info['world_max'] * 8:.1f}cm・{info['seconds']:.0f} 秒） → {out}")
     vmd.write(out, merged)
 
+    # ここから MMD に書き戻す。この先は中断しない（キーを消してから読み込むので、途中で止めるとキーが消えたままになる）
+    resident.check_cancel()
+    if on_commit:
+        on_commit()
     # 前回の記録は読み込みの前に残す（読み込みで止まっても「元に戻す」でバックアップに戻せるように。11-07 Codex のレビュー）
     _save_last_run(link, backup, out, span, pmx)
     log("MMD に読み込み中…")

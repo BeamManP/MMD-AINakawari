@@ -88,6 +88,22 @@ def _skip_when_empty(c):
     return c
 
 
+class Stopped(Exception):
+    """頼んだ側が中断した（常駐は終わらせず、次の依頼を待つ）。"""
+
+
+def stop_requested(conn):
+    """頼んだ側が、作っている途中に同じ接続で {"cancel": True} を送ってきたか（mmd_ainakawari/resident.py の _send）。
+    頼んだ側がいなくなった（接続が切れた）時も、作り続けても受け取る相手がいないのでやめる。"""
+    try:
+        while conn.poll(0):
+            if conn.recv().get("cancel"):
+                return True
+    except (EOFError, OSError):
+        return True
+    return False
+
+
 MODEL = "kimodo-soma-rp"
 # 計算の方式（mmd_ainakawari/paths.py の説明。無ければ cuda）。load() が見る
 BACKEND = os.environ.get("AINAKAWARI_BACKEND") or "cuda"
@@ -135,11 +151,18 @@ def load(name=MODEL):
     return model
 
 
-def generate(model, req, t_load=0.0):
-    """依頼 → (結果, 1 行のまとめ)。"""
+def generate(model, req, t_load=0.0, should_stop=None):
+    """依頼 → (結果, 1 行のまとめ)。should_stop() が真になったら、ノイズ除去の 1 回ごとの切れ目で Stopped（常駐の中断）。"""
     import torch
     from kimodo.constraints import load_constraints_lst
     from kimodo.tools import seed_everything
+    from tqdm import tqdm
+
+    def progress(steps):   # Kimodo がノイズ除去のループを包む物（既定は tqdm）。1 回ごとに中断を見る
+        for step in tqdm(steps):
+            if should_stop is not None and should_stop():
+                raise Stopped()
+            yield step
 
     if req.get("model", MODEL) != MODEL:
         raise ValueError(f"モデル {req['model']} には対応していません（{MODEL} だけ）")
@@ -214,17 +237,31 @@ def generate(model, req, t_load=0.0):
     if sum(int(s["frames"]) for s in segments) != num_frames:
         raise ValueError(f"segments add up to {sum(int(s['frames']) for s in segments)} frames, expected {num_frames}")
     t1 = time.time()
-    out = model(
-        [s["prompt"] for s in segments],
-        [int(s["frames"]) for s in segments],
-        constraint_lst=constraints,
-        num_denoising_steps=int(req.get("steps", 100)),
-        cfg_weight=[float(v) for v in req.get("cfg_weight", [2.0, 2.0])],  # [テキストの効き, キーの効き]（Kimodo の既定は 2, 2）
-        num_samples=1,
-        multi_prompt=True,
-        post_processing=bool(req.get("post_processing", True)),
-        return_numpy=True,
-    )
+    # Kimodo（e1c219c）の区間ごとの生成（_multiprompt）は、受け取った progress_bar を内側の _generate に渡していない
+    # （既定の tqdm のまま回る。11-10 に中断が効かなくて気づいた）。公式のコードは書き換えず、この生成の間だけ
+    # _generate に progress を差し込む
+    inner = model._generate
+
+    def generate_stoppable(*args, **kwargs):
+        kwargs.setdefault("progress_bar", progress)
+        return inner(*args, **kwargs)
+
+    model._generate = generate_stoppable
+    try:
+        out = model(
+            [s["prompt"] for s in segments],
+            [int(s["frames"]) for s in segments],
+            constraint_lst=constraints,
+            num_denoising_steps=int(req.get("steps", 100)),
+            cfg_weight=[float(v) for v in req.get("cfg_weight", [2.0, 2.0])],  # [テキストの効き, キーの効き]（Kimodo の既定は 2, 2）
+            num_samples=1,
+            multi_prompt=True,
+            post_processing=bool(req.get("post_processing", True)),
+            return_numpy=True,
+            progress_bar=progress,
+        )
+    finally:
+        del model._generate   # クラスの元の関数に戻る
     t_gen = time.time() - t1
 
     local = out["local_rot_mats"]  # (1, T, 77, 3, 3)
@@ -339,9 +376,15 @@ def serve(port):
                 conn.send({"ok": True, "result": released, "line": line})
                 print(line, flush=True)
                 continue
-            result, line = generate(model, req)
+            result, line = generate(model, req, should_stop=lambda: stop_requested(conn))
             conn.send({"ok": True, "result": result, "line": line})
             print(line, flush=True)
+        except Stopped:
+            print("cancelled", flush=True)
+            try:
+                conn.send({"ok": False, "cancelled": True})
+            except OSError:   # 頼んだ側がいなくなっていた
+                pass
         except Exception:
             text = traceback.format_exc()
             print(text, flush=True)

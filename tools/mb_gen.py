@@ -52,6 +52,22 @@ from motionbricks.model.config import MotionBricksInferenceConfig
 from motionbricks.model.soma.contract import SOMA_N1_FP32_ONNX_PATH
 from motionbricks.model.soma.engine import MotionBricksSOMAEngine
 
+class Stopped(Exception):
+    """頼んだ側が中断した（常駐は終わらせず、次の依頼を待つ）。"""
+
+
+def stop_requested(conn):
+    """頼んだ側が、作っている途中に同じ接続で {"cancel": True} を送ってきたか（mmd_ainakawari/resident.py の _send）。
+    頼んだ側がいなくなった（接続が切れた）時も、作り続けても受け取る相手がいないのでやめる。"""
+    try:
+        while conn.poll(0):
+            if conn.recv().get("cancel"):
+                return True
+    except (EOFError, OSError):
+        return True
+    return False
+
+
 MIN_TOKENS, MAX_TOKENS = 6, 16   # 1 回で 4k-6 フレーム（両端込み）＝ 18〜58
 AUTHKEY = b"AINakawari.resident.v1"   # mmd_ainakawari/resident.py と同じ
 IDLE_SECONDS = 5 * 60                # 常駐で、これだけ頼まれなければ終わる（tools/kimodo_gen.py と同じ）
@@ -139,8 +155,8 @@ def resample(roots, rots, contacts, count):
     return out_roots, out_rots, out_contacts
 
 
-def generate(engine, rig, job):
-    """1 つの依頼（文脈と目標の並び）→ Kimodo の形の結果。"""
+def generate(engine, rig, job, should_stop=None):
+    """1 つの依頼（文脈と目標の並び）→ Kimodo の形の結果。should_stop() が真になったら、目標ごとの切れ目で Stopped。"""
     context = [rig.to_mb(p) for p in job["context"]]
     if len(context) != 4:
         raise ValueError("context は 4 つの姿勢")
@@ -149,6 +165,8 @@ def generate(engine, rig, job):
     tgt = engine.create_input(rig.skeleton)
     out = engine.create_output(rig.skeleton)
     for target in job["targets"]:
+        if should_stop is not None and should_stop():
+            raise Stopped()
         count = int(target["frames"]) + 1
         tokens = min(MAX_TOKENS, max(MIN_TOKENS, round((count + 6) / 4)))
         if not 4 * MIN_TOKENS - 6 <= count <= 4 * MAX_TOKENS - 6:
@@ -177,12 +195,12 @@ def generate(engine, rig, job):
             "foot_contacts": contacts.reshape(-1).tolist(), "segments": segments}
 
 
-def run(engine, rigs, req):
-    """依頼 → (結果, 1 行のまとめ)。rigs は骨格のファイルごとの Rig の控え。"""
+def run(engine, rigs, req, should_stop=None):
+    """依頼 → (結果, 1 行のまとめ)。rigs は骨格のファイルごとの Rig の控え。should_stop は generate の説明。"""
     rig = rigs.get(req["skeleton"]) or rigs.setdefault(req["skeleton"], Rig(req["skeleton"]))
     jobs = req["jobs"] if "jobs" in req else [req]
     t0 = time.time()
-    results = [generate(engine, rig, job) for job in jobs]
+    results = [generate(engine, rig, job, should_stop) for job in jobs]
     seconds = time.time() - t0
     result = {"results": results, "seconds_generate": seconds} if "jobs" in req else dict(results[0], seconds_generate=seconds)
     return result, f"ok jobs={len(results)} frames={[r['num_frames'] for r in results]} seconds={seconds:.2f}"
@@ -227,9 +245,15 @@ def serve(port):
                     conn.close()
                     print("stale exit", flush=True)
                     os._exit(0)
-                result, line = run(engine, rigs, req)
+                result, line = run(engine, rigs, req, should_stop=lambda: stop_requested(conn))
                 conn.send({"ok": True, "result": result, "line": line})
                 print(line, flush=True)
+            except Stopped:
+                print("cancelled", flush=True)
+                try:
+                    conn.send({"ok": False, "cancelled": True})
+                except OSError:   # 頼んだ側がいなくなっていた
+                    pass
             except Exception:
                 text = traceback.format_exc()
                 print(text, flush=True)

@@ -20,7 +20,9 @@ import torch.nn.functional as F
 from torch import nn
 
 PROVIDERS = {"directml": "DmlExecutionProvider", "cpu": "CPUExecutionProvider"}
-EXPORT = 3      # 書き出し方の版（変えたら作り直す）
+# DirectML は何も言わないと 1 番目の GPU を使う（ノート PC では内蔵の GPU のことが多い）。性能の高い GPU を選ばせる
+DML_OPTIONS = {"performance_preference": "high_performance", "device_filter": "gpu"}
+EXPORT = 3     # 書き出し方の版（変えたら作り直す）
 OPSET = 17
 BLOCKS = ("root_model", "body_model")
 INPUTS = ("x", "text_feat", "timesteps", "first_heading_angle")
@@ -188,7 +190,8 @@ class OrtBlock(nn.Module):
         if self.provider == "directml":   # DirectML の決まり（メモリの使い回しを切る・順に実行）
             options.enable_mem_pattern = False
             options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-        providers = [PROVIDERS[self.provider]] + (["CPUExecutionProvider"] if self.provider != "cpu" else [])
+        providers = ([("DmlExecutionProvider", DML_OPTIONS), "CPUExecutionProvider"] if self.provider == "directml"
+                     else ["CPUExecutionProvider"])
         session = ort.InferenceSession(self.onnx_path, options, providers=providers)
         if session.get_providers()[0] != PROVIDERS[self.provider]:   # 開けないと黙って CPU になるので、確かめる
             raise RuntimeError(f"{PROVIDERS[self.provider]} で開けませんでした（開いたのは {session.get_providers()}）")

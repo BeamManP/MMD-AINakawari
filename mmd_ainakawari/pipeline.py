@@ -456,8 +456,10 @@ def run_kimodo(job, work_dir, on_line=None, use_llama=True):
                         ("プロンプトの読み取り（Llama 3）を入れていない", "セットアップで入れてください"))
             raise ValueError(f"{why}ので、「サンプルから選ぶ」の文だけが使えます。"
                              f"読み取れない文: {' / '.join(lost)}（自由に書くには、{how}）")
-    # 頼み終わるまでを 1 つずつにする（MMD ごとの窓が同時に頼んでも、常駐はどのみち 1 つずつ作る）
-    with _KIMODO_LOCK:
+    # 頼み終わるまでを 1 つずつにする（MMD ごとの窓が同時に頼んでも、常駐はどのみち 1 つずつ作る）。
+    # 待っている間・作っている間に中断されたら resident.Cancelled（resident.cancellable の中で呼ばれた時）
+    resident.acquire(_KIMODO_LOCK)
+    try:
         os.makedirs(work_dir, exist_ok=True)
         res = os.path.join(work_dir, "result.json")
         if os.path.exists(res):
@@ -467,6 +469,8 @@ def run_kimodo(job, work_dir, on_line=None, use_llama=True):
         log(line)
         json.dump(result, open(res, "w", encoding="utf-8"))
         return result
+    finally:
+        _KIMODO_LOCK.release()
 
 
 def _key_difference(a, b):

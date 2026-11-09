@@ -44,6 +44,8 @@ from motionbricks.inference.types import TensorMode   # noqa: E402
 from motionbricks.model.soma.engine import MotionBricksSOMAEngine   # noqa: E402
 
 PROVIDERS = {"directml": "DmlExecutionProvider", "cpu": "CPUExecutionProvider"}
+# DirectML は何も言わないと 1 番目の GPU を使う（ノート PC では内蔵の GPU のことが多い）。性能の高い GPU を選ばせる
+DML_OPTIONS = {"performance_preference": "high_performance", "device_filter": "gpu"}
 BATCH_DIM = "batch_size"   # ONNX の入出力の先頭の次元の名前。MotionBricks は 1 で使う
 DML_PATCH = 1              # directml_model の手直しの版（変えたら作り直す）
 
@@ -158,7 +160,7 @@ class OrtSOMAEngine(MotionBricksSOMAEngine):
             options.enable_mem_pattern = False
             options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
             onnx_path = directml_model(onnx_path, cache_dir)
-        providers = [PROVIDERS[provider]] + (["CPUExecutionProvider"] if provider != "cpu" else [])
+        providers = [("DmlExecutionProvider", DML_OPTIONS), "CPUExecutionProvider"] if provider == "directml" else ["CPUExecutionProvider"]
         self._session = ort.InferenceSession(str(onnx_path), options, providers=providers)
         if self._session.get_providers()[0] != PROVIDERS[provider]:
             raise RuntimeError(f"{PROVIDERS[provider]} で開けませんでした（開いたのは {self._session.get_providers()}）")

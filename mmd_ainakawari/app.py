@@ -180,7 +180,10 @@ class App:
             self.cfg.update(tab="nakawari", mode="fill")
         self.q = queue.Queue()
         self.busy = False
-        self.selected_keys = None    # MMD のタイムラインで選んでいるキーのフレーム（_read_mmd が 1 秒ごとに読む。読めなければ None）
+        # 生成の中断（11-10 マスター）。生成中は「生成」が「中断」になる。押せるのは MMD に書き戻す前まで（cancellable）
+        self.cancel = threading.Event()
+        self.cancellable = False
+        self.selected_keys = None   # MMD のタイムラインで選んでいるキーのフレーム（_read_mmd が 1 秒ごとに読む。読めなければ None）
         # 「続きを足す」の時だけ読む: 骨（VMD の名前）→ キーのフレーム と、選択中のモデルの書き戻す骨（PMX ごとに覚える）
         self._key_frames = self._body_names = None
         self._body_cache = {}
@@ -256,7 +259,7 @@ class App:
                         command=self._mode_changed).pack(side="left")
         bf = ttk.Frame(foot)
         bf.pack(fill="x")
-        self.gen_btn = ttk.Button(bf, text="生成", command=self._generate)
+        self.gen_btn = ttk.Button(bf, text="生成", command=self._generate_or_cancel)
         self.gen_btn.pack(side="left", fill="x", expand=True, ipady=8)
         self.undo_btn = ttk.Button(bf, text="元に戻す", command=self._undo, state="disabled")
         self.undo_btn.pack(side="left", padx=(6, 0), ipady=8)
@@ -707,8 +710,10 @@ class App:
             kind, payload = self.q.get()
             if kind == "log":
                 self._write_log(payload)
+            elif kind == "commit":   # MMD への書き戻しが始まる。ここからは中断できない
+                self.cancellable = False
             elif kind == "done":
-                self.busy = False
+                self.busy = self.cancellable = False
                 ok, msg = payload
                 self.status.set(msg)
                 if not ok:
@@ -732,11 +737,16 @@ class App:
         elif not block and self._status_before is not None:
             self.status.set(self._status_before)
             self._status_before = None
+        # 生成中は「生成」が「中断」になる。押した後（止まるのを待っている間）と、書き戻し・元に戻すの間は押せない
+        can_cancel = self.busy and self.cancellable and not self.cancel.is_set()
+        label = "中断" if self.busy and self.cancellable else "生成"
+        if str(self.gen_btn.cget("text")) != label:
+            self.gen_btn.configure(text=label)
         # 変わった時だけ設定する（毎回設定し直すと、マウスオーバーが 0.5 秒で消えていた。widgets.set_enabled）
-        if set_enabled(self.gen_btn, not (self.busy or block)):
+        if set_enabled(self.gen_btn, can_cancel or not (self.busy or block)):
             # 押しても反応しないことがある（11-08 マスター）。一瞬だけ押せなくなっていたのか、後から記録で分かるように残す
-            applog.write("「生成」を押せるようにしました" if not (self.busy or block)
-                         else f"「生成」を押せなくしました（{'生成中' if self.busy else block}）")
+            applog.write(f"「{label}」を押せるようにしました" if can_cancel or not (self.busy or block)
+                         else f"「{label}」を押せなくしました（{'生成中' if self.busy else block}）")
         set_enabled(self.undo_btn, bool(self.last_backup and not self.busy))
         self._sync_panel()
 
@@ -806,6 +816,7 @@ class App:
             shown = {
                 panel.RANGE: range_text,
                 panel.STATUS: "詳細の窓で「セットアップ」を押してください" if missing else self.status.get(),
+                panel.GENERATE: str(self.gen_btn.cget("text")),   # 生成中は「中断」
             }
             for item, text in shown.items():
                 if self._seen.get(("text", item)) != text:
@@ -833,7 +844,7 @@ class App:
             self.status.set("MMD が応答しませんでした。もう一度押してください")
             return
         if button == panel.GENERATE and str(self.gen_btn.cget("state")) == "normal":
-            self._generate(fill=True)
+            self._generate_or_cancel(fill=True)
         elif button == panel.UNDO and str(self.undo_btn.cget("state")) == "normal":
             self._undo()
 
@@ -907,6 +918,9 @@ class App:
                     self.last_backup = r["backup"]
                     self.last_run = r
                 self.q.put(("done", (True, ok_message)))
+            except resident.Cancelled:   # 中断は失敗ではない。MMD のキーは触っていない（書き戻しの前でしか止まらない）
+                self.q.put(("log", "中断しました（MMD のキーはそのままです）"))
+                self.q.put(("done", (True, "中断しました")))
             except Exception as e:  # 窓に出して止める（握りつぶさない）。どこで落ちたかは記録にだけ書く
                 applog.exception("失敗した時の traceback:")
                 try:   # 読み込みで止まった時も「元に戻す」で戻せるように、読み込みの前に残した記録を読み直す（11-07 Codex のレビュー）
@@ -918,6 +932,15 @@ class App:
                 self.q.put(("log", f"失敗: {e}"))
                 self.q.put(("done", (False, f"失敗: {e}")))
         threading.Thread(target=work, daemon=True).start()
+
+    def _generate_or_cancel(self, fill=False):
+        """「生成」のボタン（窓・パネル）。生成中は「中断」として働く。"""
+        if not self.busy:
+            self._generate(fill=fill)
+        elif self.cancellable and not self.cancel.is_set():
+            self.cancel.set()   # 生成のスレッドと常駐が、次の切れ目で止まる（resident.cancellable）
+            self.status.set("中断しています…")
+            self._write_log("中断を頼みました…")
 
     def _generate(self, fill=False):
         try:
@@ -931,7 +954,10 @@ class App:
         self._write_log("―" * 20)
         self.status.set("生成中…")
         previous = self.last_run
-        self._run(lambda log: runner.generate(s, log, link=self.link, previous=previous),
+        self.cancel.clear()
+        self.cancellable = True
+        self._run(lambda log: runner.generate(s, log, link=self.link, previous=previous, cancel=self.cancel,
+                                              on_commit=lambda: self.q.put(("commit", None))),
                   "できました。MMD で再生して確かめてください")
 
     def _undo(self):
