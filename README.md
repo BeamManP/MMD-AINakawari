@@ -37,11 +37,15 @@ MMD（MikuMikuDance）で打ったキーとキーの間を、AI が中割りし�
 |---|---|---|
 | OS | Windows 10／11（64bit） | Windows 11 |
 | MMD | MikuMikuDance 9.32 x64（日本語版） | 9.32 x64 |
-| GPU | NVIDIA の GPU。GTX 16 シリーズ／RTX 20 シリーズ以降、VRAM 6GB 以上。ドライバは新しい物に | RTX 3090（24GB） |
-| メモリ | 16GB 以上（プロンプトの読み取りに約 8GB 使う。サンプルの文だけなら使わない。MMD を全部閉じるか、5 分使わなければ空けます） | 64GB |
+| GPU | NVIDIA の GPU。GTX 16 シリーズ／RTX 20 シリーズ以降、VRAM 6GB 以上（使うのは約 2.6GB）。ドライバは新しい物に | RTX 3090（24GB）。GTX 1650（4GB）でも動いたと報告をいただきました |
+| メモリ | 16GB 以上（プロンプトの読み取りに約 8GB 使う。サンプルの文だけなら使わない。MMD を全部閉じるか、5 分使わなければ空けます） | 64GB。メモリ 16GB の PC でも動いたと報告をいただきました |
 | ランタイム | [Microsoft Visual C++ 再頒布可能パッケージ（x64）](https://aka.ms/vs/17/release/vc_redist.x64.exe)。入っていなければ、セットアップがここへ案内します | |
 | ディスク | 約 21GB（Kimodo 約 15GB・MotionBricks 約 6GB） | |
 | ネット | セットアップの時だけ（約 12GB を落とします） | |
+
+**Llama 3 なし（サンプルの文だけ）の目安**: VRAM 4GB 以上・メモリ 8GB 以上・空き約 13GB・落とす量約 4GB。
+AI の部分が使うのは、メモリ約 2.1GB（Kimodo 1.7GB・MotionBricks 0.4GB）と VRAM 約 2.6GB です（11-10 に測った値）。
+**メモリ 8GB の PC ではまだ確かめていません。動いた・動かなかったを教えてもらえると助かります。**
 
 プラグインの土台の [MMDPlugin](https://bowlroll.net/file/121761)（ver0.41 64bit・おいがみ さん）は zip に入っています。MME もそのまま使えます。
 詳細の窓の「Kimodo」タブの下に、この PC の GPU とメモリで動くかの判定が出ます。
