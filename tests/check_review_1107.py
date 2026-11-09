@@ -7,6 +7,7 @@
 3. 読み込みが失敗したら、バックアップを読み込み直すか
 4. IK をオフにしたフレームの姿勢を、IK を解かずに読むか
 5. 長い日本語のモデル名で、書く・読む・書くを繰り返しても止まらないか
+6. 書き戻しで消すのは、ボーンと表情の行だけか（「表示･IK･外親」の行を消すと外部親が外れる。11-09）
 モデルは Tda式初音ミク V4X、動きは work\\demo のキーだけの VMD（30F おき）。どちらも手元に無ければ止める。
 """
 import os
@@ -116,7 +117,7 @@ check("1. 書き戻す骨のキーは前回の元のキーのまま", orig is no
 # ---- 2・3. 読み込む直前の確かめと、失敗の戻し ------------------------------------------------------
 class Calls:
     def __init__(self, load_ok=(True,)):
-        self.log, self.load_ok = [], list(load_ok)
+        self.log, self.load_ok, self.tracks = [], list(load_ok), []
 
 
 def fake_link(selected, calls):
@@ -125,7 +126,10 @@ def fake_link(selected, calls):
     link.selected_model = lambda: {"path": selected, "name": os.path.basename(selected)}
     link.current_frame = lambda: 0
     mmd_link.playback.get = lambda hwnd=None: {"playing": False}
-    mmd_link.timeline.select_range = lambda *a, **k: (calls.log.append("select"), {"status": "completed"})[1]
+    def select_range(start, end, track, hwnd=None):
+        calls.log.append("select"); calls.tracks.append(track)
+        return {"status": "completed"}
+    mmd_link.timeline.select_range = select_range
     mmd_link.edit_actions.perform = lambda *a, **k: (calls.log.append("delete"), {"status": "completed"})[1]
     mmd_link.scene.set_frame = lambda *a, **k: None
 
@@ -157,6 +161,8 @@ except (RuntimeError, TypeError) as e:
     msg = str(e)
 restored = ("load", "backup0.vmd", True) in calls.log
 check("3. 読み込みが失敗したら、バックアップを読み込み直す", restored, str(calls.log))
+# 11-09: 「全ﾌﾚｰﾑ」で消すと「表示･IK･外親」の行も消えて外部親が外れる。ボーンと表情の行だけを消す
+check("6. 書き戻しで消すのはボーンと表情の行だけ（外部親を外さない）", calls.tracks == ["全ボーンﾌﾚｰﾑ", "全表情ﾌﾚｰﾑ"], str(calls.tracks))
 check("3. 失敗は知らせる（黙って成功にしない）", bool(msg) and "TypeError" not in type(msg).__name__)
 
 calls = Calls(load_ok=("raise", True))
