@@ -119,6 +119,9 @@ AI のモデル（Kimodo・MotionBricks・Llama 3・LLM2Vec）と llama.cpp、�
   - Meta Llama 3: Meta Llama 3 Community License・Acceptable Use Policy。Built with Meta Llama 3
   - LLM2Vec: MIT
 - llama.cpp（ggml-org）: MIT。公式の CPU 版を落とし、llama-server.exe だけ使う
+
+サンプルの文（mmd_ainakawari\\prompt_samples.txt）の読み取り結果（上のプロンプトの読み取りで作った 4096 個の数・44 文）は、
+Llama を入れない人も作れるように app\\mmd_ainakawari\\text_cache に入れている。Built with Meta Llama 3
 """
 
 

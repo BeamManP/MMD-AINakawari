@@ -60,7 +60,7 @@ def main():
         return R_ROOT[idx], R_ROT[idx]
 
 
-    def fake_kimodo(job, work_dir, on_line=None):
+    def fake_kimodo(job, work_dir, on_line=None, **_kw):
         n = job.request["num_frames"]
         root, rot = frames_of(n)
         return {"fps": 30.0, "num_frames": n, "names": REAL["names"], "root": root.reshape(-1).tolist(),

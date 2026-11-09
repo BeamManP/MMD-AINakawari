@@ -37,7 +37,7 @@ class Server:
     cwd: str
     env: dict
     args: tuple = ()             # --serve <口> の後ろに付ける引数
-    start_timeout: float = 180.0
+    start_timeout: float = 600.0   # 読み込みの上限。メモリ 16GB・GTX 1650 の PC で 180 秒を超えた報告があり 600 に（11-10）
 
 
 def _log_path(server):
@@ -156,26 +156,30 @@ def shutdown(server):
         return True
 
 
-def stop(name, port, wait=10.0):
-    """窓のプロセスが終わる時に、口 port の常駐がいれば終わらせる。終わらせたら True。
+def notify(name, port, request, wait=10.0):
+    """口 port の常駐がいれば request を送って答えを返す。いなければ立ち上げずに None。
 
-    例外は出さない（窓の終わりを止めない）。生成の途中や読み込み中で wait 秒のうちに答えない時はあきらめる。
-    その時は常駐が、作り終わってから自分のアイドルの時間（5 分）で終わる。
+    例外は出さない（窓の終わり・設定の切り替えを止めない）。生成の途中や読み込み中で wait 秒のうちに答えない時は None。
     """
     server = Server(name, port, "", "", "", {})
     lock = _start_locks[port]
     if not lock.acquire(timeout=wait):   # 生成のスレッドが立ち上げている途中
-        return False
+        return None
     try:
         conn = _connect(server, timeout=wait)
         if conn is None:
-            return False
-        _send(conn, server, {"shutdown": True})
-        return True
+            return None
+        return _send(conn, server, request)
     except Exception:   # いない・ほかのプログラム・答えない
-        return False
+        return None
     finally:
         lock.release()
+
+
+def stop(name, port, wait=10.0):
+    """窓のプロセスが終わる時に、口 port の常駐がいれば終わらせる。終わらせたら True。
+    答えない時は、常駐が作り終わってから自分のアイドルの時間（5 分）で終わる。"""
+    return notify(name, port, {"shutdown": True}, wait) is not None
 
 
 def _wait_closed(server, seconds=10):

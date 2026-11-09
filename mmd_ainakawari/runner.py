@@ -40,6 +40,7 @@ class Settings:
     key_stop: bool = False          # 中割りで、キーごとに止まる（オフなら次のキーへの速さで通る）
     wrist_lerp: bool = False        # 中割りで、手首だけキーの間を補間でつなぐ（MotionBricks は手首を回しすぎることがある）
     thin: int = 0                   # 生成したキーの間引き（thin.LEVELS の番号。0 は間引かない。窓の既定は thin.DEFAULT_LEVEL）
+    use_llama: bool = True          # False なら Llama を使わず、読み取り結果のある文（サンプル）だけで作る（メモリが足りない人向け。11-10）
 
 
 def _same_motion(a, b, tol=1e-3, fixed_pos=(), names=None):
@@ -258,7 +259,8 @@ def generate(settings, log=print, link=None, previous=None):
                                    wrist_lerp=settings.wrist_lerp, log=log)
     else:
         log("Kimodo で生成中…")
-        result = pipeline.run_kimodo(job, os.path.join(WORK_DIR, "kimodo"), on_line=lambda l: log("  " + l))
+        result = pipeline.run_kimodo(job, os.path.join(WORK_DIR, "kimodo"), on_line=lambda l: log("  " + l),
+                                     use_llama=settings.use_llama)
     if settings.smooth_stop and job.stop_frames:
         log("MotionBricks で止まり方を作り直し中…")
         result = smooth_stop.apply(job, result, os.path.join(WORK_DIR, "motionbricks"), log=log)

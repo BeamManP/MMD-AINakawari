@@ -27,8 +27,9 @@ MMD（MikuMikuDance）で打ったキーとキーの間を、AI が中割りし�
 | **キー以外の手がかり**（Kimodo） | 全ての親だけのキーは「腰がそこを通る」目印、足 IK・腕 IK だけのキーは「手足がそこに来る」目印になる（MotionBricks の中割りでは使わない） |
 | **なめらかに止まる** | 最後のキーでぴたっと止まらず、MotionBricks で自然に減速して止まる |
 | **元に戻す** | 生成の前のモーションに 1 回で戻す |
-| **サンプルのプロンプト** | 英語が苦手でも、「前へ歩く：A person walks forward.」のような一覧から選べる（6 種類・43 個） |
+| **サンプルのプロンプト** | 英語が苦手でも、「前へ歩く：A person walks forward.」のような一覧から選べる（7 種類・44 個） |
 | **軽い** | VRAM 6GB の GPU・メインメモリ 16GB の PC を目安にしています（プロンプトの読み取りは CPU で、1 文 0.5 秒ほど） |
+| **Llama なしでも** | セットアップで「プロンプトを自由に書けるようにする」を外すと、Llama 3（約 8GB）を入れずにサンプルの文だけで作れます。メインメモリも約 8GB 少なく済みます。後から入れることもできます。入れた後でメモリが足りない時は、詳細の窓の「プロンプトの読み取り（Llama 3）を使う」を外すと、消さずに同じ形にできます |
 
 ## 動く環境
 
@@ -37,7 +38,7 @@ MMD（MikuMikuDance）で打ったキーとキーの間を、AI が中割りし�
 | OS | Windows 10／11（64bit） | Windows 11 |
 | MMD | MikuMikuDance 9.32 x64（日本語版） | 9.32 x64 |
 | GPU | NVIDIA の GPU。GTX 16 シリーズ／RTX 20 シリーズ以降、VRAM 6GB 以上。ドライバは新しい物に | RTX 3090（24GB） |
-| メモリ | 16GB 以上（プロンプトの読み取りに約 8GB 使う。MMD を全部閉じるか、5 分使わなければ空けます） | 64GB |
+| メモリ | 16GB 以上（プロンプトの読み取りに約 8GB 使う。サンプルの文だけなら使わない。MMD を全部閉じるか、5 分使わなければ空けます） | 64GB |
 | ランタイム | [Microsoft Visual C++ 再頒布可能パッケージ（x64）](https://aka.ms/vs/17/release/vc_redist.x64.exe)。入っていなければ、セットアップがここへ案内します | |
 | ディスク | 約 21GB（Kimodo 約 15GB・MotionBricks 約 6GB） | |
 | ネット | セットアップの時だけ（約 12GB を落とします） | |
@@ -48,7 +49,8 @@ MMD（MikuMikuDance）で打ったキーとキーの間を、AI が中割りし�
 ## インストール
 
 ### 1. zip を落として、MMD のフォルダに展開する
-[Releases](https://github.com/BeamManP/MMD-AINakawari/releases) から `MMD-AINakawari-<版>.zip` を落とします。
+[Releases](https://github.com/BeamManP/MMD-AINakawari/releases) の「Assets」から `MMD-AINakawari-<版>.zip`（約 70MB）を落とします。
+その下の「Source code (zip)」や、このページの緑の「Code」→「Download ZIP」はプログラムのソースで、`AIナカワリ導入.cmd` が入っていません。
 **MMD を閉じてから**、zip の中身を `MikuMikuDance.exe` のあるフォルダに展開します。中身は次の 3 つです。
 
 ```
@@ -173,7 +175,8 @@ MMDPlugin（`MMDPlugin.dll`・`d3d9.dll`・`d3dx9_43.dll`・`plugin\MMDPlugin\`�
 - [mmd-mcp](https://github.com/BeamManP/mmd-mcp)（MIT-0 ほか）
 - zip に同梱の Python（python-build-standalone）と uv などのライセンスは、zip の `MMD-AINakawari\THIRD_PARTY.txt` に書いています
 
-AI のモデル（Kimodo・MotionBricks・Llama 3・LLM2Vec）と llama.cpp は、zip にもこのリポジトリにも入っていません。セットアップが、それぞれの配布元から落とします（セットアップの画面でライセンスに同意してから）。
+AI のモデル（Kimodo・MotionBricks・Llama 3・LLM2Vec）と llama.cpp は、zip にもこのリポジトリにも入っていません
+（サンプルの文を上のプロンプトの読み取りで数にした結果 44 文分・1MB 足らずだけは、Llama なしでも作れるように `mmd_ainakawari/text_cache` に入れています）。セットアップが、それぞれの配布元から落とします（セットアップの画面でライセンスに同意してから）。
 
 ## 開発者向け
 リポジトリから動かす時は、[mmd-mcp](https://github.com/BeamManP/mmd-mcp) の Python 環境（`pip install -e . numpy` と `scripts\build_native.cmd`。Visual Studio 2022 の C++ が要ります）で窓を動かします。

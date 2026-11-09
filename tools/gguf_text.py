@@ -26,7 +26,7 @@ HEAD = "<|start_header_id|>user<|end_header_id|>\n\n"   # LLM2Vec が Meta-Llama
 EOT = "<|eot_id|>"
 DIM = 4096
 CONTEXT = 512          # 1 文のトークンの上限（双方向の注意は 1 回で全部読むので、-b・-ub も同じにする）
-START_TIMEOUT = 180.0  # 起動の上限（Q8_0 の 8GB をディスクから読む。2 回目からは数秒）
+START_TIMEOUT = 600.0  # 起動の上限（Q8_0 の 8GB をディスクから読む。2 回目からは数秒。メモリ 16GB の PC で 180 秒を超えた報告があり 600 に。11-10）
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
@@ -145,6 +145,95 @@ class LlamaServerEncoder:
         one = isinstance(text, str)
         texts = [text] if one else list(text)
         e = torch.from_numpy(np.stack([self.embed(t) for t in texts]))[:, None].to(self._device)   # (N, 1, 4096)
+        if one:
+            return e[0], 1
+        return e, [1] * len(texts)
+
+    def to(self, device=None, dtype=None):
+        if device is not None:
+            self._device = str(device)
+        return self
+
+    def eval(self):
+        return self
+
+    def close(self):
+        """llama-server を終わらせる（メインメモリ約 7.6GB を空ける）。"""
+        if self.proc.poll() is None:
+            self.proc.kill()
+            self.proc.wait(timeout=30)
+        self._log.close()
+
+
+class NoTextEncoder(RuntimeError):
+    """読み取り結果の無い文が来たが、プロンプトの読み取り（Llama）を入れていない。"""
+
+
+class CachedText:
+    """Kimodo の text_encoder（LlamaServerEncoder と同じ呼び方）。読み取り結果を同梱 → 手元の順に引き、どちらにも無い文だけ
+    Llama（llama-server）で読む（mmd_ainakawari/text_keys.py）。llama-server は初めて要った時に起こす（11-10 マスター。
+    前は常駐の起動で必ず起こし、サンプルの文でもメインメモリを約 7.6GB 使っていた）。空の文は Llama に聞かずに 0
+    （Kimodo も空の文の結果は 0 で塗りつぶす。kimodo_model.py の「handle empty string」）。
+
+    make_encoder(): LlamaServerEncoder を作る。Llama が入っていなければ NoTextEncoder を投げる。
+    use_cache=False: 読み取り結果を引かず・ためない（セットアップの試しで、Llama そのものが動くかを確かめる時）。
+    11-07〜11-09 は公式デモの CachedTextEncoder を使っていた。鍵と置き方は同じなので、ためた結果はそのまま使える。
+    """
+
+    def __init__(self, make_encoder, device="cuda", use_cache=True):
+        from mmd_ainakawari import text_keys
+
+        self._keys = text_keys
+        self._make = make_encoder
+        self.encoder = None
+        self._device = device
+        self.use_cache = use_cache
+        self.allow_llama = True   # False: 読み取り結果のある文だけ（窓の「Llama を使う」を外した時。11-10 マスター）
+        self.hits = 0
+        self.misses = 0
+
+    def release(self):
+        """起きている llama-server を終わらせる。次に読み取り結果の無い文が来たら、また起こす。終わらせたら True。"""
+        if self.encoder is None:
+            return False
+        self.encoder.close()
+        self.encoder = None
+        return True
+
+    def vector(self, text):
+        """1 文 → 4096 次元（float32）。"""
+        clean = self._keys.sanitize_text(text)
+        if not clean:
+            return np.zeros(DIM, dtype=np.float32)
+        if self.use_cache:
+            path = self._keys.find_clean(clean)
+            if path:
+                arr = np.load(path)
+                if arr.shape != (1, DIM):
+                    raise RuntimeError(f"読み取り結果の形が想定と違います（{arr.shape}・{path}）")
+                self.hits += 1
+                return arr[0].astype(np.float32)
+        if not self.allow_llama:
+            raise NoTextEncoder(f"「{clean}」は読み取り結果がありません。「プロンプトの読み取り（Llama 3）を使う」を外しているので、"
+                                "「サンプルから選ぶ」の文を使ってください")
+        if self.encoder is None:
+            self.encoder = self._make()
+        v = self.encoder.embed(clean).astype(np.float32)
+        self.misses += 1
+        if self.use_cache:   # 書きかけを読まれないように、別の名前で書いてから置き換える
+            os.makedirs(self._keys.WORK_DIR, exist_ok=True)
+            path = os.path.join(self._keys.WORK_DIR, self._keys.key(clean) + ".npy")
+            with open(path + ".tmp", "wb") as f:
+                np.save(f, v[None])
+            os.replace(path + ".tmp", path)
+        return v
+
+    def __call__(self, text):
+        import torch
+
+        one = isinstance(text, str)
+        texts = [text] if one else list(text)
+        e = torch.from_numpy(np.stack([self.vector(t) for t in texts]))[:, None].to(self._device)   # (N, 1, 4096)
         if one:
             return e[0], 1
         return e, [1] * len(texts)

@@ -12,7 +12,9 @@
 場所は環境変数で渡す: AINAKAWARI_LLAMA_SERVER（llama-server.exe）・AINAKAWARI_TEXT_GGUF（.gguf）・AINAKAWARI_LOG_DIR（記録）。
 11-07 までは低負荷（bf16 の Llama を CPU・約 15GB）と高速（GPU のサーバー・VRAM 約 16.8GB）の 2 つのモードがあったが、
 GGUF で読み取りが 1 文 0.5 秒ほどになり、高速モードの意味が無くなったのでまとめた。
-常駐は読み取り結果を work/text_cache/gguf にためて使い回す（公式デモの CachedTextEncoder。同じ文は 2 回目から読み取らない）。
+読み取り結果は同梱（サンプルの文）と work/text_cache/gguf から先に引き、どちらにも無い文が来た時だけ llama-server を起こす
+（tools/gguf_text.py の CachedText・11-10）。Llama を入れていない（セットアップで外した）時は、無い文でエラーにする。
+AINAKAWARI_TEXT_NO_CACHE=1 の時は読み取り結果を使わず必ず Llama で読む（セットアップの試し）。
 """
 import json
 import os
@@ -25,6 +27,9 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 J = 30
+HOME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if HOME not in sys.path:   # mmd_ainakawari.text_keys（読み取り結果の置き場と鍵）を読むため
+    sys.path.insert(0, HOME)
 
 
 class RootYConstraintSet:
@@ -85,48 +90,35 @@ def _skip_when_empty(c):
 
 MODEL = "kimodo-soma-rp"
 AUTHKEY = b"AINakawari.resident.v1"   # mmd_ainakawari/resident.py と同じ
-WORK = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "work")
-TEXT_CACHE = os.path.join(WORK, "text_cache", "gguf")
+WORK = os.path.join(HOME, "work")
 IDLE_SECONDS = 5 * 60                # 常駐で、これだけ頼まれなければ終わる（作り直しを続ける間は速く、手を止めたら約 8GB を空ける。11-08 マスター）
 
 
-def text_encoder():
-    """文の読み取り（tools/gguf_text.py の LlamaServerEncoder）を起こす。場所は環境変数から（無ければ止める）。"""
-    from gguf_text import LlamaServerEncoder
+def start_llama():
+    """文の読み取り（tools/gguf_text.py の LlamaServerEncoder）を起こす。読み取り結果の無い文が来た時に 1 回だけ呼ばれる。
+    場所は環境変数から。Llama を入れていなければ（ファイルが無ければ）NoTextEncoder。"""
+    from gguf_text import LlamaServerEncoder, NoTextEncoder
 
-    missing = [k for k in ("AINAKAWARI_LLAMA_SERVER", "AINAKAWARI_TEXT_GGUF") if not os.environ.get(k)]
-    if missing:
-        raise RuntimeError(f"文の読み取りの場所が渡されていません（{', '.join(missing)}）")
+    server, gguf = os.environ.get("AINAKAWARI_LLAMA_SERVER"), os.environ.get("AINAKAWARI_TEXT_GGUF")
+    if not (server and gguf and os.path.isfile(server) and os.path.isfile(gguf)):
+        raise NoTextEncoder("このプロンプトは読み取り結果がありません。プロンプトの読み取り（Llama 3）を入れていないので、"
+                            "「サンプルから選ぶ」の文を使ってください（自由に書くには、セットアップで入れてください）")
     log = os.path.join(os.environ.get("AINAKAWARI_LOG_DIR") or WORK, "llama_server.log")
-    enc = LlamaServerEncoder(os.environ["AINAKAWARI_LLAMA_SERVER"], os.environ["AINAKAWARI_TEXT_GGUF"], log)
+    enc = LlamaServerEncoder(server, gguf, log)
     print(f"text encoder ready (llama-server port={enc.port} load={enc.seconds_load:.1f}s)", flush=True)
     return enc
 
 
 def load(name=MODEL):
+    """Kimodo のモデルを読む。文の読み取りは CachedText（llama-server はまだ起こさない）。"""
+    from gguf_text import CachedText
     from kimodo import load_model
 
-    model = load_model(name, device="cuda", text_encoder=text_encoder())
+    use_cache = os.environ.get("AINAKAWARI_TEXT_NO_CACHE") != "1"
+    model = load_model(name, device="cuda", text_encoder=CachedText(start_llama, use_cache=use_cache))
     if model.skeleton.nbjoints != J:
         raise RuntimeError(f"skeleton has {model.skeleton.nbjoints} joints, expected {J}")
     return model
-
-
-def cache_text(model):
-    """読み取り結果を TEXT_CACHE にためて使い回す（公式デモの CachedTextEncoder）。
-
-    kimodo.demo から読み込むとデモの画面一式まで読み込むので、embedding_cache.py だけを直接読む。
-    前の bf16 の読み取り結果（work/text_cache/cpu・api）とは 1.7% ほど違うので、混ぜないようにフォルダを分けた。
-    """
-    import importlib.util
-
-    import kimodo
-
-    path = os.path.join(os.path.dirname(kimodo.__file__), "demo", "embedding_cache.py")
-    spec = importlib.util.spec_from_file_location("kimodo_embedding_cache", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    model.text_encoder = module.CachedTextEncoder(model.text_encoder, model_name=MODEL, base_dir=TEXT_CACHE)
 
 
 def generate(model, req, t_load=0.0):
@@ -137,6 +129,12 @@ def generate(model, req, t_load=0.0):
 
     if req.get("model", MODEL) != MODEL:
         raise ValueError(f"モデル {req['model']} には対応していません（{MODEL} だけ）")
+    # 窓の「プロンプトの読み取り（Llama 3）を使う」を外した時: 読み取り結果のある文だけで作り、起きている llama-server は止める
+    encoder = model.text_encoder
+    if hasattr(encoder, "allow_llama"):
+        encoder.allow_llama = not req.get("text_cache_only")
+        if req.get("text_cache_only") and encoder.release():
+            print("text encoder released (text_cache_only)", flush=True)
     skel30 = model.skeleton
     num_frames = int(req["num_frames"])
     keys = req.get("keys", [])
@@ -273,7 +271,8 @@ def generate(model, req, t_load=0.0):
 def _code_mtime():
     """このファイルと文の読み取りの部品の、新しい方の更新時刻。"""
     here = os.path.dirname(os.path.abspath(__file__))
-    return max(os.path.getmtime(os.path.join(here, f)) for f in ("kimodo_gen.py", "gguf_text.py"))
+    files = [os.path.join(here, f) for f in ("kimodo_gen.py", "gguf_text.py")] + [os.path.join(HOME, "mmd_ainakawari", "text_keys.py")]
+    return max(os.path.getmtime(f) for f in files)
 
 
 def serve(port):
@@ -291,7 +290,6 @@ def serve(port):
     listener = Listener(("127.0.0.1", port), authkey=AUTHKEY)   # 口がふさがっていれば（もう常駐がいれば）ここで落ちる
     t0 = time.time()
     model = load()
-    cache_text(model)
     print(f"ready port={port} load={time.time() - t0:.1f}s", flush=True)
     last = [time.time()]
 
@@ -320,6 +318,12 @@ def serve(port):
                 conn.close()
                 print("stale exit", flush=True)
                 os._exit(0)
+            if req.get("release_text"):   # 窓で「Llama を使う」を外した: llama-server だけ止める（Kimodo は残す）
+                released = model.text_encoder.release()
+                line = f"text encoder {'released' if released else 'was not running'}"
+                conn.send({"ok": True, "result": released, "line": line})
+                print(line, flush=True)
+                continue
             result, line = generate(model, req)
             conn.send({"ok": True, "result": result, "line": line})
             print(line, flush=True)

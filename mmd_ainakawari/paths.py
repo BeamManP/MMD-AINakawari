@@ -93,12 +93,11 @@ def llama_server():
     return os.path.join(kimodo_dir(), "llamacpp", "llama-server.exe")
 
 
-def check_text_encoder():
-    """文の読み取りの 2 つ（GGUF・llama-server）が置けているか。GGUF は照らしてから名前を付けるので、あれば全部そろっている。
-    Kimodo で生成する前に見る（11-07 まで bf16 の Llama 約 16GB の text_encoders フォルダを見ていた）。"""
-    for path, what in ((text_gguf(), "プロンプトを読み取るモデル"), (llama_server(), "llama.cpp")):
-        if not os.path.isfile(path):
-            raise NotSetUp(f"{what}が {path} にありません。{SETUP_HINT}")
+def has_text_encoder():
+    """文の読み取り（Llama 3 の GGUF・llama-server）が入っているか。GGUF は照らしてから名前を付けるので、あれば全部そろっている。
+    入っていない時（セットアップで外した。11-10）は、読み取り結果のある文（サンプル）だけで作る（text_keys.py）。
+    Kimodo の場所が決まっていなければ NotSetUp。"""
+    return os.path.isfile(text_gguf()) and os.path.isfile(llama_server())
 
 
 def soma_json():

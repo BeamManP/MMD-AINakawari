@@ -3,6 +3,9 @@
 # 英語の文は Kimodo のデモの例文と同じく「A person ＋ 今の形の動詞」で、何をするかを具体的に書く
 # （例: A person walks forward.）。パネルはボタンを押すたびにこのファイルを読むので、書き換えたらすぐ反映される。
 
+[基本]
+キーの間を自然につなぐ（最初の文）：A person moves naturally between poses.
+
 [歩く・走る]
 前へ歩く：A person walks forward.
 ゆっくり歩く：A person is casually walking forward slowly.

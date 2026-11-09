@@ -76,6 +76,10 @@ if "--real" in sys.argv:
     t = time.monotonic()
     conn = resident._ready(server, log=print)
     conn.close()
+    # 11-10 から llama-server は読み取り結果の無い文が来た時に起きるので、知らない文を 1 回頼んで起こす
+    import random
+    resident.call(server, {"prompt": f"A person spins {random.randint(100000, 999999)} times.", "num_frames": 30, "steps": 10},
+                  log=lambda _l: None)
     print(f"  Kimodo の常駐を立てました（{time.monotonic() - t:.1f} 秒）・llama-server {llama_pids()}", flush=True)
     check("立てた後に llama-server がいる", bool(llama_pids()))
     t = time.monotonic()

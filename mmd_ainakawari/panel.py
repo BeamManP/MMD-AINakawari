@@ -17,6 +17,7 @@ ENGINE, RANGE, PROMPT, GENERATE, UNDO, DETAILS, STATUS, SAMPLES = 101, 102, 103,
 
 WM_GETTEXT, WM_SETTEXT, WM_GETTEXTLENGTH = 0x000D, 0x000C, 0x000E
 CB_GETCURSEL, CB_SETCURSEL = 0x0147, 0x014E
+EM_SETREADONLY = 0x00CF   # 文の欄を打てなくする（Llama なし。プラグインを作り直さずに済むよう、窓から欄へ直接送る。11-10）
 SMTO_ABORTIFHUNG = 0x0002
 ENABLE_MESSAGE = 0x8000 + 2   # WM_APP + 2。パネルに部品の押せる・押せないを頼む（nakawari_panel.cpp の kEnableMessage）
 ALERT_MESSAGE = 0x8000 + 3    # WM_APP + 3。状態の 1 行を赤くするかを頼む（kAlertMessage。古いプラグインは知らないので無視する）
@@ -86,6 +87,10 @@ class Panel:
     def enable(self, item, on):
         # EnableWindow を直接呼ぶと、MMD が答えるまで待って期限を付けられないので、パネルに頼む（11-05 Codex のレビュー）
         self._call(item, ENABLE_MESSAGE, item, 1 if on else 0, to=self.hwnd)
+
+    def set_readonly(self, item, on):
+        """欄を打てなくする・戻す。打てなくても WM_SETTEXT（サンプル・窓からの同期）は効く。"""
+        self._call(item, EM_SETREADONLY, 1 if on else 0)
 
     def alert(self, on):
         """状態の 1 行を赤で描くか（セットアップ前の案内など）。"""

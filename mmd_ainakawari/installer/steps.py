@@ -38,6 +38,10 @@ FETCH_MODEL = os.path.join(HERE, "fetch_kimodo_model.py")
 TOOLS = os.path.join(paths.HOME, "tools")
 STATE_FILE = "setup_state.json"
 FINISHED = "_finished"   # setup_state.json の中の「最後まで済んだ時の AIナカワリ の版」（段の名前とぶつからない名前）
+# setup_state.json の中の「プロンプトの読み取り（Llama 3）を入れるか」（11-10 マスター。外すとサンプルの文だけで作る）。
+# 印の無い場所（11-09 までに入れた場所）は入れた物として扱う
+WITH_TEXT = "_with_text_encoder"
+TEXT_STEPS = ("text_gguf", "llamacpp")
 # 組み立て済みの部品の置き場所（配布の zip では MMD-AINakawari\prebuilt\。開発版は work\prebuilt\）。
 # kimodo は入れる時に C++ の部品（MotionCorrection。生成の「後処理」が使う）を CMake とコンパイラで組み立てるが、
 # 使う人の PC にコンパイラは無いので、組み立て済みの pyd を配って置く（11-06。試しのセットアップで CMake が無くて止まった）
@@ -164,7 +168,8 @@ class Setup:
     on_step(段の名前, "skip" | "run" | "done" | "fail"): 段の印を画面に出す。
     """
 
-    def __init__(self, dest, log=print, progress=None, on_step=None, reuse_text_gguf=None):
+    def __init__(self, dest, log=print, progress=None, on_step=None, reuse_text_gguf=None, with_text=None):
+        """with_text: プロンプトの読み取り（Llama 3）を入れるか。None は前にこの場所で選んだ方（初めてなら入れる）。"""
         check_folder(dest)
         self.dest = dest
         self.log = log
@@ -175,6 +180,7 @@ class Setup:
         self.mb = os.path.join(dest, "motionbricks")
         self.downloads = os.path.join(dest, "downloads")
         self.state_path = os.path.join(dest, STATE_FILE)
+        self.with_text = self.chosen_text() if with_text is None else bool(with_text)
         self.uv = None
         self._stop = threading.Event()
         self._proc = None
@@ -189,13 +195,20 @@ class Setup:
              self.kimodo_env),
             ("skeleton", "kimodo", "Kimodo の骨格を用意する", file_sha256(os.path.join(TOOLS, "export_skeleton.py")), 0, self.skeleton),
             ("kimodo_model", "kimodo", "Kimodo のモデルを落とす（約 1GB）", pins.KIMODO_MODEL_REVISION, 1.2, self.kimodo_model),
-            # 文の読み取り（11-07 に bf16 の Llama 約 16GB から GGUF Q8_0 約 8GB ＋ llama.cpp に替えた）
-            ("text_gguf", "kimodo", "プロンプトを読み取るモデルを落とす（約 8GB。いちばん長くかかります）",
-             f"{pins.TEXT_GGUF_REVISION}/{pins.TEXT_GGUF_FILE[1]}", 8.0, self.text_gguf),
-            ("llamacpp", "kimodo", "プロンプトの読み取りに使う llama.cpp を落とす", pins.LLAMACPP_ZIP[1], 0.1, self.llamacpp),
-            ("kimodo_test", "kimodo", "Kimodo が動くか確かめる（2 秒の動きを試しに作る）",
-             f"{pins.KIMODO_COMMIT}/{file_sha256(os.path.join(TOOLS, 'gguf_text.py'))}", 0, self.kimodo_test),
         ]
+        if self.with_text:
+            k += [
+                # 文の読み取り（11-07 に bf16 の Llama 約 16GB から GGUF Q8_0 約 8GB ＋ llama.cpp に替えた）
+                ("text_gguf", "kimodo", "プロンプトを読み取るモデルを落とす（約 8GB。いちばん長くかかります）",
+                 f"{pins.TEXT_GGUF_REVISION}/{pins.TEXT_GGUF_FILE[1]}", 8.0, self.text_gguf),
+                ("llamacpp", "kimodo", "プロンプトの読み取りに使う llama.cpp を落とす", pins.LLAMACPP_ZIP[1], 0.1, self.llamacpp),
+            ]
+        elif any(os.path.isdir(os.path.join(self.kimodo, d)) for d in ("text_encoder", "llamacpp")):
+            # 前に入れた Llama を外した時だけ出る段（消し終われば出なくなる）
+            k.append(("text_remove", "kimodo", "プロンプトの読み取り（Llama 3）を消す（約 8GB 空きます）", "removed", 0, self.text_remove))
+        k.append(("kimodo_test", "kimodo", "Kimodo が動くか確かめる（2 秒の動きを試しに作る）",
+                  f"{pins.KIMODO_COMMIT}/{file_sha256(os.path.join(TOOLS, 'gguf_text.py'))}/{'text' if self.with_text else 'samples'}",
+                  0, self.kimodo_test))
         m = [
             ("mb_src", "mb", "MotionBricks の本体を落とす", pins.MOTIONBRICKS_COMMIT, 0.2, self.mb_src),
             ("mb_models", "mb", "MotionBricks のモデルを落とす（約 1.1GB）", pins.MOTIONBRICKS_COMMIT, 1.2, self.mb_models),
@@ -214,6 +227,10 @@ class Setup:
             return data if isinstance(data, dict) else {}
         except (FileNotFoundError, ValueError):
             return {}
+
+    def chosen_text(self):
+        """この場所で前に選んだ「プロンプトの読み取り（Llama 3）を入れるか」。印が無ければ入れる。"""
+        return bool(self.load_state().get(WITH_TEXT, True))
 
     def save_state(self, state):
         tmp = self.state_path + ".tmp"
@@ -258,6 +275,11 @@ class Setup:
         self.log(f"入れる場所: {self.dest}（空き {free:.0f}GB・残りの手順で約 {need:.0f}GB）")
         self.log(f"uv: {self.uv}")
         state = self.load_state()
+        state[WITH_TEXT] = self.with_text
+        if not self.with_text:   # 後でまた入れる時に、落とし直すように
+            for key in TEXT_STEPS:
+                state.pop(key, None)
+        self.log("プロンプトの読み取り（Llama 3）: " + ("入れます" if self.with_text else "入れません（「サンプルから選ぶ」の文だけで作ります）"))
         steps = self.steps()
         for i, (key, group, title, version, _gb, fn) in enumerate(steps):
             if state.get(key) == version:
@@ -593,8 +615,19 @@ class Setup:
         os.replace(work, into)
         self.call([os.path.join(into, "llama-server.exe"), "--version"], "llama.cpp の版を確かめる")
 
+    def text_remove(self):
+        """前に入れたプロンプトの読み取り（GGUF 約 8GB・llama.cpp）を消す（セットアップで外した時。消す前に窓で確かめる）。"""
+        for d in ("text_encoder", "llamacpp"):
+            folder = os.path.join(self.kimodo, d)
+            if os.path.isdir(folder):
+                self.progress(f"{folder} を消しています")
+                shutil.rmtree(folder)
+                self.log(f"  消しました: {folder}")
+
     def kimodo_test(self):
-        """常駐と同じ置き方（文の読み取りは llama-server の GGUF）で 1 回作る。通ったら paths.json に書く。"""
+        """常駐と同じ置き方で 1 回作る。通ったら paths.json に書く。
+        Llama を入れた時は、読み取り結果を使わずに llama-server で読む（AINAKAWARI_TEXT_NO_CACHE。Llama そのものを確かめる）。
+        入れていない時は、同梱の読み取り結果（サンプルの文）で作る。"""
         work = os.path.join(self.dest, "setup_test")
         os.makedirs(work, exist_ok=True)
         req, out = os.path.join(work, "kimodo_request.json"), os.path.join(work, "kimodo_result.json")
@@ -602,11 +635,15 @@ class Setup:
             json.dump({"prompt": "A person walks forward.", "num_frames": 60, "seed": 0}, f)
         if os.path.exists(out):
             os.remove(out)
-        self.log("  初めての読み込みなので 1〜2 分かかります（プロンプトを読み取るモデル約 8GB をメインメモリに読みます）")
+        if self.with_text:
+            self.log("  初めての読み込みなので 1〜2 分かかります（プロンプトを読み取るモデル約 8GB をメインメモリに読みます）")
+        else:
+            self.log("  初めての読み込みなので 1 分ほどかかります（プロンプトはサンプルの読み取り結果を使います）")
         self.call([self.kimodo_python(), os.path.join(TOOLS, "kimodo_gen.py"), req, out], "Kimodo の試しの生成", cwd=self.kimodo,
                   HF_HUB_CACHE=os.path.join(self.kimodo, "hf_cache"), LOCAL_CACHE="true", HF_HUB_OFFLINE="1",
                   AINAKAWARI_LLAMA_SERVER=os.path.join(self.kimodo, "llamacpp", "llama-server.exe"),
-                  AINAKAWARI_TEXT_GGUF=os.path.join(self.kimodo, "text_encoder", pins.TEXT_GGUF_FILE[0]), AINAKAWARI_LOG_DIR=work)
+                  AINAKAWARI_TEXT_GGUF=os.path.join(self.kimodo, "text_encoder", pins.TEXT_GGUF_FILE[0]), AINAKAWARI_LOG_DIR=work,
+                  AINAKAWARI_TEXT_NO_CACHE="1" if self.with_text else "0")
         with open(out, encoding="utf-8") as f:
             frames = json.load(f).get("num_frames")
         if not frames:
@@ -665,10 +702,16 @@ def main():
     parser = argparse.ArgumentParser(description="AIナカワリ のセットアップ（ふつうは詳細の窓の「セットアップ」から）")
     parser.add_argument("dest", nargs="?", help="入れる場所（省くと空きのいちばん多いドライブの \\AINakawari）")
     parser.add_argument("--reuse-text-gguf", help="開発用: 手元の文の読み取りの GGUF を照らしてから写す（8GB を落とし直さない）")
+    choice = parser.add_mutually_exclusive_group()
+    choice.add_argument("--no-text-encoder", dest="with_text", action="store_false", default=None,
+                        help="プロンプトの読み取り（Llama 3・約 8GB）を入れない（サンプルの文だけで作る。前に入れていれば消す）")
+    choice.add_argument("--text-encoder", dest="with_text", action="store_true", help="プロンプトの読み取りを入れる")
+    parser.set_defaults(with_text=None)   # どちらも無ければ、前にこの場所で選んだ方
     args = parser.parse_args()
     try:
         setup = Setup(args.dest or default_folder(), log=lambda line: print(line, flush=True),
-                      on_step=lambda key, state: print(f"[{state}] {key}", flush=True), reuse_text_gguf=args.reuse_text_gguf)
+                      on_step=lambda key, state: print(f"[{state}] {key}", flush=True), reuse_text_gguf=args.reuse_text_gguf,
+                      with_text=args.with_text)
         setup.run()
     except (Failed, Cancelled) as e:
         print(f"止まりました: {e}", file=sys.stderr)

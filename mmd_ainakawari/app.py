@@ -50,6 +50,7 @@ DEFAULTS = {
     "steps": 100, "seed": -1, "post_processing": True, "cfg_text": CFG_DEFAULT, "cfg_key": CFG_DEFAULT,
     "stop_at_last_key": True, "smooth_stop": True, "key_stop": False, "wrist_lerp": False,
     "thin": thin.DEFAULT_LEVEL, "thin_nakawari": thin.DEFAULT_LEVEL,   # キーの間引き（Kimodo・MotionBricks のタブごと）
+    "use_llama": True,   # プロンプトの読み取り（Llama 3）を使う。メインメモリが足りない時は外す（11-10 マスター）
 }
 # Tk は空白でしか折り返さないので、行は自分で分ける（「MMD の」の空白で折れて 1 行目が短くなっていた）
 THIN_NOTE = ("生成したキーを、MMD の補間曲線で表せる所だけ減らします。\n"
@@ -357,6 +358,18 @@ class App:
         sample_button = ttk.Button(prompt_bar, text="サンプルから選ぶ ▼")
         sample_button.configure(command=lambda: self._show_samples(sample_button))
         sample_button.pack(side="left", padx=(8, 0))
+        # 「Llama を使う」（Llama を入れている時だけ出す。メインメモリが足りない人は外す。11-10 マスター）と、
+        # 使えない時の案内（文の欄は打てなくなる）。どちらも refresh_text が出し入れする
+        self.text_free = True
+        self.use_llama = tk.BooleanVar(value=self.cfg["use_llama"])
+        self.llama_row = ttk.Frame(t)
+        ttk.Checkbutton(self.llama_row, text="プロンプトの読み取り（Llama 3）を使う", variable=self.use_llama,
+                        command=self._use_llama_changed).pack(anchor="w")
+        ttk.Label(self.llama_row, text="メインメモリが足りない時は外してください（約 8GB 減ります。サンプルの文だけで作ります）",
+                  foreground="#555").pack(anchor="w", padx=(22, 0))
+        # Tk は空白でしか折り返さず「Llama」と「3）」の間で切れたので、行は自分で分ける（11-10 マスター。THIN_NOTE と同じ）
+        self.prompt_note = ttk.Label(t, foreground="#a33", justify="left")
+        self._prompt_bar = prompt_bar
 
         # Kimodo の CFG の重み。数字を打つのは面倒なのでスライダ（11-08 マスター）。範囲は前の欄と同じ 0.5〜10・0.5 刻み
         # よく触るので「詳しい設定」には畳まず、プロンプトのすぐ下に出す（11-08 マスター）
@@ -485,14 +498,53 @@ class App:
         try:
             paths.kimodo_dir()
             self.kimodo_ready = True
+            self.llama_installed = paths.has_text_encoder()
         except paths.NotSetUp:
-            self.kimodo_ready = False   # パネルの状態の 1 行も赤い案内にする（_sync_panel）
+            self.kimodo_ready = False
+            self.llama_installed = False
+        self.refresh_text()
+        if not self.kimodo_ready:   # パネルの状態の 1 行も赤い案内にする（_sync_panel）
             self.kimodo_missing.pack(anchor="w", pady=(0, 8), before=self.kimodo_top)
             self.status.set("AI のモデルがまだ入っていません。下の「セットアップ」で入れてください")
             return
         self.kimodo_missing.pack_forget()
         if self.status.get().startswith("AI のモデルがまだ入っていません"):
             self.status.set("MMD でキーを打ってから「生成」を押してください")
+
+    def refresh_text(self):
+        """文の欄を打てるかを、Llama が入っているか・「Llama を使う」から決めて、チェックと案内を出し直す。
+        打てない時は、サンプルからだけ選ぶ（パネルの欄は _sync_panel が合わせる。11-10 マスター）。
+        Kimodo をまだ入れていない時は、打てるままにしておく。"""
+        self.text_free = not self.kimodo_ready or (self.llama_installed and bool(self.use_llama.get()))
+        self.prompt_rows.set_readonly(not self.text_free)
+        if self.llama_installed:
+            self.llama_row.pack(anchor="w", pady=(6, 0), after=self._prompt_bar)
+        else:
+            self.llama_row.pack_forget()
+        if self.text_free:
+            self.prompt_note.pack_forget()
+            return
+        if self.llama_installed:
+            how = "自由に書くには、上の「プロンプトの読み取り（Llama 3）を使う」を入れます"
+            why = "プロンプトの読み取り（Llama 3）を使わない設定なので、サンプルの文だけ選べます。"
+        else:
+            how = "自由に書くには、下の「セットアップ」で入れます"
+            why = "プロンプトの読み取り（Llama 3）を入れていないので、サンプルの文だけ選べます。"
+        self.prompt_note.configure(text=f"{why}\n行を押してから「サンプルから選ぶ」で入れてください。\n{how}")
+        self.prompt_note.pack(anchor="w", pady=(4, 0), after=self.llama_row if self.llama_installed else self._prompt_bar)
+
+    def _use_llama_changed(self):
+        """「Llama を使う」を切り替えた: 覚えて、文の欄を出し直す。外したら、常駐の llama-server を今すぐ止める（Kimodo は残す）。"""
+        self.cfg["use_llama"] = bool(self.use_llama.get())
+        try:
+            os.makedirs(runner.WORK_DIR, exist_ok=True)
+            json.dump(self.cfg, open(SETTINGS_PATH, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        except OSError:
+            applog.exception("設定を保存できませんでした:")
+        self.refresh_text()
+        if not self.use_llama.get():
+            threading.Thread(target=resident.notify, args=(pipeline.KIMODO_NAME, pipeline.KIMODO_PORT, {"release_text": True}),
+                             name="Llama を止める", daemon=True).start()
 
     def _mode_changed(self):
         mode = self.mode.get()
@@ -577,6 +629,9 @@ class App:
         if getattr(self, "_sample_menu", None) is not None:   # 前に開いた一覧は消す（開くたびに増えていた。11-05 Codex のレビュー）
             self._sample_menu.destroy()
         menu = self._sample_menu = tk.Menu(self.root, tearoff=0)
+        if not self.text_free:   # 打てないので、空にする（キーだけで作る）のもここから
+            menu.add_command(label="（空にする：プロンプトなしでキーだけで作る）", command=lambda: self.prompt_rows.set_current(""))
+            menu.add_separator()
         for name, items in groups:
             sub = tk.Menu(menu, tearoff=0) if name else menu
             for label, prompt in items:
@@ -724,6 +779,10 @@ class App:
                 p.set_text(panel.PROMPT, panel.one_line(mine))
                 got = panel.lines_of(panel.one_line(mine))
             seen[("panel", "prompt")], seen[("window", "prompt")] = got, mine
+            # Llama なしなら、パネルの文の欄も打てなくする（サンプルの一覧からは入る。11-10 マスター）
+            if seen.get(("window", "readonly")) != (not self.text_free):
+                p.set_readonly(panel.PROMPT, not self.text_free)
+                seen[("window", "readonly")] = not self.text_free
             # Kimodo か MotionBricks か（窓のタブ）
             got, mine = p.selection(panel.ENGINE), self.tabs.index("current")
             if ("panel", "engine") not in seen or (got == seen[("panel", "engine")] and mine != seen[("window", "engine")]):
@@ -826,7 +885,8 @@ class App:
                                 length=length, extend=extend, use_keys=mode not in ("fresh", "center"),
                                 use_center=mode == "center",
                                 stop_at_last_key=mode == "fill" and bool(self.stop.get()),
-                                smooth_stop=bool(self.smooth.get()) and smooth_stop.available(), engine="kimodo", **common)
+                                smooth_stop=bool(self.smooth.get()) and smooth_stop.available(), engine="kimodo",
+                                use_llama=bool(self.use_llama.get()), **common)
             self.cfg.update(mode=self.mode.get(), length=self.length.get(), prompt=s.prompt, steps=s.steps, seed=s.seed,
                             post_processing=s.post_processing, cfg_text=s.cfg_text, cfg_key=s.cfg_key,
                             stop_at_last_key=bool(self.stop.get()),

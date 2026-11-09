@@ -221,11 +221,91 @@ class MMDLink:
         return r
 
     def _load_vmd(self, path):
-        """mmd-mcp で VMD を読み込む。例外（ファイルが無い・MMD の画面が読めないなど）も失敗の返事にする（キーを消した後の戻しを通すため）。"""
+        """mmd-mcp で VMD を読み込む。例外（ファイルが無い・MMD の画面が読めないなど）も失敗の返事にする（キーを消した後の戻しを通すため）。
+        モデル名が長いと出る「〜用のモーションデータです 続行しますか？」は OK で進める（_accept_other_model）。"""
         try:
-            return files.load_file("motion", path, self.hwnd)
+            r = files.load_file("motion", path, self.hwnd)
         except Exception as e:
-            return {"status": type(e).__name__, "dialogs": str(e)}
+            # mmd-mcp は、パスを送った後に閉じかけのファイルの窓を調べて落ちることがある（GetParent の 1400。11-10 に
+            # 長い名前の確認の窓が出る時に 5 回中 1 回）。その時は確認の窓が出ていれば、そこから続ける
+            r = self._confirm_after_error(e)
+            if r is None:
+                return {"status": type(e).__name__, "dialogs": str(e)}
+        if r.get("status") == "dialog_requires_action" and r.get("path_submitted"):
+            r = self._accept_other_model(r)
+        return r
+
+    def _confirm_after_error(self, error, wait=3.0):
+        """load_file が例外で返った時に、MMD に確認の窓が出ていれば、それを dialog_requires_action の返事の形にする。無ければ None。"""
+        import time
+        deadline = time.monotonic() + wait
+        while time.monotonic() < deadline:
+            try:
+                targets = [w for w in list_windows() if w.hwnd == self.hwnd]
+                dialogs = files.owned_dialogs(targets[0]) if len(targets) == 1 else []
+            except Exception:
+                dialogs = []
+            if dialogs:
+                return {"status": "dialog_requires_action", "path_submitted": True, "dialogs": dialogs, "error": str(error)}
+            time.sleep(0.1)
+        return None
+
+    def _accept_other_model(self, result, timeout=60.0):
+        """VMD の読み込みで「このファイルは ○○ 用のモーションデータです／同じボーン名のモーションのみを取り込む事になります／
+        続行しますか？」（OK・キャンセル）が出た時だけ、OK を押して読み込みが終わるまで待つ。それ以外の窓なら result をそのまま返す。
+
+        VMD のモデル名は 20 バイト（cp932）までなので、名前の長いモデルは MMD が書き出した VMD でも名前が合わず、毎回この確認が出る
+        （11-10 動作報告。名前を 52 バイトにした Tda式ミクで再現）。読み込むのは、選んでいるモデルから書き出して作った VMD
+        （load_motion の前に check_model で確かめている）なので、OK でよい。ボーン名で取り込むのは、名前が合う時と同じ。
+        """
+        import time
+
+        import pywintypes
+        import win32gui
+
+        def confirm(d):
+            """その窓が「〜用のモーションデータです 続行しますか？」なら (OK のボタン, 文)。違えば None。"""
+            if d.get("title") != "モーションデータ読込":
+                return None
+            controls = d.get("controls") or []
+            texts = [c.get("text") or "" for c in controls if c.get("class") == "Static"]
+            ok = [c for c in controls if c.get("class") == "Button" and c.get("id") == 1]
+            if len(ok) != 1 or not any("用のモーションデータです" in t and "続行しますか" in t for t in texts):
+                return None
+            return ok[0]["hwnd"], texts
+
+        dialogs = [d for d in result.get("dialogs") or [] if isinstance(d, dict)]
+        if len(dialogs) != 1 or confirm(dialogs[0]) is None:
+            return result
+        # UIReader は確認の窓が開いていると作れない（「modal dialog open」）ので、list_windows から取る
+        targets = [w for w in list_windows() if w.hwnd == self.hwnd]
+        if len(targets) != 1:
+            return result
+        target, texts, pressed = targets[0], confirm(dialogs[0])[1], set()
+        deadline, quiet = time.monotonic() + timeout, None
+        # 窓は毎回取り直す。窓が出入りする途中で Windows の関数が失敗することがある（11-10 に 1 回、OK を押す前に落ちた）ので、
+        # 失敗したらその回は飛ばして次で取り直す
+        while time.monotonic() < deadline:
+            try:
+                now = files.owned_dialogs(target)
+                others = [d for d in now if confirm(d) is None]
+                if others:   # 別の窓が出た（ほかの窓は押さない）
+                    return {"status": "dialog_requires_action", "path_submitted": True, "dialogs": others}
+                waiting = [d for d in now if d["hwnd"] not in pressed]
+                for d in waiting:
+                    win32gui.PostMessage(confirm(d)[0], 0xF5, 0, 0)   # BM_CLICK
+                    pressed.add(d["hwnd"])
+                if now or not win32gui.IsWindowEnabled(self.hwnd):   # 窓が消えるのを待つ・読み込み中
+                    quiet = None
+                else:
+                    get_ui_state(self.hwnd)
+                    quiet = quiet or time.monotonic()
+                    if time.monotonic() - quiet >= 0.3:
+                        return {"status": "completed", "path_submitted": True, "accepted": texts}
+            except (pywintypes.error, ValueError, RuntimeError):
+                quiet = None
+            time.sleep(0.1)
+        return {"status": "timeout", "path_submitted": True, "note": "OK を押した後、読み込みが終わりませんでした"}
 
     def set_frame(self, frame, tries=3, wait=0.5):
         """MMD の今のフレームを frame にする。

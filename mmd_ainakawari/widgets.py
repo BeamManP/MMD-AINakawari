@@ -36,7 +36,14 @@ class PromptRows(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
         self.columnconfigure(1, weight=1)
-        self.rows = []   # [{"frame": StringVar か None, "text": StringVar, "widgets": [...]}]（変数も持っておく。手放すと tk 側の値が消える）
+        self.rows = []   # [{"frame": StringVar か None, "text": StringVar, "entry": 文の欄, "widgets": [...]}]（変数も持っておく。手放すと tk 側の値が消える）
+        self.readonly = False   # 文の欄を打てなくする（Llama なし。サンプルからだけ選ぶ。11-10 マスター）
+
+    def set_readonly(self, on):
+        """文の欄を打てなくする・戻す。区間のフレームの欄はそのまま打てる。打てなくても、行を押せばサンプルの入れ先になる。"""
+        self.readonly = bool(on)
+        for row in self.rows:
+            row["entry"].configure(state="readonly" if self.readonly else "normal")
 
     def load(self, prompt):
         for row in self.rows:
@@ -104,8 +111,8 @@ class PromptRows(ttk.Frame):
             # 打っている途中で並び替えると行が動くので、欄を離れた時だけ並べ直す
             frame_entry.bind("<FocusOut>", lambda _: self._regrid())
             frame_entry.bind("<Return>", lambda _: self._regrid())
-        entry = ttk.Entry(self, textvariable=text_var)
-        row = {"frame": frame_var, "text": text_var, "widgets": head + [entry]}
+        entry = ttk.Entry(self, textvariable=text_var, state="readonly" if self.readonly else "normal")
+        row = {"frame": frame_var, "text": text_var, "entry": entry, "widgets": head + [entry]}
         entry.bind("<FocusIn>", lambda _: setattr(self, "current", row))   # サンプルを入れる先（最後に打っていた行）
         if frame is not None:
             remove = ttk.Button(self, text="×", width=3, command=lambda: self._remove(row))

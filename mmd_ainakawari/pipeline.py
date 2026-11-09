@@ -14,7 +14,7 @@ import numpy as np
 
 from . import paths
 from . import quat as Q
-from . import resident, vmd
+from . import resident, text_keys, vmd
 from .mmd_skel import MMDSkeleton, sample, split_interp
 from .retarget import TOE_GROUND, Retargeter, conv_p, conv_q
 
@@ -441,10 +441,19 @@ def kimodo_server():
 _KIMODO_LOCK = threading.Lock()
 
 
-def run_kimodo(job, work_dir, on_line=None):
-    """常駐の Kimodo（tools/kimodo_gen.py --serve）で作って結果を返す。依頼と結果は work_dir に残す（見返す用）。"""
+def run_kimodo(job, work_dir, on_line=None, use_llama=True):
+    """常駐の Kimodo（tools/kimodo_gen.py --serve）で作って結果を返す。依頼と結果は work_dir に残す（見返す用）。
+    use_llama=False（窓の「プロンプトの読み取り（Llama 3）を使う」を外した）: 読み取り結果のある文だけで作り、常駐の llama-server も止める。"""
     log = on_line or (lambda _l: None)
-    paths.check_text_encoder()
+    installed = paths.has_text_encoder()
+    job.request["text_cache_only"] = not (installed and use_llama)
+    if job.request["text_cache_only"]:   # 読み取り結果の無い文は、常駐を起こす前に止める
+        lost = text_keys.missing(s["prompt"] for s in job.request["segments"])
+        if lost:
+            why, how = (("「プロンプトの読み取り（Llama 3）を使う」を外している", "詳細の窓でチェックを入れてください") if installed else
+                        ("プロンプトの読み取り（Llama 3）を入れていない", "セットアップで入れてください"))
+            raise ValueError(f"{why}ので、「サンプルから選ぶ」の文だけが使えます。"
+                             f"読み取れない文: {' / '.join(lost)}（自由に書くには、{how}）")
     # 頼み終わるまでを 1 つずつにする（MMD ごとの窓が同時に頼んでも、常駐はどのみち 1 つずつ作る）
     with _KIMODO_LOCK:
         os.makedirs(work_dir, exist_ok=True)

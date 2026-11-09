@@ -104,6 +104,17 @@ class SetupWindow:
         ttk.Label(lf, text="Llama 3 で作った物を公開する時は、「Built with Meta Llama 3」の表示が要ります",
                   foreground="#555").pack(anchor="w", padx=(22, 0))
 
+        # プロンプトの読み取り（Llama 3）を入れるか（11-10 マスター）。外すとサンプルの文だけで作る（読み取り結果を同梱している）。
+        # 入れ終わった後に足せる・外せるように、畳む欄（form）の外の、見出しのすぐ下に置く
+        self.with_text = tk.BooleanVar(value=True)
+        self._text_dest = None   # with_text をどの場所の印から読んだか（場所を変えたら、その場所で前に選んだ方に戻す）
+        box = self.text_box = ttk.Frame(outer)
+        box.pack(fill="x", before=self.form)
+        ttk.Checkbutton(box, text="プロンプトを自由に書けるようにする（Llama 3 を入れる・約 8GB・生成中にメインメモリを約 8GB 使う）",
+                        variable=self.with_text, command=self._refresh).pack(anchor="w", pady=(10, 0))
+        ttk.Label(box, text="外すと「サンプルから選ぶ」の文だけで作ります（メインメモリの少ない PC 向け）。後からここで入れたり外したりできます",
+                  foreground="#555").pack(anchor="w", padx=(22, 0))
+
         # 段の一覧
         self.step_box = ttk.Frame(f)
         self.step_box.pack(fill="x", pady=(10, 0))
@@ -168,7 +179,8 @@ class SetupWindow:
         self.expanded = True
         self._refresh()
 
-    def _show_form(self, show):
+    def _show_form(self, show, text_box=True):
+        """入れる場所〜ボタン（form）を出すか。text_box: Llama のチェックを出すか（手で入れた環境では効かないので隠す）。"""
         if show and not self.form.winfo_manager():
             self.more_btn.pack_forget()
             self.form.pack(fill="both", expand=True)
@@ -176,6 +188,10 @@ class SetupWindow:
             self.form.pack_forget()
         if not show and not self.more_btn.winfo_manager():
             self.more_btn.pack(anchor="w", pady=(8, 0))
+        if not text_box:
+            self.text_box.pack_forget()
+        elif not self.text_box.winfo_manager():
+            self.text_box.pack(fill="x", before=self.form if show else self.more_btn)
 
     def _initial_folder(self):
         """前に入れた場所（paths.json の Kimodo の 1 つ上）があればそこ。無ければ空きのいちばん多いドライブ。"""
@@ -194,9 +210,16 @@ class SetupWindow:
             self.dest.set(os.path.normpath(folder))
 
     def _make_setup(self):
-        return steps.Setup(self.dest.get().strip(), log=lambda line: self.q.put(("log", line)),
+        dest = self.dest.get().strip()
+        if dest != self._text_dest:   # 場所が変わった（開いた時も）: その場所で前に選んだ方にする
+            self._text_dest = dest
+            try:
+                self.with_text.set(steps.Setup(dest).chosen_text())
+            except steps.Failed:
+                pass
+        return steps.Setup(dest, log=lambda line: self.q.put(("log", line)),
                            progress=lambda text: self.q.put(("progress", text)),
-                           on_step=lambda key, state: self.q.put(("step", (key, state))))
+                           on_step=lambda key, state: self.q.put(("step", (key, state))), with_text=self.with_text.get())
 
     def _refresh(self):
         """入れる場所・同意が変わった時: 空きと段の一覧を出し直し、始めるボタンの可否を決める。"""
@@ -225,7 +248,7 @@ class SetupWindow:
             self.headline.set("別の方法で入れた環境を使っています")
             self.subline.set(f"Kimodo: {self.manual}" + (f"・MotionBricks: {mb}" if mb else "")
                              + "\n入れ直したい時は、「別の場所に入れる…」で場所を選んでください")
-            self._show_form(False)
+            self._show_form(False, text_box=False)
             return
         if kind == "done":
             used = setup.in_use()
@@ -245,7 +268,7 @@ class SetupWindow:
             text = "続きから始める"
         else:
             self.headline.set("AI のモデルを入れます")
-            self.subline.set("Kimodo・MotionBricks と、それを動かす Python をまとめて入れます（落とす量は約 12GB）")
+            self.subline.set(f"Kimodo・MotionBricks と、それを動かす Python をまとめて入れます（落とす量は約 {'12' if setup.with_text else '4'}GB）")
             text = "セットアップを始める"
         self._show_form(True)
         self.start_btn.configure(text=text, state="normal" if self.agree.get() else "disabled")
@@ -273,8 +296,13 @@ class SetupWindow:
         except steps.Failed as e:
             messagebox.showerror("AIナカワリ のセットアップ", str(e), parent=self.win)
             return
-        kind, _pending = setup.status()
+        kind, pending = setup.status()
         if kind != "done" and not self.agree.get():
+            return
+        if any(key == "text_remove" for key, _t, _gb in pending) and not messagebox.askyesno(
+                "AIナカワリ のセットアップ", "入れてあるプロンプトの読み取り（Llama 3・約 8GB）を消します。\n"
+                "消した後は「サンプルから選ぶ」の文だけで作ります（また入れる時は約 8GB 落とし直します）。よろしいですか？",
+                parent=self.win):
             return
         self.setup = setup
         self.expanded = True   # 回した後も、入れる場所・段の一覧・ログを出したままにする
