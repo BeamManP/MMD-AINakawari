@@ -429,8 +429,10 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
 def kimodo_env():
     """常駐の Kimodo（と、セットアップの試しの生成）に渡す環境。文の読み取りの場所（tools/kimodo_gen.py の説明）を入れる。"""
     # GPU の番号は nvidia-smi と同じ並びに（gpu.py の診断と同じ GPU を cuda:0 にする）
+    # 計算の方式（paths.backend）と、DirectML の時に書き出す ONNX の置き場も渡す
     return dict(os.environ, HF_HUB_CACHE=paths.kimodo_hf_cache(), AINAKAWARI_LLAMA_SERVER=paths.llama_server(),
                 AINAKAWARI_TEXT_GGUF=paths.text_gguf(), AINAKAWARI_LOG_DIR=resident.LOG_DIR,
+                AINAKAWARI_BACKEND=paths.backend("kimodo"), AINAKAWARI_ORT_CACHE=os.path.join(paths.kimodo_dir(), "ort_cache"),
                 PYTHONUTF8="1", PYTHONIOENCODING="utf-8", CUDA_DEVICE_ORDER="PCI_BUS_ID")
 
 

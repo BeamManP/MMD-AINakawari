@@ -4,6 +4,11 @@
     Kimodo:        .venv\\Scripts\\python.exe・hf_cache\\・text_encoder\\（GGUF）・llamacpp\\llama-server.exe・tools\\somaskel30.json
     MotionBricks:  .venv\\Scripts\\python.exe（中身は GitHub の motionbricks そのまま）
 
+計算の方式（kimodo_backend・motionbricks_backend）も同じファイルに書く。セットアップの試しの生成が、通った方式を書く:
+    cuda      NVIDIA の GPU（Kimodo は PyTorch の CUDA・MotionBricks は TensorRT）。書いていない時はこれ（0.2.x までと同じ）
+    directml  DirectX 12 の GPU（NVIDIA・AMD・Intel）を ONNX Runtime の DirectML で使う（tools/kimodo_ort.py・tools/mb_ort.py。11-10）
+    cpu       GPU を使わない（Kimodo は PyTorch の CPU で、数十秒〜数分かかる。MotionBricks は ONNX Runtime の CPU）
+
 設定が無い時に、決まった場所を探しに行ったりはしない（11-05 まで F:\\ に決め打ちだった）。Kimodo が無ければ生成の時に
 NotSetUp で止め、セットアップへ案内する。MotionBricks は入れなくてもよいので、無ければ「無い」（None）として扱う。
 """
@@ -16,6 +21,9 @@ PATHS_FILE = os.path.join(WORK_DIR, "paths.json")
 # 入れ方の案内（セットアップの画面は mmd_ainakawari/installer。11-06 にできた）
 SETUP_HINT = "詳細の窓の下の「セットアップ」で入れてください"
 KEYS = ("kimodo", "motionbricks")
+BACKENDS = ("cuda", "directml", "cpu")
+BACKEND_LABEL = {"cuda": "CUDA（NVIDIA）", "directml": "DirectML", "cpu": "CPU"}
+BACKEND_ENV = "AINAKAWARI_BACKEND"   # 試す時に、設定より先に見る（窓のプロセスの環境変数。常駐にも同じ名前で渡す）
 
 
 class NotSetUp(RuntimeError):
@@ -44,15 +52,44 @@ def save(**changes):
     except NotSetUp:
         data = {}
     for key, value in changes.items():
+        if key not in KEYS:
+            raise ValueError(f"paths.save に渡せるのは {KEYS}（{key!r}）")
         if value is None:
             data.pop(key, None)
         else:
             data[key] = os.path.abspath(value)
+    _write(data)
+
+
+def _write(data):
     os.makedirs(WORK_DIR, exist_ok=True)
     tmp = PATHS_FILE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=1)
     os.replace(tmp, PATHS_FILE)
+
+
+def backend(name):
+    """name（"kimodo"・"motionbricks"）の計算の方式（BACKENDS のどれか）。書いていなければ cuda。
+    環境変数 AINAKAWARI_BACKEND があれば、設定より先にそれを使う（試す時用）。"""
+    if name not in KEYS:
+        raise ValueError(name)
+    value = os.environ.get(BACKEND_ENV) or load().get(name + "_backend", "cuda")
+    if value not in BACKENDS:
+        raise NotSetUp(f"計算の方式が正しくありません（{value!r}。{' / '.join(BACKENDS)} のどれか）。{SETUP_HINT}")
+    return value
+
+
+def save_backend(name, value):
+    """name（"kimodo"・"motionbricks"）の計算の方式を書く（セットアップの試しの生成が、通った方式を書く）。"""
+    if name not in KEYS or value not in BACKENDS:
+        raise ValueError(f"{name!r} {value!r}")
+    try:
+        data = load()
+    except NotSetUp:
+        data = {}
+    data[name + "_backend"] = value
+    _write(data)
 
 
 def check(folder, name):
@@ -138,6 +175,7 @@ def main():
     print(f"書きました: {PATHS_FILE}")
     print(f"  Kimodo: {kimodo_dir()}")
     print(f"  MotionBricks: {motionbricks_dir() or '（入っていません）'}")
+    print(f"  計算の方式: Kimodo {backend('kimodo')}・MotionBricks {backend('motionbricks')}")
 
 
 if __name__ == "__main__":

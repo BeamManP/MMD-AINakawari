@@ -20,13 +20,26 @@ MotionBricks の骨格（77 関節の USD）は基準の回転が 0 でないの
     0 フレーム目は文脈の最後の姿勢。目標が複数なら、前の結果の最後の 4 フレームを次の文脈にしてつなぐ。
 まとめて頼む時（読み込みは 1 回で済む）:
     {"skeleton": …, "jobs": [{"context": …, "targets": …}, …]}  →  {"results": [上の結果, …], "seconds_generate": …}
+
+計算の方式は環境変数 AINAKAWARI_BACKEND（mmd_ainakawari/paths.py の説明。無ければ cuda）:
+    cuda      公式のエンジン（TensorRT・NVIDIA の GPU）
+    directml  ONNX Runtime の DirectML（tools/mb_ort.py。DirectX 12 の GPU ならメーカーを問わない）
+    cpu       ONNX Runtime の CPU
+どれでも結果はほぼ同じ（TensorRT との差は回転で最大 0.03 度・腰の位置 0.02mm）で、1 回の時間も 0.4〜0.6 秒と変わらない（11-10）。
 """
+import contextlib
 import json
 import os
 import sys
 import threading
 import time
 import traceback
+
+BACKEND = os.environ.get("AINAKAWARI_BACKEND") or "cuda"
+if BACKEND not in ("cuda", "directml", "cpu"):
+    raise SystemExit(f"AINAKAWARI_BACKEND={BACKEND!r} は cuda / directml / cpu のどれかにしてください")
+if BACKEND != "cuda":
+    import mb_ort   # motionbricks より先に（空の tensorrt を置くので、TensorRT が入っていない・使えない PC でも読める）
 
 import numpy as np
 import warp as wp
@@ -42,6 +55,20 @@ from motionbricks.model.soma.engine import MotionBricksSOMAEngine
 MIN_TOKENS, MAX_TOKENS = 6, 16   # 1 回で 4k-6 フレーム（両端込み）＝ 18〜58
 AUTHKEY = b"AINakawari.resident.v1"   # mmd_ainakawari/resident.py と同じ
 IDLE_SECONDS = 5 * 60                # 常駐で、これだけ頼まれなければ終わる（tools/kimodo_gen.py と同じ）
+
+
+@contextlib.contextmanager
+def open_engine():
+    """計算の方式（BACKEND）に合わせてエンジンを開く。with の中で使い、出る時に閉じる。"""
+    wp.init()
+    if BACKEND == "cuda":
+        wp.set_device("cuda:0")
+        with MotionBricksSOMAEngine(SOMA_N1_FP32_ONNX_PATH) as engine, wp.ScopedStream(engine.stream):
+            yield engine
+    else:   # 前後の計算（Warp）は CPU。推論だけ ONNX Runtime（DirectML か CPU）
+        wp.set_device("cpu")
+        with mb_ort.OrtSOMAEngine(SOMA_N1_FP32_ONNX_PATH, provider=BACKEND) as engine:
+            yield engine
 
 
 class Rig:
@@ -169,8 +196,6 @@ def serve(port):
     # このファイルが書き換わったら、古いコードのまま作らずに終わる（resident.py が立ち上げ直す）。読み込む前に取る
     born = os.path.getmtime(__file__)
     listener = Listener(("127.0.0.1", port), authkey=AUTHKEY)   # 口がふさがっていれば（もう常駐がいれば）ここで落ちる
-    wp.init()
-    wp.set_device("cuda:0")
     rigs = {}
     last = [time.time()]
 
@@ -182,8 +207,8 @@ def serve(port):
                 os._exit(0)
     threading.Thread(target=watch, daemon=True).start()
     t0 = time.time()
-    with MotionBricksSOMAEngine(SOMA_N1_FP32_ONNX_PATH) as engine, wp.ScopedStream(engine.stream):
-        print(f"ready port={port} load={time.time() - t0:.1f}s", flush=True)
+    with open_engine() as engine:
+        print(f"ready port={port} load={time.time() - t0:.1f}s backend={BACKEND}", flush=True)
         while True:
             try:
                 conn = listener.accept()
@@ -222,12 +247,10 @@ def main():
         serve(int(sys.argv[2]))
         return
     req = json.load(open(sys.argv[1], encoding="utf-8"))
-    wp.init()
-    wp.set_device("cuda:0")
-    with MotionBricksSOMAEngine(SOMA_N1_FP32_ONNX_PATH) as engine, wp.ScopedStream(engine.stream):
+    with open_engine() as engine:
         result, line = run(engine, {}, req)
     json.dump(result, open(sys.argv[2], "w", encoding="utf-8"))
-    print(line)
+    print(f"{line} backend={BACKEND}")
 
 
 if __name__ == "__main__":

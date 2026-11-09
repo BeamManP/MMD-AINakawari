@@ -1,0 +1,4 @@
+# ONNX Runtime（DirectML）と ONNX。MotionBricks を TensorRT の代わりに動かす（tools/mb_ort.py）。
+# 11-10 に RTX 3090 で確かめた版
+onnxruntime-directml==1.24.4
+onnx==1.23.2

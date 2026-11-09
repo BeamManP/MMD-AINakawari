@@ -3,6 +3,11 @@
 窓（app.py）の Python には torch が無いので、nvidia-smi とWindows の関数で読む。
 目安の数字は 11-04・11-07 に RTX 3090・メインメモリ 64GB で測った値から（docs/DEVELOPMENT.md の「文の読み取り」）。
 11-07 まで高速モード（VRAM 20GB 以上）と低負荷モード（メインメモリ 24GB 以上）の 2 段だったが、文の読み取りを GGUF にして 1 段にした。
+
+計算の方式（paths.backend）が cuda の時は、今までどおり NVIDIA の GPU を nvidia-smi で見る。
+directml・cpu の時（11-10。NVIDIA 以外の GPU・今の CUDA では動かない GPU）は、Windows が知っている GPU（レジストリ）を見る。
+セットアップの前（方式がまだ決まっていない）で NVIDIA の GPU が無い時も、Windows が知っている GPU を出して「動く見込み」とする
+（セットアップの試しの生成が DirectML で通れば、その方式になる）。
 """
 import ctypes
 import os
@@ -27,6 +32,7 @@ class Diagnosis:
     ram_free_gb: float  # 今空いているメインメモリ
     ok: bool            # 目安を満たす（GPU を調べられない時も、試せるので True）
     note: str           # 窓に出す一言
+    backend: str = "cuda"   # 計算の方式（paths.BACKENDS）
 
     @property
     def usable(self):
@@ -36,7 +42,8 @@ class Diagnosis:
     def summary(self):
         if not self.gpu:
             return self.note
-        return f"{self.gpu}（VRAM {self.vram_gb:.0f}GB）・メインメモリ {self.ram_gb:.0f}GB"
+        vram = f"（VRAM {self.vram_gb:.0f}GB）" if self.vram_gb else ""   # NVIDIA 以外では分からないことがある
+        return f"{self.gpu}{vram}・メインメモリ {self.ram_gb:.0f}GB"
 
 
 class _MemoryStatus(ctypes.Structure):
@@ -93,8 +100,76 @@ def _gpu():
     raise _Unknown(f"使う GPU（CUDA_VISIBLE_DEVICES={visible!r}）が見つかりません" if visible is not None else "GPU の一覧が空です")
 
 
+def _adapters():
+    """Windows が知っている GPU の [(名前, VRAM GB)]（VRAM の多い順）。読めなければ空。
+    レジストリのディスプレイ アダプターの一覧から。VRAM は HardwareInformation.qwMemorySize（専用の分。内蔵 GPU は小さく出る）。"""
+    import winreg
+
+    found = []
+    base = r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, base) as root:
+            for i in range(64):
+                try:
+                    sub = winreg.EnumKey(root, i)
+                except OSError:
+                    break
+                if not sub.isdigit():
+                    continue
+                try:
+                    with winreg.OpenKey(root, sub) as key:
+                        name = str(winreg.QueryValueEx(key, "DriverDesc")[0]).strip()
+                        try:
+                            size = winreg.QueryValueEx(key, "HardwareInformation.qwMemorySize")[0]
+                            vram = (int.from_bytes(size, "little") if isinstance(size, bytes) else int(size)) / 2**30
+                        except (OSError, ValueError, TypeError):
+                            vram = 0.0
+                except OSError:
+                    continue
+                if name and "Basic Display" not in name and "Basic Render" not in name:   # ドライバの無い時の仮の物は GPU として数えない
+                    found.append((name, vram))
+    except OSError:
+        return []
+    return sorted(found, key=lambda a: -a[1])
+
+
+def _backend():
+    """Kimodo の計算の方式。まだセットアップしていない・設定を読めない時は None（方式が決まっていない）。"""
+    from . import paths
+    try:
+        if os.environ.get(paths.BACKEND_ENV) or "kimodo_backend" in paths.load():
+            return paths.backend("kimodo")
+    except paths.NotSetUp:
+        pass
+    return None
+
+
+def _diagnose_other(backend, ram, ram_free):
+    """NVIDIA の GPU を CUDA で使わない時の診断（DirectML・CPU。まだ方式が決まっていなくて NVIDIA の GPU が無い時も）。"""
+    ram_ok = ram >= RAM_CHECK_GB
+    ram_note = "" if ram_ok else f"。メインメモリが足りないかもしれません（目安 {RAM_GB:.0f}GB 以上）"
+    if backend == "cpu":
+        return Diagnosis("", 0.0, 0.0, ram, ram_free, True,
+                         "GPU を使わずに作ります（時間がかかります。2 秒の動きに 1 分ほど）" + ram_note, "cpu")
+    adapters = _adapters()
+    if not adapters:
+        if backend == "directml":   # セットアップでは通っている。名前を読めないだけ
+            return Diagnosis("", 0.0, 0.0, ram, ram_free, True, "DirectML で動かします（GPU の名前は読めませんでした）" + ram_note, "directml")
+        return Diagnosis("", 0.0, 0.0, ram, ram_free, True,
+                         "GPU が見つかりません。セットアップで試して、動けば GPU なしで作ります（時間がかかります）" + ram_note, "cpu")
+    name, vram = adapters[0]
+    if backend == "directml":
+        note = "この PC で動きます（DirectML）"
+    else:   # まだセットアップしていない
+        note = "NVIDIA 以外の GPU です。DirectML で動かします（セットアップの試しの生成で確かめます）"
+    return Diagnosis(name, vram, 0.0, ram, ram_free, ram_ok, note + ram_note, "directml")
+
+
 def diagnose():
     ram, ram_free = _ram()
+    backend = _backend()
+    if backend in ("directml", "cpu"):
+        return _diagnose_other(backend, ram, ram_free)
     visible = os.environ.get("CUDA_VISIBLE_DEVICES")
     if visible is not None and visible.split(",")[0].strip() in ("", "-1"):   # GPU を見せない設定。どちらのモードも動かない
         return Diagnosis("", 0.0, 0.0, ram, ram_free, False,
@@ -106,8 +181,10 @@ def diagnose():
         applog.write(f"GPU を調べられませんでした: {e}")
         return Diagnosis("", 0.0, 0.0, ram, ram_free, True, "GPU を調べられませんでした。「生成」を押して試してください")
     if g is None:
+        if backend is None:   # まだセットアップしていない。NVIDIA 以外の GPU なら DirectML で動かせる（11-10）
+            return _diagnose_other(None, ram, ram_free)
         return Diagnosis("", 0.0, 0.0, ram, ram_free, False,
-                         "NVIDIA の GPU が見つかりません（AIナカワリ に必要です）")
+                         "NVIDIA の GPU が見つかりません（計算の方式が CUDA になっています。「セットアップ」を押して入れ直してください）")
     name, vram, vram_free = g
     ok = vram >= VRAM_GB and ram >= RAM_CHECK_GB
     if ok:
@@ -123,4 +200,5 @@ if __name__ == "__main__":
     import sys
     sys.stdout.reconfigure(encoding="utf-8")
     d = diagnose()
-    print(d.summary(), "→", d.note, f"（空き VRAM {d.vram_free_gb:.1f}GB・空きメモリ {d.ram_free_gb:.1f}GB）")
+    print(d.summary(), "→", d.note, f"（計算の方式 {d.backend}・空き VRAM {d.vram_free_gb:.1f}GB・空きメモリ {d.ram_free_gb:.1f}GB）")
+    print("Windows が知っている GPU:", _adapters())

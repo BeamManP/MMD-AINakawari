@@ -89,6 +89,10 @@ def _skip_when_empty(c):
 
 
 MODEL = "kimodo-soma-rp"
+# 計算の方式（mmd_ainakawari/paths.py の説明。無ければ cuda）。load() が見る
+BACKEND = os.environ.get("AINAKAWARI_BACKEND") or "cuda"
+if BACKEND not in ("cuda", "directml", "cpu"):
+    raise SystemExit(f"AINAKAWARI_BACKEND={BACKEND!r} は cuda / directml / cpu のどれかにしてください")
 AUTHKEY = b"AINakawari.resident.v1"   # mmd_ainakawari/resident.py と同じ
 WORK = os.path.join(HOME, "work")
 IDLE_SECONDS = 5 * 60                # 常駐で、これだけ頼まれなければ終わる（作り直しを続ける間は速く、手を止めたら約 8GB を空ける。11-08 マスター）
@@ -110,14 +114,24 @@ def start_llama():
 
 
 def load(name=MODEL):
-    """Kimodo のモデルを読む。文の読み取りは CachedText（llama-server はまだ起こさない）。"""
+    """Kimodo のモデルを読む。文の読み取りは CachedText（llama-server はまだ起こさない）。
+
+    計算の方式（BACKEND）が cuda なら今までどおり GPU の PyTorch。directml なら CPU で読んでから、重い 2 つの Transformer だけを
+    ONNX Runtime の DirectML に差し替える（tools/kimodo_ort.py。書き出した ONNX は AINAKAWARI_ORT_CACHE か <今の場所>\\ort_cache）。
+    cpu は PyTorch の CPU のまま（67 フレームで約 40 秒・300 フレームで 2〜4 分。11-10・i7-12700F）。
+    """
     from gguf_text import CachedText
     from kimodo import load_model
 
     use_cache = os.environ.get("AINAKAWARI_TEXT_NO_CACHE") != "1"
-    model = load_model(name, device="cuda", text_encoder=CachedText(start_llama, use_cache=use_cache))
+    device = "cuda" if BACKEND == "cuda" else "cpu"
+    model = load_model(name, device=device, text_encoder=CachedText(start_llama, device=device, use_cache=use_cache))
     if model.skeleton.nbjoints != J:
         raise RuntimeError(f"skeleton has {model.skeleton.nbjoints} joints, expected {J}")
+    if BACKEND == "directml":
+        import kimodo_ort
+        kimodo_ort.install(model, "directml", os.environ.get("AINAKAWARI_ORT_CACHE") or os.path.join(os.getcwd(), "ort_cache"),
+                           log=lambda line: print(line, flush=True))
     return model
 
 
@@ -271,7 +285,8 @@ def generate(model, req, t_load=0.0):
 def _code_mtime():
     """このファイルと文の読み取りの部品の、新しい方の更新時刻。"""
     here = os.path.dirname(os.path.abspath(__file__))
-    files = [os.path.join(here, f) for f in ("kimodo_gen.py", "gguf_text.py")] + [os.path.join(HOME, "mmd_ainakawari", "text_keys.py")]
+    files = ([os.path.join(here, f) for f in ("kimodo_gen.py", "gguf_text.py", "kimodo_ort.py")]
+             + [os.path.join(HOME, "mmd_ainakawari", "text_keys.py")])
     return max(os.path.getmtime(f) for f in files)
 
 
@@ -290,7 +305,7 @@ def serve(port):
     listener = Listener(("127.0.0.1", port), authkey=AUTHKEY)   # 口がふさがっていれば（もう常駐がいれば）ここで落ちる
     t0 = time.time()
     model = load()
-    print(f"ready port={port} load={time.time() - t0:.1f}s", flush=True)
+    print(f"ready port={port} load={time.time() - t0:.1f}s backend={BACKEND}", flush=True)
     last = [time.time()]
 
     def watch():
@@ -348,7 +363,7 @@ def main():
     model = load(req.get("model", MODEL))
     result, line = generate(model, req, t_load=time.time() - t0)
     json.dump(result, open(sys.argv[2], "w", encoding="utf-8"))
-    print(line)
+    print(f"{line} backend={BACKEND}")
 
 
 if __name__ == "__main__":

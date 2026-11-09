@@ -34,6 +34,9 @@ from . import pins
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REQUIREMENTS = os.path.join(HERE, "kimodo-requirements.txt")
+# ONNX Runtime（DirectML）と ONNX。NVIDIA 以外の GPU・今の CUDA では動かない GPU で動かすため（tools/kimodo_ort.py・tools/mb_ort.py。11-10）
+ORT_KIMODO = os.path.join(HERE, "ort-kimodo.txt")
+ORT_MOTIONBRICKS = os.path.join(HERE, "ort-motionbricks.txt")
 FETCH_MODEL = os.path.join(HERE, "fetch_kimodo_model.py")
 TOOLS = os.path.join(paths.HOME, "tools")
 STATE_FILE = "setup_state.json"
@@ -41,6 +44,9 @@ FINISHED = "_finished"   # setup_state.json の中の「最後まで済んだ時
 # setup_state.json の中の「プロンプトの読み取り（Llama 3）を入れるか」（11-10 マスター。外すとサンプルの文だけで作る）。
 # 印の無い場所（11-09 までに入れた場所）は入れた物として扱う
 WITH_TEXT = "_with_text_encoder"
+# setup_state.json の中の「試しの生成が通った計算の方式」（paths.BACKENDS のどれか）。register が窓の paths.json へ写す
+BACKEND_STATE = {"kimodo": "_backend_kimodo", "motionbricks": "_backend_motionbricks"}
+BACKEND_ORDER_ENV = "AINAKAWARI_SETUP_BACKENDS"   # 試す順を決め打ちする（開発用。例: directml,cpu）
 TEXT_STEPS = ("text_gguf", "llamacpp")
 # 組み立て済みの部品の置き場所（配布の zip では MMD-AINakawari\prebuilt\。開発版は work\prebuilt\）。
 # kimodo は入れる時に C++ の部品（MotionCorrection。生成の「後処理」が使う）を CMake とコンパイラで組み立てるが、
@@ -182,6 +188,7 @@ class Setup:
         self.state_path = os.path.join(dest, STATE_FILE)
         self.with_text = self.chosen_text() if with_text is None else bool(with_text)
         self.uv = None
+        self.found = {}   # 試しの生成が通った計算の方式（BACKEND_STATE の名前 → 方式）。run が setup_state.json に書く
         self._stop = threading.Event()
         self._proc = None
 
@@ -206,16 +213,22 @@ class Setup:
         elif any(os.path.isdir(os.path.join(self.kimodo, d)) for d in ("text_encoder", "llamacpp")):
             # 前に入れた Llama を外した時だけ出る段（消し終われば出なくなる）
             k.append(("text_remove", "kimodo", "プロンプトの読み取り（Llama 3）を消す（約 8GB 空きます）", "removed", 0, self.text_remove))
+        # 環境を作り直した時に入れ直すように、Kimodo の環境の段より後ろ・試しの生成の前に置く（run は後ろの段をやり直させる）
+        k.append(("kimodo_ort", "kimodo", "ONNX Runtime を Kimodo の環境に入れる（NVIDIA 以外の GPU でも動かすため）",
+                  file_sha256(ORT_KIMODO), 0.2, self.kimodo_ort))
         k.append(("kimodo_test", "kimodo", "Kimodo が動くか確かめる（2 秒の動きを試しに作る）",
-                  f"{pins.KIMODO_COMMIT}/{file_sha256(os.path.join(TOOLS, 'gguf_text.py'))}/{'text' if self.with_text else 'samples'}",
-                  0, self.kimodo_test))
+                  f"{pins.KIMODO_COMMIT}/{file_sha256(os.path.join(TOOLS, 'gguf_text.py'))}/{'text' if self.with_text else 'samples'}"
+                  f"/{file_sha256(os.path.join(TOOLS, 'kimodo_ort.py'))}",
+                  1.2, self.kimodo_test))   # 1.2GB は DirectML の時に書き出す ONNX（CUDA で動く PC では作らない）
         m = [
             ("mb_src", "mb", "MotionBricks の本体を落とす", pins.MOTIONBRICKS_COMMIT, 0.2, self.mb_src),
             ("mb_models", "mb", "MotionBricks のモデルを落とす（約 1.1GB）", pins.MOTIONBRICKS_COMMIT, 1.2, self.mb_models),
             ("mb_env", "mb", "MotionBricks の Python の環境を作る（約 3GB）",
              f"{pins.MOTIONBRICKS_COMMIT}/{pins.MOTIONBRICKS_PYTHON}", 3.3, self.mb_env),
+            ("mb_ort", "mb", "ONNX Runtime を MotionBricks の環境に入れる（NVIDIA 以外の GPU でも動かすため）",
+             file_sha256(ORT_MOTIONBRICKS), 0.2, self.mb_ort),
             ("mb_test", "mb", "MotionBricks が動くか確かめる（1 秒の動きを試しに作る。初回は数分かかる）",
-             pins.MOTIONBRICKS_COMMIT, 0.8, self.mb_test),
+             f"{pins.MOTIONBRICKS_COMMIT}/{file_sha256(os.path.join(TOOLS, 'mb_ort.py'))}", 0.8, self.mb_test),
         ]
         # MotionBricks は選ばせずに必ず入れる（11-06 マスター。前は画面で選べた）
         return k + m
@@ -303,6 +316,7 @@ class Setup:
                 self.on_step(key, "fail")
                 raise Cancelled()
             state[key] = version
+            state.update(self.found)
             self.save_state(state)
             self.on_step(key, "done")
             self.log(f"   済み（{time.time() - t0:.0f} 秒）")
@@ -318,6 +332,9 @@ class Setup:
         paths.check(self.kimodo, "Kimodo")
         paths.check(self.mb, "MotionBricks")
         paths.save(kimodo=self.kimodo, motionbricks=self.mb)
+        state = self.load_state()
+        for name, key in BACKEND_STATE.items():   # 0.2.x までにセットアップした場所には印が無い（cuda で動いていた）
+            paths.save_backend(name, state.get(key) if state.get(key) in paths.BACKENDS else "cuda")
         self.log(f"この場所を使うように設定しました（{paths.PATHS_FILE}）")
 
     def cancel(self):
@@ -522,6 +539,36 @@ class Setup:
     def mb_python(self):
         return os.path.join(self.mb, ".venv", "Scripts", "python.exe")
 
+    # ---- 計算の方式 ---------------------------------------------------------------------------------
+    def backends_to_try(self):
+        """試しの生成で試す計算の方式の順。NVIDIA の GPU が見える（nvidia-smi がある）時だけ cuda から。
+        環境変数 AINAKAWARI_SETUP_BACKENDS があれば、その順（開発用）。"""
+        forced = [b.strip() for b in os.environ.get(BACKEND_ORDER_ENV, "").split(",") if b.strip()]
+        if forced:
+            if any(b not in paths.BACKENDS for b in forced):
+                raise Failed(f"{BACKEND_ORDER_ENV}={os.environ[BACKEND_ORDER_ENV]!r} は {' / '.join(paths.BACKENDS)} の並びにしてください")
+            return forced
+        return (["cuda"] if shutil.which("nvidia-smi") else []) + ["directml", "cpu"]
+
+    def try_backends(self, name, label, attempt):
+        """attempt(方式) を順に試して、最初に通った方式を返す。覚えてもおく（self.found。run が setup_state.json に書く）。
+        途中の失敗はログに残して次の方式へ。全部だめなら最後の失敗をそのまま出す。
+        GPU の世代を決め打ちしないための作り: 今の PyTorch（CUDA 12.8）や TensorRT で動かない NVIDIA の GPU も、ここで DirectML に落ちる。"""
+        order = self.backends_to_try()
+        for i, backend in enumerate(order):
+            self.log(f"  計算の方式: {paths.BACKEND_LABEL[backend]} で試します")
+            try:
+                attempt(backend)
+            except Failed as e:
+                if i == len(order) - 1:
+                    raise
+                self.log(f"  {label} は {paths.BACKEND_LABEL[backend]} では動きませんでした。次の方式で試します:")
+                for line in str(e).splitlines():
+                    self.log("    " + line)
+                continue
+            self.found[BACKEND_STATE[name]] = backend
+            return backend
+
     # ---- Kimodo -------------------------------------------------------------------------------------
     def kimodo_src(self):
         self.fetch_zip(pins.KIMODO_ZIP, f"kimodo-{pins.KIMODO_COMMIT[:7]}", os.path.join(self.kimodo, "repo"))
@@ -559,6 +606,13 @@ class Setup:
         shutil.copyfile(pyd, os.path.join(site, info["file"]))
         self.call([self.kimodo_python(), "-c", "import torch, motion_correction._motion_correction; print('motion_correction ok')"],
                   "組み立て済みの部品の読み込み")
+
+    def kimodo_ort(self):
+        self.call([self.uv, "pip", "install", "--python", self.kimodo_python(), "--require-hashes", "-r", ORT_KIMODO],
+                  "ONNX Runtime を入れる（Kimodo）")
+        self.call([self.kimodo_python(), "-c",
+                   "import onnx, onnxruntime; print('onnxruntime', onnxruntime.__version__, onnxruntime.get_available_providers())"],
+                  "ONNX Runtime の読み込み（Kimodo）")
 
     def skeleton(self):
         os.makedirs(os.path.join(self.kimodo, "tools"), exist_ok=True)
@@ -633,28 +687,39 @@ class Setup:
         req, out = os.path.join(work, "kimodo_request.json"), os.path.join(work, "kimodo_result.json")
         with open(req, "w", encoding="utf-8") as f:
             json.dump({"prompt": "A person walks forward.", "num_frames": 60, "seed": 0}, f)
-        if os.path.exists(out):
-            os.remove(out)
         if self.with_text:
             self.log("  初めての読み込みなので 1〜2 分かかります（プロンプトを読み取るモデル約 8GB をメインメモリに読みます）")
         else:
             self.log("  初めての読み込みなので 1 分ほどかかります（プロンプトはサンプルの読み取り結果を使います）")
-        self.call([self.kimodo_python(), os.path.join(TOOLS, "kimodo_gen.py"), req, out], "Kimodo の試しの生成", cwd=self.kimodo,
-                  HF_HUB_CACHE=os.path.join(self.kimodo, "hf_cache"), LOCAL_CACHE="true", HF_HUB_OFFLINE="1",
-                  AINAKAWARI_LLAMA_SERVER=os.path.join(self.kimodo, "llamacpp", "llama-server.exe"),
-                  AINAKAWARI_TEXT_GGUF=os.path.join(self.kimodo, "text_encoder", pins.TEXT_GGUF_FILE[0]), AINAKAWARI_LOG_DIR=work,
-                  AINAKAWARI_TEXT_NO_CACHE="1" if self.with_text else "0")
+
+        def attempt(backend):
+            if os.path.exists(out):
+                os.remove(out)
+            if backend == "directml":
+                self.log("  DirectML では、初回だけ Kimodo のモデルを ONNX に書き出します（約 1.2GB・1 分ほど）")
+            elif backend == "cpu":
+                self.log("  GPU を使わずに作ります（2 秒の動きに 1 分ほどかかります）")
+            self.call([self.kimodo_python(), os.path.join(TOOLS, "kimodo_gen.py"), req, out], "Kimodo の試しの生成", cwd=self.kimodo,
+                      HF_HUB_CACHE=os.path.join(self.kimodo, "hf_cache"), LOCAL_CACHE="true", HF_HUB_OFFLINE="1",
+                      AINAKAWARI_LLAMA_SERVER=os.path.join(self.kimodo, "llamacpp", "llama-server.exe"),
+                      AINAKAWARI_TEXT_GGUF=os.path.join(self.kimodo, "text_encoder", pins.TEXT_GGUF_FILE[0]), AINAKAWARI_LOG_DIR=work,
+                      AINAKAWARI_TEXT_NO_CACHE="1" if self.with_text else "0",
+                      AINAKAWARI_BACKEND=backend, AINAKAWARI_ORT_CACHE=os.path.join(self.kimodo, "ort_cache"))
+            with open(out, encoding="utf-8") as f:
+                if not json.load(f).get("num_frames"):
+                    raise Failed(f"Kimodo の試しの生成の結果が空でした（{out}）")
+
+        backend = self.try_backends("kimodo", "Kimodo", attempt)
         with open(out, encoding="utf-8") as f:
             frames = json.load(f).get("num_frames")
-        if not frames:
-            raise Failed(f"Kimodo の試しの生成の結果が空でした（{out}）")
         paths.check(self.kimodo, "Kimodo")
-        paths.save(kimodo=self.kimodo)
-        self.log(f"  Kimodo で {frames} フレーム作れました。この場所を使うように設定しました")
+        paths.save(kimodo=self.kimodo)   # 通ってから、場所と方式を書く
+        paths.save_backend("kimodo", backend)
+        self.log(f"  Kimodo で {frames} フレーム作れました（計算の方式: {paths.BACKEND_LABEL[backend]}）。この場所を使うように設定しました")
 
     # ---- MotionBricks -------------------------------------------------------------------------------
     def mb_src(self):
-        self.fetch_zip(pins.MOTIONBRICKS_ZIP, f"motionbricks-{pins.MOTIONBRICKS_COMMIT[:7]}", self.mb, keep=(".venv", ".trt-cache"))
+        self.fetch_zip(pins.MOTIONBRICKS_ZIP, f"motionbricks-{pins.MOTIONBRICKS_COMMIT[:7]}", self.mb, keep=(".venv", ".trt-cache", ".ort-cache"))
 
     def mb_models(self):
         for path, (digest, size) in pins.MOTIONBRICKS_LFS.items():
@@ -671,8 +736,16 @@ class Setup:
     def mb_env(self):
         self.call([self.uv, "sync", "--frozen", "--python", pins.MOTIONBRICKS_PYTHON], "MotionBricks の部品を入れる", cwd=self.mb)
 
+    def mb_ort(self):
+        self.call([self.uv, "pip", "install", "--python", self.mb_python(), "--require-hashes", "-r", ORT_MOTIONBRICKS],
+                  "ONNX Runtime を入れる（MotionBricks）")
+        self.call([self.mb_python(), "-c",
+                   "import onnx, onnxruntime; print('onnxruntime', onnxruntime.__version__, onnxruntime.get_available_providers())"],
+                  "ONNX Runtime の読み込み（MotionBricks）")
+
     def mb_test(self):
-        """T ポーズから T ポーズへ 1 回つなぐ。初回は TensorRT のエンジンを作る（.trt-cache。GPU ごとに数分）。通ったら paths.json に書く。"""
+        """T ポーズから T ポーズへ 1 回つなぐ。通った計算の方式と場所を paths.json に書く。
+        CUDA の初回は TensorRT のエンジンを作る（.trt-cache。GPU ごとに数分）。DirectML の初回は手直しした ONNX を作る（.ort-cache。数秒）。"""
         skeleton = os.path.join(self.kimodo, "tools", "somaskel30.json")
         if not os.path.isfile(skeleton):
             raise Failed("Kimodo の骨格がありません。先に Kimodo のセットアップを済ませてください")
@@ -685,17 +758,25 @@ class Setup:
         with open(req, "w", encoding="utf-8") as f:
             json.dump({"skeleton": skeleton, "context": [pose] * 4,
                        "targets": [{"poses": [pose], "frames": 30, "num_poses_to_use": 1}]}, f)
-        if os.path.exists(out):
-            os.remove(out)
-        self.log("  初回は GPU に合わせた TensorRT の準備で数分かかります（止まって見えても進んでいます）")
-        self.call([self.mb_python(), os.path.join(TOOLS, "mb_gen.py"), req, out], "MotionBricks の試しの生成", cwd=self.mb)
+
+        def attempt(backend):
+            if os.path.exists(out):
+                os.remove(out)
+            if backend == "cuda":
+                self.log("  初回は GPU に合わせた TensorRT の準備で数分かかります（止まって見えても進んでいます）")
+            self.call([self.mb_python(), os.path.join(TOOLS, "mb_gen.py"), req, out], "MotionBricks の試しの生成", cwd=self.mb,
+                      AINAKAWARI_BACKEND=backend)
+            with open(out, encoding="utf-8") as f:
+                if not json.load(f).get("num_frames"):
+                    raise Failed(f"MotionBricks の試しの生成の結果が空でした（{out}）")
+
+        backend = self.try_backends("motionbricks", "MotionBricks", attempt)
         with open(out, encoding="utf-8") as f:
             frames = json.load(f).get("num_frames")
-        if not frames:
-            raise Failed(f"MotionBricks の試しの生成の結果が空でした（{out}）")
         paths.check(self.mb, "MotionBricks")
-        paths.save(motionbricks=self.mb)
-        self.log(f"  MotionBricks で {frames} フレーム作れました。この場所を使うように設定しました")
+        paths.save(motionbricks=self.mb)   # 通ってから、場所と方式を書く
+        paths.save_backend("motionbricks", backend)
+        self.log(f"  MotionBricks で {frames} フレーム作れました（計算の方式: {paths.BACKEND_LABEL[backend]}）。この場所を使うように設定しました")
 
 
 def main():

@@ -1,0 +1,4 @@
+# ONNX Runtime（DirectML）と ONNX。Kimodo の 2 つの Transformer を書き出して DirectML で動かす（tools/kimodo_ort.py）。
+# 11-10 に RTX 3090 で確かめた版。上げる時は pins.py の説明のとおり、まっさらな場所へのセットアップと試しの生成を通してから
+onnxruntime-directml==1.23.0
+onnx==1.23.2

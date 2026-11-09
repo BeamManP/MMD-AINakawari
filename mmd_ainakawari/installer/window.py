@@ -151,17 +151,20 @@ class SetupWindow:
         """一番上の「現在の環境: GPU・メインメモリ → MotionBricks ○ Kimodo ○」（11-06 マスター。11-07 に動作モードの 2 つを 1 つに）。
         使える物は緑の ○、使えない物は赤の ×。GPU を調べられなかった時は、どれも橙の ？（試せる。gpu.diagnose）。
         赤がある時は、理由（gpu.diagnose の一言）を下に小さく出す。"""
-        unknown = not d.gpu and d.ok
+        no_gpu = d.backend == "cpu" and not d.gpu   # GPU を使わずに作る（遅いが動く。11-10）
+        unknown = not d.gpu and d.ok and not no_gpu
         row = ttk.Frame(f)
         row.pack(anchor="w", fill="x")
-        hardware = d.summary() if d.gpu else f"{'GPU を調べられませんでした' if unknown else 'NVIDIA の GPU が見つかりません'}・メインメモリ {d.ram_gb:.0f}GB"
+        missing = "GPU なし" if no_gpu else "GPU を調べられませんでした" if unknown else "NVIDIA の GPU が見つかりません"
+        hardware = d.summary() if d.gpu else f"{missing}・メインメモリ {d.ram_gb:.0f}GB"
         ttk.Label(row, text=f"現在の環境：{hardware}　→").pack(side="left")
-        marks = [("MotionBricks", bool(d.gpu)), ("Kimodo", d.ok and bool(d.gpu))]
+        marks = [("MotionBricks", bool(d.gpu) or no_gpu), ("Kimodo", d.ok and (bool(d.gpu) or no_gpu))]
         for name, ok in marks:
             mark, color = ("？", "#c70") if unknown else ("○", "#2a7") if ok else ("×", "#c33")
             tk.Label(row, text=f"{name} {mark}", foreground=color, font=("", 9, "bold"),
                      background=ttk.Style().lookup("TFrame", "background")).pack(side="left", padx=(8, 0))
-        if unknown or not all(ok for _n, ok in marks):
+        # CUDA 以外（DirectML・GPU なし）は、どう動かすかの一言も出す
+        if unknown or d.backend != "cuda" or not all(ok for _n, ok in marks):
             ttk.Label(f, text=d.note, foreground="#555").pack(anchor="w", pady=(2, 0))
 
     @staticmethod
