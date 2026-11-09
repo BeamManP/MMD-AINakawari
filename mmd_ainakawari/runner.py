@@ -222,6 +222,16 @@ def generate(settings, log=print, link=None, previous=None):
             + (f"（後ろ {outside} フレームは止まるために余分に作るだけで、書き戻さない）" if outside > 0 else ""))
     if job.limb_frames:
         log(f"手足の IK だけのキー {len(job.limb_frames)} 個: {job.limb_frames}（手足の位置だけ合わせ、体は任せる）")
+    if job.sunk_keys:
+        runs = []   # 続いたフレーム（範囲の外の文脈など）は 1 つにまとめる [始め, 終わり, 一番低い]
+        for f, d in job.sunk_keys:
+            if runs and f == runs[-1][1] + 1:
+                runs[-1][1], runs[-1][2] = f, max(runs[-1][2], d)
+            else:
+                runs.append([f, f, d])
+        shown = "・".join(f"{a}F（{d * 100:.0f}cm）" if a == b else f"{a}〜{b}F（{d * 100:.0f}cm）" for a, b, d in runs)
+        log(f"注意: 足の裏がほかのキーより低いキーがあります: {shown}。床は一番低い足で決めるので、"
+            f"ほかのフレームもそのぶん沈みます。足が床に埋まっていないか、足ＩＫの高さを確かめてください")
     for old, new, key in job.segment_moves:
         log(f"区間の始め {old}F の直後にキー（{key}F）があるので、区間の始めを {new}F にずらしました（キーで跳ばないように）")
     if not mb:

@@ -30,7 +30,7 @@ from .message_window import MessageWindow, register_message
 from . import vmd
 from .mmd_link import MMDLink
 from .mmd_skel import MMDSkeleton
-from .widgets import Fold, PromptRows, ScrollFrame
+from .widgets import Fold, PromptRows, ScrollFrame, set_enabled
 
 APP_MUTEX = "Local\\AINakawari.App.v1"
 HUB_CLASS = "AINakawari.Hub"           # プラグインと 2 回目の起動が探す目印（nakawari_plugin.cpp と同じ）
@@ -42,10 +42,12 @@ _set_window_long = ctypes.windll.user32.SetWindowLongPtrW
 _set_window_long.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
 _set_window_long.restype = ctypes.c_void_p
 SETTINGS_PATH = os.path.join(runner.WORK_DIR, "settings.json")
+CFG_DEFAULT = 2.0             # プロンプトの効き・キーの効きの推奨（Kimodo の既定）。「推奨に戻す」もこの値
+CFG_RANGE = (0.5, 10.0, 0.5)  # スライダの下限・上限・刻み
 DEFAULTS = {
     "tab": "kimodo", "mode": "fill", "range_mode": "keys", "length": "",   # 範囲は選んだキーの間から（11-05 マスター）
     "prompt": "A person moves naturally between poses.",
-    "steps": 100, "seed": -1, "post_processing": True, "cfg_text": 2.0, "cfg_key": 2.0,
+    "steps": 100, "seed": -1, "post_processing": True, "cfg_text": CFG_DEFAULT, "cfg_key": CFG_DEFAULT,
     "stop_at_last_key": True, "smooth_stop": True, "key_stop": False, "wrist_lerp": False,
 }
 # 前の窓の保存にあった項目（読む時に変換して捨てる。perf_mode は 11-07 まであった動作モード・use_center は 11-07 までのチェック）
@@ -349,24 +351,37 @@ class App:
         sample_button.configure(command=lambda: self._show_samples(sample_button))
         sample_button.pack(side="left", padx=(8, 0))
 
+        # Kimodo の CFG の重み。数字を打つのは面倒なのでスライダ（11-08 マスター）。範囲は前の欄と同じ 0.5〜10・0.5 刻み
+        # よく触るので「詳しい設定」には畳まず、プロンプトのすぐ下に出す（11-08 マスター）
+        # テキストを上げるとプロンプトの動きが強く出る（回転なら 8・1 で振り向くほど）
+        strength = ttk.Frame(t)
+        strength.pack(fill="x", pady=(8, 0))
+        strength.columnconfigure(1, weight=1)
+        self.cfg_text = tk.DoubleVar(value=self.cfg["cfg_text"])
+        self.cfg_key = tk.DoubleVar(value=self.cfg["cfg_key"])
+        self._cfg_slider(strength, 0, "プロンプトの効き", self.cfg_text,
+                         "上げると、文の動きが強く・大きく出ます（動きが弱い・出ない時は 3〜5 に）。上げすぎると大げさで不自然になります")
+        self._cfg_slider(strength, 2, "キーの効き", self.cfg_key,
+                         "上げると、キーのポーズへ寄せる力が強くなります（キーの前後がカクつく時に）。"
+                         "下げると、キーの近くも自由に動きます（動きが硬い時に）。キーのフレームの姿勢はどちらでもそのまま残ります")
+        ttk.Button(strength, text=f"推奨（{CFG_DEFAULT:g}・{CFG_DEFAULT:g}）に戻す",
+                   command=lambda: (self.cfg_text.set(CFG_DEFAULT), self.cfg_key.set(CFG_DEFAULT))).grid(
+            row=4, column=0, columnspan=3, sticky="w", padx=4, pady=2)
+
         details = Fold(t, "詳しい設定")
         details.pack(fill="x", pady=(8, 0))
         d, g = details.body, {"padx": 4, "pady": 2}
-        ttk.Label(d, text="計算の回数（少ないほど速い）").grid(row=0, column=0, sticky="w", **g)
+        d.columnconfigure(1, weight=1)
+        top = ttk.Frame(d)
+        top.grid(row=0, column=0, columnspan=3, sticky="w", **g)
+        ttk.Label(top, text="計算の回数（少ないほど速い）").pack(side="left")
         self.steps = tk.IntVar(value=self.cfg["steps"])
-        ttk.Spinbox(d, from_=10, to=100, increment=10, textvariable=self.steps, width=6).grid(row=0, column=1, sticky="w", **g)
-        ttk.Label(d, text="seed（-1 で毎回違う動き）").grid(row=1, column=0, sticky="w", **g)
+        ttk.Spinbox(top, from_=10, to=100, increment=10, textvariable=self.steps, width=6).pack(side="left", padx=(4, 16))
+        ttk.Label(top, text="seed（-1 で毎回違う動き）").pack(side="left")
         self.seed = tk.IntVar(value=self.cfg["seed"])
-        ttk.Entry(d, textvariable=self.seed, width=8).grid(row=1, column=1, sticky="w", **g)
-        # Kimodo の CFG の重み。テキストを上げるとプロンプトの動きが強く出る（回転なら 8・1 で振り向くほど）
-        ttk.Label(d, text="プロンプトの効き").grid(row=0, column=2, sticky="e", **g)
-        self.cfg_text = tk.DoubleVar(value=self.cfg["cfg_text"])
-        ttk.Spinbox(d, from_=0.5, to=10, increment=0.5, textvariable=self.cfg_text, width=5).grid(row=0, column=3, sticky="w", **g)
-        ttk.Label(d, text="キーの効き").grid(row=1, column=2, sticky="e", **g)
-        self.cfg_key = tk.DoubleVar(value=self.cfg["cfg_key"])
-        ttk.Spinbox(d, from_=0.5, to=10, increment=0.5, textvariable=self.cfg_key, width=5).grid(row=1, column=3, sticky="w", **g)
+        ttk.Entry(top, textvariable=self.seed, width=8).pack(side="left", padx=(4, 0))
         self.post = tk.BooleanVar(value=self.cfg["post_processing"])
-        ttk.Checkbutton(d, text="仕上補正（足すべり・姿勢）", variable=self.post).grid(row=2, column=0, columnspan=2, sticky="w", **g)
+        ttk.Checkbutton(d, text="仕上補正（足すべり・姿勢）", variable=self.post).grid(row=1, column=0, columnspan=3, sticky="w", **g)
         # GPU 診断（この PC で足りるか）
         d = self.diagnosis
         bg = ttk.Style().lookup("TFrame", "background")
@@ -375,6 +390,31 @@ class App:
         # 足りない・GPU が無い時は赤で目立たせる（普段の説明と同じ灰色だと読み飛ばす）
         tk.Label(t, text=("→ " if d.gpu else "") + d.note, foreground="#556" if d.ok else "#c22", background=bg,
                  wraplength=500, anchor="w", justify="left").pack(fill="x", pady=(0 if d.gpu else 8, 0))
+
+    def _cfg_slider(self, d, row, title, var, note):
+        """効きのスライダ 1 本（名前・スライダ・今の値）と、その下の説明。値は CFG_RANGE の刻みにそろえる。"""
+        low, high, step = CFG_RANGE
+        shown = tk.StringVar()
+
+        def snap(*_):
+            try:
+                v = float(var.get())
+            except (tk.TclError, ValueError):   # 前の保存が数字でないなど。推奨に戻す
+                v = CFG_DEFAULT
+            s = min(high, max(low, round(v / step) * step))
+            if s != v:
+                # trace の中で同じ変数に書いても、Tcl は trace をもう一度呼ばない。なのでここで return すると、
+                # 刻みに合わない値（ドラッグ中はほぼ全部）で右の数字が変わらなかった（11-08 マスター）
+                var.set(s)
+            shown.set(f"{s:.1f}" + ("（推奨）" if s == CFG_DEFAULT else ""))
+
+        ttk.Label(d, text=title, width=12).grid(row=row, column=0, sticky="w", padx=4, pady=(4, 0))
+        ttk.Scale(d, from_=low, to=high, orient="horizontal", variable=var).grid(row=row, column=1, sticky="ew", padx=4, pady=(4, 0))
+        ttk.Label(d, textvariable=shown, width=12).grid(row=row, column=2, sticky="w", padx=4, pady=(4, 0))
+        tk.Label(d, text=note, foreground="#556", background=ttk.Style().lookup("TFrame", "background"),
+                 wraplength=460, anchor="w", justify="left").grid(row=row + 1, column=0, columnspan=3, sticky="w", padx=4)
+        var.trace_add("write", snap)
+        snap()
 
     def _build_nakawari(self, t):
         """「MotionBricks」タブ（プロンプト無しの中割り）。"""
@@ -397,7 +437,7 @@ class App:
         """入っている物（Kimodo・MotionBricks）に合わせて、窓の部品と状態の 1 行を出し直す。作った時と、セットアップが済んだ時に呼ぶ。"""
         mb = smooth_stop.available()
         for check in self.nakawari_checks:
-            check.configure(state="normal" if mb else "disabled")
+            set_enabled(check, mb)
         if mb:
             self.nakawari_missing.pack_forget()
         else:
@@ -421,24 +461,24 @@ class App:
         mode = self.mode.get()
         self.mode_note.set(MODE_NOTES[mode])
         if mode == "extend":   # 足す長さ。範囲を選んでいても使う（前は範囲の時に欄が効かず、埋めると同じになっていた。11-07 マスター）
-            self.length_entry.configure(state="normal")
+            set_enabled(self.length_entry, True)
         elif self.range_mode.get() == "keys":
-            self.length_entry.configure(state="disabled")
+            set_enabled(self.length_entry, False)
             self.length_note.set("F（範囲の終わりまで）")
         elif mode in ("fill", "center"):   # センターに合わせて作るのも、埋めると同じ範囲
-            self.length_entry.configure(state="disabled")
+            set_enabled(self.length_entry, False)
             self.length_note.set("F（最後のキーまで）")
         else:
-            self.length_entry.configure(state="normal")
+            set_enabled(self.length_entry, True)
             self.length_note.set("F（最初のキーから数えた全部の長さ。必須）")
         # 止める位置のキーが無い: プロンプトだけで作る時・続きを足す時（続きの終わりにキーは無い）
-        self.stop_check.configure(state="normal" if mode == "fill" else "disabled")
+        set_enabled(self.stop_check, mode == "fill")
         self._stop_changed()
         self._extend_changed()
 
     def _stop_changed(self):
         usable = self.mode.get() == "fill" and self.stop.get() and smooth_stop.available()
-        self.smooth_check.configure(state="normal" if usable else "disabled")
+        set_enabled(self.smooth_check, usable)
 
     def _body_of(self, pmx):
         """モデルの書き戻す骨（VMD の名前）。PMX ごとに 1 回だけ読む。読めない（Kimodo が無い・PMX でない）時は None。"""
@@ -600,8 +640,12 @@ class App:
         elif not block and self._status_before is not None:
             self.status.set(self._status_before)
             self._status_before = None
-        self.gen_btn.configure(state="disabled" if self.busy or block else "normal")
-        self.undo_btn.configure(state="normal" if (self.last_backup and not self.busy) else "disabled")
+        # 変わった時だけ設定する（毎回設定し直すと、マウスオーバーが 0.5 秒で消えていた。widgets.set_enabled）
+        if set_enabled(self.gen_btn, not (self.busy or block)):
+            # 押しても反応しないことがある（11-08 マスター）。一瞬だけ押せなくなっていたのか、後から記録で分かるように残す
+            applog.write("「生成」を押せるようにしました" if not (self.busy or block)
+                         else f"「生成」を押せなくしました（{'生成中' if self.busy else block}）")
+        set_enabled(self.undo_btn, bool(self.last_backup and not self.busy))
         self._sync_panel()
 
     # ---------------- MMD の右下のパネル ----------------
@@ -783,7 +827,7 @@ class App:
             messagebox.showerror("AIナカワリ", str(e), parent=self.root)
             return
         except tk.TclError:   # 数字の欄（計算の回数・seed・効き）に数字でないものが入っている
-            messagebox.showerror("AIナカワリ", "「詳しい設定」の計算の回数・seed・効きには数字を入れてください", parent=self.root)
+            messagebox.showerror("AIナカワリ", "「詳しい設定」の計算の回数・seed には数字を入れてください", parent=self.root)
             return
         self._write_log("―" * 20)
         self.status.set("生成中…")

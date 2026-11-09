@@ -6,6 +6,26 @@ from tkinter import ttk
 _SEGMENT = re.compile(r"\s*(\d+)\s*[:：]\s*(.*)")
 
 
+def set_enabled(widget, on):
+    """ttk の部品を押せる／押せなくする。今と同じなら何もしない。変えたら True。
+
+    ttk の部品は state を同じ値で設定し直すだけで、マウスオーバーの印（active）が消え、マウスが入り直すまで戻らない
+    （11-08 マスター。詳細の窓の 0.5 秒ごとの更新で「生成」の青いマウスオーバーが一瞬で消えていた。Tk 8.6.12 で確かめた）。
+    押せるように戻した時にマウスが上にあれば、印を付け直す。
+    """
+    state = "normal" if on else "disabled"
+    if str(widget.cget("state")) == state:
+        return False
+    widget.configure(state=state)
+    try:
+        under = widget.winfo_containing(*widget.winfo_pointerxy()) if on else None
+    except (KeyError, tk.TclError):   # マウスの下が tkinter の知らない部品（コンボボックスの一覧など）
+        under = None
+    if under is widget:
+        widget.state(["active"])
+    return True
+
+
 class PromptRows(ttk.Frame):
     """区間ごとのプロンプトの行。
 

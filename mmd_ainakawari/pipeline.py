@@ -27,6 +27,9 @@ KIMODO_NAME = "Kimodo"
 MAX_FRAMES = 300  # Kimodo の 1 区間は 10 秒（30fps）まで（公式の limitations.md）。区間を分ければ全体はこれより長くてよい
 STOP_HOLD = 10    # 「最後のキーで止まる」で、キーの後ろに腰を止めておくフレーム数
 RANGE_CONTEXT = 3  # 範囲を作り直す時に、範囲の端の外側から使う姿勢のフレーム数（外の動きの勢いをつなぐ。MotionBricks の文脈は 4 姿勢）
+# 足の裏がほかのキー（中央値）よりこれ以上低いキーは、床に沈んでいるかもしれないと知らせる（m）。床は一番低い足で決めるので、
+# そのぶん間のフレームが全部沈む（11-08、200F の左足ＩＫが床から 12cm 下で、0〜180F の腰が 15cm ほど沈んだ）
+SUNK_KEY = 0.05
 SPLIT_MOVE_TOLERANCE = 0.05   # 曲線を分けた後、範囲の外で元と違ってよい移動（MMD の単位）。超える部分は元の値のキーで埋める
 SPLIT_ANGLE_TOLERANCE = 0.5   # 同じく回転（度）
 PARALLEL_SECONDS = 10   # 書き戻しの計算の残りがこれ以上かかりそうなら、子プロセスに分けて並べる
@@ -50,6 +53,7 @@ class Job:
     ref_pos: np.ndarray = None    # 最初のキーの腰の XZ（Kimodo 座標・m）
     ref_yaw: float = 0.0          # 最初のキーの腰の向き（ラジアン）。Kimodo には +Z 向き・原点で渡す
     ground_lift: float = 0.0      # 足が床に着くように上げ下げした量（m）
+    sunk_keys: list = field(default_factory=list)     # 足の裏がほかのキーより SUNK_KEY 以上低いキー [(MMD のフレーム, 低さ m)]
     stop_frames: list = field(default_factory=list)   # 最後のキーで止まるために腰を止めておくフレーム（MMD のフレーム。範囲の外も含む）
     mmd_frames: set = field(default_factory=set)      # 書き戻さず MMD の補間のままにするフレーム（中割りで作れなかった間・範囲の外側の文脈）
     anchors: list = field(default_factory=list)       # 範囲を作り直す時に、MMD の姿勢をキーにした範囲の端のフレーム
@@ -337,7 +341,13 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
     job.ref_pos = np.array([hips0[0], 0.0, hips0[2]])
     job.ref_yaw = _yaw_of(loc0[0])
     # 一番低い足の裏が Kimodo の床（つま先の付け根 TOE_GROUND）に来るように上げ下げする
-    job.ground_lift = TOE_GROUND - min(rt.foot_clearance(*poses[f]) for f in (frames or [first]))
+    # 床は 1 枚なので、1 つだけ足が沈んだキー（床に埋まった足ＩＫ）があると、間のフレームが全部そこまで沈む。決め方は変えずに知らせる
+    # （中央値で決めると、階段を下りるような本当に高さの違うキーで、下の段のキーが床に埋まる。11-08 マスターと決めた）
+    clearance = {f: rt.foot_clearance(*poses[f]) for f in (frames or [first])}
+    job.ground_lift = TOE_GROUND - min(clearance.values())
+    # 中央値はマスターのキーと範囲の端で取る（範囲の外の文脈のフレームは、外のキーに近いと同じ低さで何個も並んで、中央値を引っ張る）
+    middle = float(np.median([c for f, c in clearance.items() if f not in set(context)] or list(clearance.values())))
+    job.sunk_keys = [(f, middle - c) for f, c in sorted(clearance.items()) if middle - c >= SUNK_KEY]
 
     to_canon = Q.from_axis_angle([0, 1, 0], -job.ref_yaw)
 
