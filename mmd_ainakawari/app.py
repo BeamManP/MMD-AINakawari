@@ -24,7 +24,7 @@ import winerror
 
 from mmd_mcp.windows import list_windows
 
-from . import applog, gpu, panel, paths, pipeline, resident, runner, samples, smooth_stop
+from . import applog, gpu, panel, paths, pipeline, resident, runner, samples, smooth_stop, thin
 from .installer import window as setup_window
 from .message_window import MessageWindow, register_message
 from . import vmd
@@ -49,7 +49,11 @@ DEFAULTS = {
     "prompt": "A person moves naturally between poses.",
     "steps": 100, "seed": -1, "post_processing": True, "cfg_text": CFG_DEFAULT, "cfg_key": CFG_DEFAULT,
     "stop_at_last_key": True, "smooth_stop": True, "key_stop": False, "wrist_lerp": False,
+    "thin": thin.DEFAULT_LEVEL, "thin_nakawari": thin.DEFAULT_LEVEL,   # キーの間引き（Kimodo・MotionBricks のタブごと）
 }
+# Tk は空白でしか折り返さないので、行は自分で分ける（「MMD の」の空白で折れて 1 行目が短くなっていた）
+THIN_NOTE = ("生成したキーを、MMD の補間曲線で表せる所だけ減らします。\n"
+             "右ほど少なくなり、動きは元から少しずつ離れます（左端は間引きません）")
 # 前の窓の保存にあった項目（読む時に変換して捨てる。perf_mode は 11-07 まであった動作モード・use_center は 11-07 までのチェック）
 OLD_KEYS = ("use_keys", "range_start", "range_end", "pmx", "perf_mode", "use_center")
 TABS = [("kimodo", "Kimodo"), ("nakawari", "MotionBricks")]   # 右下のパネルの選び方と同じ名前（11-06 マスター。前は「プロンプトで作る／中割り」）
@@ -325,6 +329,9 @@ class App:
         self.extend_warn = tk.StringVar()
         tk.Label(line(""), textvariable=self.extend_warn, foreground="#c22", background=ttk.Style().lookup("TFrame", "background"),
                  wraplength=420, anchor="w", justify="left").pack(side="left", fill="x")
+        # 生成したキーの間引き（長さの下に。11-09 マスター）
+        self.thin_kimodo = tk.DoubleVar(value=self.cfg["thin"])
+        self._thin_slider(line("キーの間引き", pady=(4, 0)), line(""), self.thin_kimodo)
         # キーは「その瞬間にこの姿勢を通る」だけなので、止めないと走りなどは最後のキーを勢いのまま通り過ぎる
         self.stop = tk.BooleanVar(value=self.cfg["stop_at_last_key"])
         stop_row = line("", pady=(4, 0))
@@ -416,6 +423,28 @@ class App:
         var.trace_add("write", snap)
         snap()
 
+    def _thin_slider(self, row, note_row, var):
+        """キーの間引きのスライダ（row に・段の名前つき）と、note_row に説明。段は thin.LEVELS（0 は間引かない）。"""
+        top = len(thin.LEVELS) - 1
+        shown = tk.StringVar()
+
+        def snap(*_):
+            try:
+                v = float(var.get())
+            except (tk.TclError, ValueError):   # 前の保存が数字でないなど。既定に戻す
+                v = thin.DEFAULT_LEVEL
+            s = int(min(top, max(0, round(v))))
+            if s != v:
+                var.set(s)   # 刻みにそろえる（_cfg_slider と同じく、trace の中で書いても trace はもう一度呼ばれない）
+            shown.set(thin.level_name(s) + ("（推奨）" if s == thin.DEFAULT_LEVEL else ""))
+
+        ttk.Scale(row, from_=0, to=top, orient="horizontal", variable=var, length=180).pack(side="left")
+        ttk.Label(row, textvariable=shown, width=12).pack(side="left", padx=(6, 0))
+        tk.Label(note_row, text=THIN_NOTE, foreground="#556", background=ttk.Style().lookup("TFrame", "background"),
+                 wraplength=420, anchor="w", justify="left").pack(side="left", fill="x")
+        var.trace_add("write", snap)
+        snap()
+
     def _build_nakawari(self, t):
         """「MotionBricks」タブ（プロンプト無しの中割り）。"""
         tk.Label(t, text=NAKAWARI_NOTE, foreground="#556", background=ttk.Style().lookup("TFrame", "background"),
@@ -428,6 +457,14 @@ class App:
         ]
         self.nakawari_checks[0].pack(anchor="w", pady=(10, 0))
         self.nakawari_checks[1].pack(anchor="w", pady=(4, 0))
+        # 生成したキーの間引き（「手首は〜」の下に。11-09 マスター）
+        self.thin_nakawari = tk.DoubleVar(value=self.cfg["thin_nakawari"])
+        row, note = ttk.Frame(t), ttk.Frame(t)
+        row.pack(fill="x", pady=(8, 0))
+        note.pack(fill="x")
+        ttk.Label(row, text="キーの間引き", width=10).pack(side="left")
+        ttk.Label(note, text="", width=10).pack(side="left")
+        self._thin_slider(row, note, self.thin_nakawari)
         self.nakawari_missing = ttk.Label(t, text="MotionBricks がまだ入っていません。下の「セットアップ」で入れてください", foreground="#a33")
 
     def _open_setup(self):
@@ -774,8 +811,10 @@ class App:
                 raise ValueError("MMD のタイムラインで、作り直す範囲の最初と最後のキーを選んでください（2 つ以上のフレーム）")
             selection = (keys[0], keys[-1])
         common = dict(range_start=selection[0] if selection else None, range_end=selection[1] if selection else None,
-                      key_stop=bool(self.key_stop.get()), wrist_lerp=bool(self.wrist_lerp.get()))
-        self.cfg.update(tab=tab, range_mode=self.range_mode.get(), key_stop=common["key_stop"], wrist_lerp=common["wrist_lerp"])
+                      key_stop=bool(self.key_stop.get()), wrist_lerp=bool(self.wrist_lerp.get()),
+                      thin=round(self.thin_nakawari.get() if nakawari else self.thin_kimodo.get()))
+        self.cfg.update(tab=tab, range_mode=self.range_mode.get(), key_stop=common["key_stop"], wrist_lerp=common["wrist_lerp"],
+                        thin=round(self.thin_kimodo.get()), thin_nakawari=round(self.thin_nakawari.get()))
         if nakawari:
             # 中割りは、隠れている「Kimodo」タブの欄を読まない（入力の途中や誤りで中割りが止まっていた。11-04 Codex のレビュー）
             s = runner.Settings(prompt="", engine="motionbricks", **common)

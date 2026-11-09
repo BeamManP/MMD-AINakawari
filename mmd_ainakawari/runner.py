@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from . import nakawari, paths, pipeline, smooth_stop, vmd
+from . import nakawari, paths, pipeline, smooth_stop, thin, vmd
 from .mmd_link import MMDLink
 from .mmd_skel import MMDSkeleton
 
@@ -39,6 +39,7 @@ class Settings:
     engine: str = "kimodo"          # "motionbricks" ならキーの間を MotionBricks だけで埋める（中割り・プロンプト無し。nakawari.py）
     key_stop: bool = False          # 中割りで、キーごとに止まる（オフなら次のキーへの速さで通る）
     wrist_lerp: bool = False        # 中割りで、手首だけキーの間を補間でつなぐ（MotionBricks は手首を回しすぎることがある）
+    thin: int = 0                   # 生成したキーの間引き（thin.LEVELS の番号。0 は間引かない。窓の既定は thin.DEFAULT_LEVEL）
 
 
 def _same_motion(a, b, tol=1e-3, fixed_pos=(), names=None):
@@ -264,8 +265,14 @@ def generate(settings, log=print, link=None, previous=None):
     generated = pipeline.build_motion(job, result)
     merged = pipeline.merge(original, generated, job)
     out = os.path.join(WORK_DIR, f"kimodo_{stamp}.vmd")
+    log(f"間のフレームのキー {len(generated.bones)} 個を差し込みました" + ("" if settings.thin else f" → {out}"))
+    if settings.thin:   # 後から手で直しやすいように、曲線で表せる所のキーを落とす（thin.py。11-09 マスター）
+        log(f"キーを間引き中（{thin.level_name(settings.thin)}）…")
+        merged, info = thin.thin_motion(merged, generated, skel, rt, settings.thin)
+        if info:   # 1 単位はおよそ 8cm
+            log(f"  モデル全体のキー {info['before']} → {info['after']} 個（キーを置いたフレーム {info['aligned']}・"
+                f"手足や頭のずれ最大 {info['world_max'] * 8:.1f}cm・{info['seconds']:.0f} 秒） → {out}")
     vmd.write(out, merged)
-    log(f"間のフレームのキー {len(generated.bones)} 個を差し込みました → {out}")
 
     # 前回の記録は読み込みの前に残す（読み込みで止まっても「元に戻す」でバックアップに戻せるように。11-07 Codex のレビュー）
     _save_last_run(link, backup, out, span, pmx)
