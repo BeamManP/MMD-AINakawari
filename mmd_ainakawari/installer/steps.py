@@ -599,14 +599,16 @@ class Setup:
     def kimodo_src(self):
         self.fetch_zip(pins.KIMODO_ZIP, f"kimodo-{pins.KIMODO_COMMIT[:7]}", os.path.join(self.kimodo, "repo"))
 
-    def stop_residents(self):
-        """常駐の Kimodo・MotionBricks がいれば終わらせる。環境を作り直す前に呼ぶ: 常駐が環境のファイルをつかんでいると、
-        uv が古い環境を消せずに「アクセスが拒否されました」で止まる（11-10 に検証用の MMD で踏んだ）。"""
+    def stop_residents(self, why="環境を作り直すため"):
+        """常駐の Kimodo・MotionBricks がいれば終わらせる。
+        環境を作り直す前: 常駐が環境のファイルをつかんでいると、uv が古い環境を消せずに「アクセスが拒否されました」で止まり、
+        環境が途中まで消えた形で残る（11-10 に検証用の MMD で踏んだ）。
+        計算の方式を書いた後: 前の方式で動いている常駐に、次の生成を頼まないように。"""
         try:
             from .. import pipeline, resident, smooth_stop
             for name, port in ((pipeline.KIMODO_NAME, pipeline.KIMODO_PORT), ("MotionBricks", smooth_stop.MB_PORT)):
                 if resident.stop(name, port):
-                    self.log(f"  常駐の {name} を終わらせました（環境を作り直すため）")
+                    self.log(f"  常駐の {name} を終わらせました（{why}）")
         except Exception as e:   # 終わらせられなくても、作り直しは試す（だめなら uv の失敗がそのまま出る）
             self.log(f"  常駐を終わらせられませんでした（{type(e).__name__}: {e}）")
 
@@ -753,6 +755,7 @@ class Setup:
         paths.check(self.kimodo, "Kimodo")
         paths.save(kimodo=self.kimodo)   # 通ってから、場所と方式を書く
         paths.save_backend("kimodo", backend)
+        self.stop_residents("次の生成から、選んだ計算の方式で動かすため")
         self.log(f"  Kimodo で {frames} フレーム作れました（計算の方式: {paths.BACKEND_LABEL[backend]}）。この場所を使うように設定しました")
 
     # ---- MotionBricks -------------------------------------------------------------------------------
@@ -815,6 +818,7 @@ class Setup:
         paths.check(self.mb, "MotionBricks")
         paths.save(motionbricks=self.mb)   # 通ってから、場所と方式を書く
         paths.save_backend("motionbricks", backend)
+        self.stop_residents("次の生成から、選んだ計算の方式で動かすため")
         self.log(f"  MotionBricks で {frames} フレーム作れました（計算の方式: {paths.BACKEND_LABEL[backend]}）。この場所を使うように設定しました")
 
 
