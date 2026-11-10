@@ -7,6 +7,7 @@
 3. Setup.call: 通信の失敗は待ってやり直す・済めば通る／やり直しても駄目なら、案内つきの失敗／ふつうの失敗はやり直さない／中止はすぐ出る
 4. 進み具合の 1 行: 黙っている手順でも、かかった時間と、ここまでに使った量が出る
 5. Setup.download（手元の小さなサーバーから）: 途中で切れても続きから落とし直して、照らして置く／切れ続けたら案内つきの失敗／無い物（404）はやり直さない
+6. 中途半端な場所にかけ直しても直る: 済んだ印があっても中身が欠けていればやり直す（Setup.intact）・そろっていれば点検だけで終わる
 """
 import hashlib
 import http.server
@@ -120,8 +121,16 @@ check("黙っている手順でも、時間が何度も出る", len(ticks) >= 2 
 check("ここまでに使った量が出る", any("ここまでに約 0." in line and "GB" in line for line in ticks), ticks[-1] if ticks else "")
 os.remove(os.path.join(setup.dest, "big.bin"))
 shown.clear()
-setup.call([sys.executable, "-c", "import time; print('Downloading torch (2.5GiB)', flush=True); time.sleep(6)"], "Kimodo の部品を入れる")
-check("uv の「Downloading …」の行は、時間の後ろに付けて出す", any("Downloading torch" in line and "秒" in line for line in shown), shown[-1] if shown else "")
+UV_LINES = ("import time; p = lambda s: print(s, flush=True);"
+            "p('Downloading torch (2.5GiB)'); p('Downloading numpy (12.0MiB)'); time.sleep(3); p(' Downloaded numpy'); time.sleep(4);"
+            "p(' Downloaded torch'); time.sleep(3)")
+setup.call([sys.executable, "-c", UV_LINES], "Kimodo の部品を入れる")
+check("落としている物を、時間の後ろに出す", any("落としている物: torch（2.5GiB）・numpy（12.0MiB）" in line and "秒" in line for line in shown),
+      next((line for line in shown if "落としている物" in line), ""))
+later = [line for line in shown if "0 分 06 秒" in line or "0 分 05 秒" in line]
+check("先に終わった小さい物は消えて、まだ落としている大きい物だけ残る", any("落としている物: torch（2.5GiB）" in line and "numpy" not in line for line in later),
+      later[-1] if later else "")
+check("全部落とし終わったら、落としている物は出さない", "落としている物" not in shown[-1], shown[-1])
 
 # 5. 自前のダウンロード（手元のサーバー。何回目まで途中で切るかを決められる）
 DATA = os.urandom(3_000_000)
@@ -176,6 +185,62 @@ try:
     check("無い物（404）はやり直さない", kind == "failed" and steps.NETWORK_HINT not in text, text[:50])
 finally:
     server.shutdown()
+
+# 6. 済んだ印があっても、中身が欠けていればやり直す（中途半端な場所にかけ直しても直る）
+k, m = setup.kimodo, setup.mb
+check("何も無い場所は、どの物も「欠けている」", not any(setup.intact(key) for key in ("kimodo_src", "kimodo_env", "skeleton", "kimodo_model", "kimodo_ort",
+                                                                                "mb_src", "mb_models", "mb_env", "mb_ort", "text_gguf", "llamacpp")))
+check("物を置かない段は、いつも「そろっている」", setup.intact("kimodo_test") and setup.intact("mb_test") and setup.intact("text_remove"))
+os.makedirs(os.path.join(k, "repo", "kimodo"))
+open(os.path.join(k, "repo", "kimodo", "__init__.py"), "w").close()
+check("本体のファイルがあれば「そろっている」", setup.intact("kimodo_src"))
+for path, (_digest, size) in steps.pins.MOTIONBRICKS_LFS.items():
+    full = os.path.join(m, *path.split("/"))
+    os.makedirs(os.path.dirname(full), exist_ok=True)
+    with open(full, "wb") as f:
+        f.truncate(size)   # 中身は空のまま、大きさだけ合わせる（ディスクは使わない）
+check("モデルは、全部が正しい大きさであれば「そろっている」", setup.intact("mb_models"))
+short = os.path.join(m, *next(iter(steps.pins.MOTIONBRICKS_LFS)).split("/"))
+with open(short, "r+b") as f:
+    f.truncate(1000)
+check("途中までしか無いモデルは「欠けている」", not setup.intact("mb_models"))
+venv = os.path.join(k, ".venv", "Scripts")
+os.makedirs(venv)
+check("Python が無い環境は「欠けている」", not setup.intact("kimodo_env"))
+shutil.copyfile(sys.executable, os.path.join(venv, "python.exe"))
+check("読み込めない部品がある環境は「欠けている」", not setup._imports(sys.executable, "import no_such_module_ainakawari"))
+check("読み込める環境は「そろっている」", setup._imports(sys.executable, "import json, os"))
+
+# run の流れ: 作り物の段で（A・B は同じ組。B は A の後ろ）
+ran_steps, broken = [], set()
+fake = steps.Setup(os.path.join(tmp, "dest2"), log=logs.append, progress=shown.append, with_text=False)
+os.makedirs(fake.dest)
+fake.steps = lambda eol="lf": [("a", "g1", "A を入れる（約 1GB）", "v1", 0, lambda: ran_steps.append("a")),
+                               ("b", "g1", "B を入れる", "v1", 0, lambda: ran_steps.append("b")),
+                               ("c", "g2", "C を入れる", "v1", 0, lambda: ran_steps.append("c"))]
+fake.intact = lambda key: key not in broken
+fake.register = lambda: None
+real_checks = steps.check_vc_runtime, steps.motion_correction_info, steps.find_uv
+steps.check_vc_runtime = steps.motion_correction_info = lambda: None
+steps.find_uv = lambda: "uv"
+try:
+    fake.run()
+    check("初めては全部の段を回す", ran_steps == ["a", "b", "c"])
+    ran_steps.clear()
+    logs.clear()
+    fake.run()
+    check("全部そろっていれば何も回さず、「欠けている物はありませんでした」", ran_steps == [] and any("欠けている物はありませんでした" in line for line in logs))
+    broken.add("a")
+    logs.clear()
+    fake.run()
+    check("欠けた段と、その後ろの同じ組の段だけやり直す（別の組は飛ばす）", ran_steps == ["a", "b"]
+          and any("中身が欠けているので、やり直します" in line and "A を入れる" in line for line in logs), str(ran_steps))
+    broken.clear()
+    ran_steps.clear()
+    fake.run()
+    check("直った後は、また何も回さない", ran_steps == [])
+finally:
+    steps.check_vc_runtime, steps.motion_correction_info, steps.find_uv = real_checks
 
 shutil.rmtree(tmp, ignore_errors=True)
 print(f"\n{sum(results)}/{len(results)} OK")

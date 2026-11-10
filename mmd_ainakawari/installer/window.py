@@ -70,7 +70,12 @@ class SetupWindow:
         self.subline = tk.StringVar()
         ttk.Label(f, textvariable=self.headline, font=("", 11, "bold")).pack(anchor="w", pady=(10 if diagnosis is not None else 0, 0))
         ttk.Label(f, textvariable=self.subline, foreground="#444", wraplength=680, justify="left").pack(anchor="w", pady=(2, 0))
-        self.more_btn = ttk.Button(f, text="別の場所に入れる…", command=self._expand)
+        # 済んでいる時に出す行: 「別の場所に入れる…」と「点検して直す」（more_btn はこの行。名前は前のまま）
+        self.more_btn = ttk.Frame(f)
+        ttk.Button(self.more_btn, text="別の場所に入れる…", command=self._expand).pack(side="left")
+        # 入っている物が欠けていないかを確かめて、欠けていれば入れ直す（steps.Setup.intact。11-10 マスター
+        # 「中途半端に環境が入ったフォルダに再更新かけても大丈夫？」。前は、済んだ後に壊れると直す入口が無かった）
+        self.repair_btn = ttk.Button(self.more_btn, text="点検して直す", command=self._repair)
         self.manual = self._manual_place()   # 手で入れた場所（セットアップの印が無い）を使っている時、その Kimodo の場所
         self.expanded = False                # 済んでいる時も、入れる場所などを出している（「別の場所に入れる…」・回した後）
 
@@ -182,6 +187,12 @@ class SetupWindow:
         self.expanded = True
         self._refresh()
 
+    def _repair(self):
+        """「点検して直す」: 入っている物を確かめて、欠けていれば入れ直す（_start と同じ流れ。全部済みなら点検だけで終わる）。"""
+        self.expanded = True
+        self._refresh()
+        self._start()
+
     def _show_form(self, show, text_box=True):
         """入れる場所〜ボタン（form）を出すか。text_box: Llama のチェックを出すか（手で入れた環境では効かないので隠す）。"""
         if show and not self.form.winfo_manager():
@@ -247,6 +258,10 @@ class SetupWindow:
         done = sum(1 for _k, _t, mark in listed if mark == "skip")
         self.space.set(f"空き {free}／これから使う量 約 {need:.0f}GB" + (f"（済んだ {done} 手順の分を除く）" if done else ""))
         kind, pending = setup.status()
+        if self.manual:   # 手で入れた環境にはセットアップの印が無いので、点検できない
+            self.repair_btn.pack_forget()
+        elif not self.repair_btn.winfo_manager():
+            self.repair_btn.pack(side="left", padx=(6, 0))
         if self.manual and not self.expanded:
             mb = paths.motionbricks_dir()
             self.headline.set("別の方法で入れた環境を使っています")
@@ -259,7 +274,7 @@ class SetupWindow:
             self.headline.set("入っています" if used else "この場所に入っています（まだ使っていません）")
             self.subline.set(f"場所: {setup.dest}" + ("" if used else "\n「この場所を使う」を押すと、すぐ使えます"))
             self._show_form(self.expanded or not used)
-            self.start_btn.configure(text="この場所を使う" if not used else "セットアップ済み", state="disabled" if used else "normal")
+            self.start_btn.configure(text="この場所を使う" if not used else "点検して直す", state="normal")
             return
         names = "・".join(title.split("（")[0] for _k, title, _gb in pending[:4]) + ("…" if len(pending) > 4 else "")
         if kind == "update":
@@ -310,10 +325,14 @@ class SetupWindow:
             return
         self.setup = setup
         self.expanded = True   # 回した後も、入れる場所・段の一覧・ログを出したままにする
-        self.headline.set("入れています…")
         self.start_btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
-        self.status.set(f"入れています（落とす量は約 {setup.remaining_gb():.0f}GB）。この窓は閉じても裏で進みます")
+        if kind == "done":   # 全部済み: 点検して、欠けている物だけ入れ直す
+            self.headline.set("点検しています…")
+            self.status.set("入っている物を点検しています（10 秒ほど）。欠けている物があれば、入れ直します")
+        else:
+            self.headline.set("入れています…")
+            self.status.set(f"入れています（落とす量は約 {setup.remaining_gb():.0f}GB）。この窓は閉じても裏で進みます")
 
         def work():
             try:

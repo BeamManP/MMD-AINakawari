@@ -59,6 +59,9 @@ FOLDER_RE = re.compile(r"^[A-Za-z]:\\[A-Za-z0-9_.\-\\]*$")
 USER_AGENT = "MMD-AINakawari-setup"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 # tqdm などの進み具合の行（ログには残さず、上書きの 1 行に出す）
+# uv の「落とし始めた」「落とし終わった」の行（uv 0.9.26: "Downloading torch (2.5GiB)"・" Downloaded torch"）。今落としている物を出すのに使う
+UV_START_RE = re.compile(r"^\s*Downloading (\S+) \(([^)]+)\)")
+UV_END_RE = re.compile(r"^\s*Downloaded (\S+)")
 PROGRESS_RE = re.compile(r"\d+%\||\d+(\.\d+)?\s*[kMG]?i?B/s|^\s*(Downloading|Downloaded|Fetching|Building|Built)\b")
 
 
@@ -290,6 +293,55 @@ class Setup:
         """済んでいる段の名前の集合。印が今の版と同じ段。改行が LF・CRLF どちらの zip で入れた印でも、同じ版と見る（file_sha256）。"""
         return {key for eol in ("lf", "crlf") for key, _g, _t, version, _gb, _fn in self.steps(eol) if state.get(key) == version}
 
+    def intact(self, key):
+        """済んだ印のある段 key の中身が、今も使える形であるか。run が、飛ばす前に確かめる。
+
+        印は「その手順が最後まで終わった」ことしか言わない。その後で中身が欠けること（ウイルス対策ソフトが部品を消した・
+        フォルダの一部を手で消した・環境の作り直しが途中で止まって古い印が残った）があり、印だけ見て飛ばすと、先の手順で
+        原因から遠いエラーになって、使う人には直す手が無かった（11-10 に検証用の置き場で踏んだ: 環境が半分消えているのに
+        「ONNX Runtime の読み込みで google が無い」と出た。マスター「中途半端に環境が入ったフォルダに再更新かけても大丈夫？」）。
+        見るのは、ファイルがあるか・大きさが合うか・Python の環境なら主な部品を読み込めるか（全部で 10 秒ほど）。
+        試しの生成など、物を置かない段は True。"""
+        k, m = self.kimodo, self.mb
+        if key == "kimodo_src":
+            return os.path.isfile(os.path.join(k, "repo", "kimodo", "__init__.py"))
+        if key == "kimodo_env":
+            return self._imports(self.kimodo_python(), "import torch, kimodo, motion_correction._motion_correction")
+        if key == "skeleton":
+            return os.path.isfile(os.path.join(k, "tools", "somaskel30.json"))
+        if key == "kimodo_model":
+            snapshot = os.path.join(k, "hf_cache", "models--" + pins.KIMODO_MODEL_REPO.replace("/", "--"), "snapshots",
+                                    pins.KIMODO_MODEL_REVISION)
+            return os.path.isdir(snapshot) and bool(os.listdir(snapshot))
+        if key == "text_gguf":
+            name, _digest, size = pins.TEXT_GGUF_FILE
+            path = os.path.join(k, "text_encoder", name)
+            return os.path.isfile(path) and os.path.getsize(path) == size
+        if key == "llamacpp":
+            return os.path.isfile(os.path.join(k, "llamacpp", "llama-server.exe"))
+        if key == "kimodo_ort":
+            return self._imports(self.kimodo_python(), "import onnx, onnxruntime")
+        if key == "mb_src":
+            return os.path.isfile(os.path.join(m, "pyproject.toml"))
+        if key == "mb_models":
+            return all(os.path.isfile(os.path.join(m, *path.split("/"))) and os.path.getsize(os.path.join(m, *path.split("/"))) == size
+                       for path, (_digest, size) in pins.MOTIONBRICKS_LFS.items())
+        if key == "mb_env":
+            return self._imports(self.mb_python(), "import numpy, scipy, warp, motionbricks")
+        if key == "mb_ort":
+            return self._imports(self.mb_python(), "import onnx, onnxruntime")
+        return True
+
+    def _imports(self, python, code):
+        """python（環境の Python）が code（import の文）を読み込めるか。Python が無い・読み込めない・答えないなら False。"""
+        if not os.path.isfile(python):
+            return False
+        try:
+            return subprocess.run([python, "-c", code], env=self.env(), stdin=subprocess.DEVNULL, capture_output=True, timeout=300,
+                                  creationflags=NO_WINDOW).returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+
     def remaining_gb(self):
         done = self.finished_steps(self.load_state())
         return sum(gb for key, _g, _t, _version, gb, _fn in self.steps() if key not in done)
@@ -334,10 +386,16 @@ class Setup:
                 state.pop(key, None)
         self.log("プロンプトの読み取り（Llama 3）: " + ("入れます" if self.with_text else "入れません（「サンプルから選ぶ」の文だけで作ります）"))
         steps = self.steps()
+        ran = 0
         for i, (key, group, title, version, _gb, fn) in enumerate(steps):
             if key in self.finished_steps(state):
-                self.on_step(key, "skip")
-                continue
+                # 済んだ印があっても、中身を確かめてから飛ばす（intact）。欠けていれば、印を無視してやり直す
+                self.progress(f"点検しています: {title.split('（')[0]}")
+                if self.intact(key):
+                    self.on_step(key, "skip")
+                    continue
+                self.log(f"―― 点検: 「{title.split('（')[0]}」は済んだ印がありますが、中身が欠けているので、やり直します")
+            ran += 1
             for later in steps[i + 1:]:   # 後ろの段は作り直しの影響を受けうるので、やり直させる
                 if later[1] == group:
                     state.pop(later[0], None)
@@ -364,7 +422,8 @@ class Setup:
         state[FINISHED] = __version__   # 最後まで済んだ印（status の「途中」と「更新あり」を分ける）
         self.save_state(state)
         self.register()
-        self.log("セットアップが終わりました")
+        self.progress("")
+        self.log("セットアップが終わりました" if ran else "点検しました。欠けている物はありませんでした")
 
     def register(self):
         """この窓の paths.json に場所を書く。全部の段が済んでいて飛ばした時も書く（別の MMD に入れた AIナカワリから、
@@ -452,6 +511,7 @@ class Setup:
         # 窓に何も動きが出ず、止まったように見えていた（11-10 利用者の声「セットアップ画面に一つも進展が無い」）。
         # 量はディスクの空きの減りで見る（落とした物も入れた物も、入れる場所のドライブに置くので）
         started, free_before, last, done = time.time(), self._free_bytes(), [""], threading.Event()
+        active = {}   # uv が今落としている物（名前 → 大きさの字）
 
         def show():
             elapsed = time.time() - started
@@ -474,7 +534,18 @@ class Setup:
             if not text:
                 return
             if overwrite or PROGRESS_RE.search(text):
-                last[0] = text.strip()[-90:]
+                # uv の行は、今落としている物の一覧にして出す（最後の 1 行をそのまま出すと、大きい物を落としている間じゅう、
+                # 先に終わった小さい物の「Downloaded …」が出たままになる。11-10 に通しのセットアップで見た）
+                start, end = UV_START_RE.match(text), UV_END_RE.match(text)
+                if start:
+                    active[start.group(1)] = start.group(2)
+                elif end:
+                    active.pop(end.group(1), None)
+                if start or end:
+                    names = [f"{name}（{size}）" for name, size in list(active.items())[:2]]
+                    last[0] = ("落としている物: " + "・".join(names) + (f" ほか {len(active) - 2} 個" if len(active) > 2 else "")) if names else ""
+                else:
+                    last[0] = text.strip()[-90:]
                 show()
             else:
                 self.log("  " + text)
