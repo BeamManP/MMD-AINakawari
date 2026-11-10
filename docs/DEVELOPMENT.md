@@ -227,6 +227,29 @@ MotionBricks の directml・cpu と TensorRT は回転で 0.03〜0.11 度（Tens
   やめたら `{"ok": False, "cancelled": True}` を返して次の依頼を待つ（常駐は落とさない）。頼んだ側がいなくなった時もやめる
 - Kimodo（e1c219c）の `_multiprompt` は `progress_bar` を内側の `_generate` に渡していない。生成の間だけ `model._generate` に差し込む（`kimodo_gen.generate`）
 
+## MMM 版（試作・11-11。ブランチ work/mmm）
+MikuMikuMoving（MMM 1.2.9.2）でも、選んだキーの間を中割り・Kimodo で埋められる。AI の部分（`runner`・`pipeline`・`nakawari`）は MMD 版のまま。
+
+```
+MMM のツールバー「AIナカワリ」（mmm_plugin/・C#）── python -m mmd_ainakawari.mmm_run ── MMMLink（mmm_link.py）
+                                                                                         └ 127.0.0.1:9560 ─ MMM の中の橋渡し（E:\Projects\MMM\mmm-mcp の MmmBridge.dll）
+```
+
+- **`MMMLink`**（`mmm_link.py`）は `MMDLink` と同じ口（`key`・`state`・`current_frame`・`selected_model`・`selected_key_frames`・`read_motion`・`load_motion`・`check_model`・`return_to`）。
+  `runner.generate(…, link=MMMLink())` でそのまま動く。メモリも画面の操作も使わない
+- 読む: 選択中のモデルの基本のレイヤ（0 番）のボーンのキーを VMD にする。表情・表示/IK は読まない（触らないので消えない）
+- PMX: MMM の中の `modelfile.FileName` から取る（`model_file`）。その PMX を `MMDSkeleton` で読むと、MMM のボーンと番号・名前・親・初期位置・付与が一致した（239 本）。zip の中のモデルは未対応
+- 書く: 中身が変わったボーンだけ、全部の範囲を差し替える（`replace_keys`）。1 回の頼みなので **MMM の Ctrl+Z 1 回で生成の前に戻る**。VMD に無いボーンは 0F の既定のキーだけにする（MMD の読み込みの前に全部消すのと同じ）
+- MMM は全ボーンの 0F に既定のキー（位置 0・回転なし・直線）を持つ。MMD も 0F のキーは全ボーンにあるので、そのまま渡している
+- 範囲の外で変わるのは、範囲の後ろの次のキーの補間曲線だけ（`split_interp`。MMD 版と同じ）。位置・回転は変わらない
+- **窓**（`mmm_plugin/`）: MMM のコマンド型プラグイン。押すと中割り／Kimodo とプロンプトの小さい窓を出し、`mmm_run` を別のプロセスで動かして出力を 1 行ずつ見せる（最後の行が `OK:`／`NG:`）。
+  「中断」は書き戻しの前まで（プロセスを終わらせる。常駐は頼んだ側がいなくなると作るのをやめる）。「元に戻す」は `runner.undo`（MMM の Ctrl+Z でも戻る）
+- 設定は DLL の横の `MMM-AINakawari.ini`（`python`＝出力を読むので python.exe・`home`）。例は `mmm_plugin/MMM-AINakawari.ini.example`
+- 組み立て: `dotnet build mmm_plugin/MMM-AINakawari.csproj -c Release`（`MmmDir` を MMM のフォルダに。既定は `E:\Projects\MMM\MikuMikuMoving64\`）。MMM が DLL を握るので、組み立て直す時は MMM を閉じる
+- 確かめた事（11-11・Tda式初音ミクV4X・許してにゃん体操・4000〜4050F）: MMM から読んで VMD にして書き戻す往復で変化 0／中割り 8 秒（生成 0.7 秒）・Kimodo 50 秒（常駐の立ち上げ込み・生成 6.9 秒）／
+  範囲の外で位置・回転の変わったキー 0／Ctrl+Z で生成の前と全キー一致／キーを選ばずに押す・中断（キーはそのまま）・窓の「元に戻す」（前と一致）
+- 配布にはまだ入れていない。入れる時に要る物: 橋渡し（MmmBridge.dll・MmmBridge.Core.dll）とこの DLL の同梱、ini の相対の場所、MMM 用のセットアップの入口（今は MMD 版のセットアップで入れた環境を使う）
+
 ## 速さ（11-04 昼に高速化）
 生成 1 回の内訳を測って順に直した（`runner.generate` の段ごとに時間を記録。Tda ミク）:
 | 段 | 前 | 後 | 直したこと |

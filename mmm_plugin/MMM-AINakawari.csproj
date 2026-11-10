@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- MikuMikuMoving（MMM 1.2.9.2）のツールバーに「AIナカワリ」のボタンを足すプラグイン（試作・11-11）。
+       押すと小さい窓を出し、python -m mmd_ainakawari.mmm_run を動かして、進み具合を見せる。
+       MMM とのキーのやり取りは、別に入れる橋渡し（E:\Projects\MMM\mmm-mcp の MmmBridge.dll・127.0.0.1:9560）が受け持つ。
+       組み立て: dotnet build -c Release（MmmDir を MMM のフォルダに。既定は開発の場所）→ MMM の Plugins に写す -->
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>Library</OutputType>
+    <AssemblyName>MMM-AINakawari</AssemblyName>
+    <RootNamespace>AINakawariMMM</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Nullable>disable</Nullable>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <MmmDir Condition="'$(MmmDir)' == ''">E:\Projects\MMM\MikuMikuMoving64\</MmmDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="MikuMikuPlugin"><HintPath>$(MmmDir)System\x64\MikuMikuPlugin.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="DxMath"><HintPath>$(MmmDir)System\x64\DxMath.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+  </ItemGroup>
+  <Target Name="CopyToMmm" AfterTargets="Build" Condition="Exists('$(MmmDir)Plugins')">
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(MmmDir)Plugins" />
+  </Target>
+</Project>

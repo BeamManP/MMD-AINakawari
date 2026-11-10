@@ -4,3 +4,5 @@ mmd_plugin/bin/
 mmd_plugin/build/
 __pycache__/
 *.pyc
+mmm_plugin/bin/
+mmm_plugin/obj/
