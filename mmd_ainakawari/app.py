@@ -209,6 +209,7 @@ class App:
 
     def close(self):
         """この MMD の窓を片付ける。"""
+        self.closed = True   # 予約済みの _tick が、壊した後の窓を触らないように（11-11 動作報告の app.log に TclError）
         self.root.destroy()
         self.hub.forget(self)
 
@@ -696,6 +697,8 @@ class App:
         self.log.configure(state="disabled")
 
     def _tick(self):
+        if getattr(self, "closed", False) or not self.root.winfo_exists():   # 窓を片付けた後に、予約が残っていた
+            return
         if not win32gui.IsWindow(self.mmd.hwnd):  # MMD が閉じたら、その MMD の分は一緒に終わる
             self.close()
             return

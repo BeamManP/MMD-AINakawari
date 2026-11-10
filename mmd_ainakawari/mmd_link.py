@@ -161,11 +161,14 @@ class MMDLink:
         # 消すのはボーンと表情の行だけ。「全ﾌﾚｰﾑ」で消すと「表示･IK･外親」の行も消え、外部親の設定が全部外れる
         # （VMD には外部親の欄が無いので、読み込み直しても戻らない）。表示/IK のキーは残し、VMD の同じキーで上書きされる
         # （11-09 第一動作報告「ナカワリを使うと既存の外部親が全部解除される」。Tda式ミク＋ダミーボーンで再現・切り分けた）
-        r = self._delete_keys("全ボーンﾌﾚｰﾑ")
-        if r.get("status") != "completed":
-            raise RuntimeError(f"MMD で今のキーを消せませんでした: {r.get('status')} {r.get('dialogs', '')}")
-        try:   # ボーンを消した後は、何で止まっても下の戻しを通す（表情を消せなかった時も）
-            r = self._delete_keys("全表情ﾌﾚｰﾑ")
+        r = self._delete_keys("全ボーンﾌﾚｰﾑ", "ボーンのキーを消す時")
+        if r.get("status") != "completed" and not r.get("delete_sent"):   # 消す操作を送る前に止まった（キーは消えていない）
+            notices = r["dismissed"] if "dismissed" in r else self._dismiss_notices(r)
+            why = "・".join(notices) or f"{r.get('status')} {r.get('dialogs', '')}".strip()
+            raise RuntimeError(f"MMD で今のキーを消せませんでした（{r.get('stage', '')}: {why}）。キーは消していません")
+        try:   # ボーンを消す操作を送った後は、何で止まっても下の戻しを通す（表情を消せなかった時も）
+            if r.get("status") == "completed":
+                r = self._delete_keys("全表情ﾌﾚｰﾑ", "表情のキーを消す時")
             if r.get("status") == "completed" and self.current_frame() != frame:
                 self.set_frame(frame)
         except Exception as e:
@@ -175,8 +178,11 @@ class MMDLink:
         if r.get("status") != "completed":
             # MMD が「このファイルは Vocaloid Motion Data file ではありません」などの窓を出していると、閉じるまで操作できず、
             # 戻しの読み込みも止まる（11-07 本物の MMD で、壊れた VMD を読ませて確かめた）。ボタン 1 つのお知らせの窓だけ閉じる
-            notices = self._dismiss_notices(r)
+            # （_settle で閉じた後なら、閉じた窓の文を使う。閉じた窓にもう一度送ると、無い窓への送信で落ちる）
+            notices = r["dismissed"] if "dismissed" in r else self._dismiss_notices(r)
             why = "・".join(notices) or f"{r.get('status')} {r.get('dialogs', '')}".strip()
+            if r.get("stage"):
+                why = f"{r['stage']}: {why}"
             if restore is None:
                 raise RuntimeError(f"MMD にモーションを読み込めませんでした: {why}")
             try:
@@ -213,12 +219,94 @@ class MMDLink:
             time.sleep(0.1)
         return texts
 
-    def _delete_keys(self, track):
-        """タイムラインの範囲選択で track（「全ボーンﾌﾚｰﾑ」など）の 0〜999999F を選んで消す。mmd-mcp の返事を返す。"""
+    def _delete_keys(self, track, stage):
+        """タイムラインの範囲選択で track（「全ボーンﾌﾚｰﾑ」など）の 0〜999999F を選んで消す。mmd-mcp の返事を返す。
+        消す操作を送ったら、返事に delete_sent を付ける（その後で止まったら、キーが一部消えているかもしれないので戻しを通す）。"""
         r = timeline.select_range(0, 999999, track, self.hwnd)
-        if r.get("status") == "completed":
-            r = edit_actions.perform(["delete_keys"], self.hwnd)
-        return r
+        # 選ぶだけの段では中身を確かめようがないので、お知らせの窓だけなら閉じて先へ進む（消えたかは下で確かめる）
+        r = self._settle(r, f"{stage}（範囲選択）", lambda: True)
+        if r.get("status") != "completed":
+            return r
+        r = edit_actions.perform(["delete_keys"], self.hwnd)
+        r = self._settle(r, stage, lambda: self._keys_cleared(track))
+        return {**r, "delete_sent": True}
+
+    def _settle(self, result, stage, verify):
+        """mmd-mcp の返事が MMD の窓で止まっていたら、その窓をログに残し、ボタン 1 つのお知らせの窓だけ閉じる。
+        閉じた後で verify()（その段が済んだかを MMD の中身で確かめる）が通れば、済んだ（completed）の返事にする。
+
+        11-11 動作報告: MMD 9.32 にプラグイン（MMPlus・メディア拡張・MMDModern・qExternalParentControlExtend）を入れた PC で、
+        AIナカワリ から読み込む時だけ「不足しているボーン／モーフはありません。」の窓が出て、読み込めているのに失敗にしていた
+        （手で同じ VMD を読むと出ない。どのプラグインの窓か、どの段で出るかは未特定）。段をログに残すのは、次に分かるようにするため。
+        """
+        if result.get("status") != "dialog_requires_action":
+            return result
+        from . import applog
+        applog.write(f"{stage}に MMD の窓が出ました: {self._describe_dialogs(result.get('dialogs'))}")
+        notices = self._dismiss_notices(result)
+        result = {**result, "stage": stage, "dismissed": notices}
+        dialogs = [d for d in result.get("dialogs") or [] if isinstance(d, dict)]
+        if not dialogs or self._still_open(dialogs):
+            return result   # お知らせでない窓（またはまだ閉じない窓）がある。押さずに止める
+        try:
+            done = verify()
+        except Exception as e:
+            applog.write(f"  {stage}が済んだかを確かめられませんでした: {type(e).__name__}: {e}")
+            return result
+        if not done:
+            applog.write(f"  お知らせの窓は閉じましたが、{stage}は済んでいませんでした")
+            return result
+        applog.write(f"  お知らせの窓として閉じ、{stage}は済んでいると MMD の中身で確かめました")
+        return {"status": "completed", "stage": stage, "dismissed": notices}
+
+    @staticmethod
+    def _still_open(dialogs):
+        """dialogs のうち、まだ開いている窓があるか（ボタン 1 つでない窓は _dismiss_notices が閉じないので残る）。"""
+        import win32gui
+        return any(win32gui.IsWindow(d["hwnd"]) and win32gui.IsWindowVisible(d["hwnd"]) for d in dialogs if d.get("hwnd"))
+
+    @staticmethod
+    def _describe_dialogs(dialogs):
+        """ログ用: 窓ごとに「タイトル」・中の文・ボタンの文。"""
+        if not isinstance(dialogs, list):
+            return str(dialogs)
+        out = []
+        for d in dialogs:
+            if not isinstance(d, dict):
+                out.append(str(d))
+                continue
+            controls = d.get("controls") or []
+            texts = [c.get("text") for c in controls if c.get("class") == "Static" and c.get("text")]
+            buttons = [c.get("text") for c in controls if c.get("class") == "Button"]
+            out.append(f"「{d.get('title', '')}」 文: {' / '.join(texts)} ボタン: {' / '.join(b or '' for b in buttons)}")
+        return "、".join(out) or "（窓の中身を読めず）"
+
+    def _keys_cleared(self, track, wait=5.0):
+        """track（「全ボーンﾌﾚｰﾑ」「全表情ﾌﾚｰﾑ」）のキーが 0F の分を残して消えたかを、MMD のメモリで確かめる。
+        0F のキーは MMD が消さないので数えない。消す途中かもしれないので wait 秒までくり返し見る。"""
+        import struct
+        import time
+        model = self.selected_model()
+        if model is None:
+            return False
+        morphs, iks = mmd_memory.read_pmx_names(model["path"])
+        deadline = time.monotonic() + wait
+        while True:
+            reader = mmd_memory.MotionReader(self.hwnd)
+            try:
+                motion = reader.read(morphs, iks)
+            finally:
+                reader.close()
+            if track == "全ボーンﾌﾚｰﾑ":
+                left = any(k.frame > 0 for k in motion.bones)
+            else:   # tail の先頭は表情のキー: 件数（4 バイト）と、名前 15・フレーム 4・値 4 の 23 バイトの行
+                n = struct.unpack_from("<I", motion.tail, 0)[0]
+                left = any(struct.unpack_from("<I", motion.tail, 4 + i * 23 + 15)[0] > 0 for i in range(n))
+            if not left:
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.3)
 
     def _load_vmd(self, path):
         """mmd-mcp で VMD を読み込む。例外（ファイルが無い・MMD の画面が読めないなど）も失敗の返事にする（キーを消した後の戻しを通すため）。
@@ -240,6 +328,10 @@ class MMDLink:
                 return {"status": type(e).__name__, "dialogs": str(e)}
         if r.get("status") == "dialog_requires_action" and r.get("path_submitted"):
             r = self._accept_other_model(r)
+        if r.get("status") == "dialog_requires_action":
+            # パスを送った後なら、読み込めたかを MMD の中身で確かめる。送る前（ファイルの窓より先に窓が出た）なら読み込んでいない
+            r = self._settle(r, "モーションを読み込む時",
+                             lambda: bool(r.get("path_submitted")) and self._loaded_after_error(path))
         return r
 
     def _confirm_after_error(self, error, wait=3.0):
