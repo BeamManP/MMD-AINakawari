@@ -80,8 +80,18 @@ def sha256(path, stop=None):
     return h.hexdigest()
 
 
-def file_sha256(path):
-    return sha256(path)[:16]
+def file_sha256(path, eol="lf"):
+    """文字のファイルの中身の印（sha256 の頭 16 字）。段の版に使う。改行を LF にそろえてから数える（eol="crlf" なら CRLF にそろえて）。
+
+    配る zip の中のファイルの改行は、作った時の作業フォルダの状態で変わる（git が CRLF で取り出した物・道具が LF で書いた物）。
+    そろえずに数えていたので、中身が同じでも zip によって版が変わり、更新のたびに Kimodo の環境（約 5GB）を入れ直させていた
+    （kimodo-requirements.txt は 0.2.2 の zip が CRLF・0.2.3 が LF。11-10 に 0.3.0 の zip を検証用の MMD に入れて気づいた）。
+    これまでの zip で入れた印はどちらの改行の物もあるので、済んだかどうかは両方と比べる（Setup.finished_steps）。"""
+    with open(path, "rb") as f:
+        data = f.read().replace(b"\r\n", b"\n")
+    if eol == "crlf":
+        data = data.replace(b"\n", b"\r\n")
+    return hashlib.sha256(data).hexdigest()[:16]
 
 
 def find_uv():
@@ -200,8 +210,12 @@ class Setup:
         self._proc = None
 
     # ---- 段の並び --------------------------------------------------------------------------------
-    def steps(self):
-        """[(名前, 組, 見出し, 版, 使う GB, 関数)]。版が setup_state.json の物と同じ段は飛ばす。"""
+    def steps(self, eol="lf"):
+        """[(名前, 組, 見出し, 版, 使う GB, 関数)]。版が setup_state.json の物と同じ段は飛ばす（finished_steps）。
+        eol は版に混ぜるファイルの印の数え方（file_sha256）。書く印はいつも "lf" の物。"""
+        def file_sha256(path):   # この関数の中では、頼まれた改行で数える
+            return globals()["file_sha256"](path, eol)
+
         k = [
             ("kimodo_src", "kimodo", "Kimodo の本体を落とす", pins.KIMODO_COMMIT, 0.2, self.kimodo_src),
             ("kimodo_env", "kimodo", "Kimodo の Python の環境を作る（約 5GB）",
@@ -258,9 +272,13 @@ class Setup:
             json.dump(state, f, ensure_ascii=False, indent=1)
         os.replace(tmp, self.state_path)
 
+    def finished_steps(self, state):
+        """済んでいる段の名前の集合。印が今の版と同じ段。改行が LF・CRLF どちらの zip で入れた印でも、同じ版と見る（file_sha256）。"""
+        return {key for eol in ("lf", "crlf") for key, _g, _t, version, _gb, _fn in self.steps(eol) if state.get(key) == version}
+
     def remaining_gb(self):
-        state = self.load_state()
-        return sum(gb for key, _g, _t, version, gb, _fn in self.steps() if state.get(key) != version)
+        done = self.finished_steps(self.load_state())
+        return sum(gb for key, _g, _t, _version, gb, _fn in self.steps() if key not in done)
 
     def status(self):
         """この場所の状態と、残りの段 [(名前, 見出し, GB)]。状態は
@@ -268,7 +286,8 @@ class Setup:
         「最後まで済んだ」は FINISHED の印で見る。印を書く前の版（0.1.x）は、最後の段（MotionBricks の試し）が済んでいれば済んだと見る。"""
         state = self.load_state()
         steps = self.steps()
-        pending = [(key, title, gb) for key, _g, title, version, gb, _fn in steps if state.get(key) != version]
+        done = self.finished_steps(state)
+        pending = [(key, title, gb) for key, _g, title, _version, gb, _fn in steps if key not in done]
         if not pending:
             return "done", []
         if not any(key in state for key, *_rest in steps):
@@ -302,7 +321,7 @@ class Setup:
         self.log("プロンプトの読み取り（Llama 3）: " + ("入れます" if self.with_text else "入れません（「サンプルから選ぶ」の文だけで作ります）"))
         steps = self.steps()
         for i, (key, group, title, version, _gb, fn) in enumerate(steps):
-            if state.get(key) == version:
+            if key in self.finished_steps(state):
                 self.on_step(key, "skip")
                 continue
             for later in steps[i + 1:]:   # 後ろの段は作り直しの影響を受けうるので、やり直させる
@@ -580,7 +599,19 @@ class Setup:
     def kimodo_src(self):
         self.fetch_zip(pins.KIMODO_ZIP, f"kimodo-{pins.KIMODO_COMMIT[:7]}", os.path.join(self.kimodo, "repo"))
 
+    def stop_residents(self):
+        """常駐の Kimodo・MotionBricks がいれば終わらせる。環境を作り直す前に呼ぶ: 常駐が環境のファイルをつかんでいると、
+        uv が古い環境を消せずに「アクセスが拒否されました」で止まる（11-10 に検証用の MMD で踏んだ）。"""
+        try:
+            from .. import pipeline, resident, smooth_stop
+            for name, port in ((pipeline.KIMODO_NAME, pipeline.KIMODO_PORT), ("MotionBricks", smooth_stop.MB_PORT)):
+                if resident.stop(name, port):
+                    self.log(f"  常駐の {name} を終わらせました（環境を作り直すため）")
+        except Exception as e:   # 終わらせられなくても、作り直しは試す（だめなら uv の失敗がそのまま出る）
+            self.log(f"  常駐を終わらせられませんでした（{type(e).__name__}: {e}）")
+
     def kimodo_env(self):
+        self.stop_residents()
         venv = os.path.join(self.kimodo, ".venv")
         self.call([self.uv, "venv", venv, "--python", pins.KIMODO_PYTHON, "--clear"], "Python の用意")
         py = self.kimodo_python()
@@ -741,6 +772,7 @@ class Setup:
             self.log(f"  落としました: {name}")
 
     def mb_env(self):
+        self.stop_residents()
         self.call([self.uv, "sync", "--frozen", "--python", pins.MOTIONBRICKS_PYTHON], "MotionBricks の部品を入れる", cwd=self.mb)
 
     def mb_ort(self):

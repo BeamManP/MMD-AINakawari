@@ -158,6 +158,14 @@ bf16 版との比べ（11-07・RTX 3090・i7-12700F・メインメモリ 64GB。
 - GPU 診断（`gpu.py`）: VRAM 6GB・メインメモリ 16GB（判定は 15GB 以上。16GB の PC は Windows が 15.8GB ほどと数える）の 1 段。足りない・GPU が無い時は判定を赤で出す。NVIDIA の GPU が無い・`CUDA_VISIBLE_DEVICES` で無効にされている時は、どちらのタブも「生成」を押せなくする（MotionBricks も GPU が要る）。足りないかもしれない時と、GPU を調べられなかった時は、試せるように押せるまま
 - 11-04〜11-07 のモードの記録: 低負荷は 1 文 3 秒・生成 15.5 秒、高速は生成 10〜14 秒。差はほぼ文の読み取りの分だけだった（動きを作る本体はどちらも GPU）
 
+## セットアップの段の版と改行（11-10・0.3.0）
+- 段の版（`setup_state.json` に書く印）は、部品表・スクリプトのファイルの sha256 から作る。**改行を LF にそろえてから数える**（`steps.file_sha256`）
+- そろえる前は、配る zip の中のファイルの改行（作った時の作業フォルダの状態で CRLF にも LF にもなる）で版が変わり、
+  中身が同じでも更新のたびに Kimodo の環境を入れ直させていた（`kimodo-requirements.txt`: 0.2.2 の zip は CRLF・0.2.3 は LF）
+- これまでの zip で入れた印はどちらの改行の物もあるので、済んだかどうかは LF・CRLF の両方の数え方と比べる（`Setup.finished_steps`）。新しく書く印は LF
+- 配布物を作る時は、未コミットの物を避けるために一時の作業ツリー（`git worktree add --detach`）で作る。その時は
+  `AINAKAWARI_SDK`（`work\mmdplugin\dev`）と `--motion-correction`（`work\prebuilt`）を元の作業フォルダの物に向け、`work\release\cache` を写しておく
+
 ## 計算の方式（11-10・0.3.0。NVIDIA 以外の GPU でも動かす）
 
 Kimodo と MotionBricks を、3 つの方式のどれかで動かす。`work\paths.json` の `kimodo_backend`・`motionbricks_backend`（`paths.backend`）。

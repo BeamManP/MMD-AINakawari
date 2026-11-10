@@ -86,6 +86,27 @@ try:
         check(f"部品表は版とハッシュつき（{name}）", all("==" in p for p in pins) and text.count("--hash=sha256:") >= len(pins)
               and any(p.startswith("onnxruntime-directml==") for p in pins) and any(p.startswith("onnx==") for p in pins), f"{len(pins)} 個")
 
+    # 2b. 段の版は、配る zip の改行（LF・CRLF）に左右されない
+    lf, crlf = os.path.join(tmp, "lf.txt"), os.path.join(tmp, "crlf.txt")
+    open(lf, "wb").write(b"a==1\nb==2\n")
+    open(crlf, "wb").write(b"a==1\r\nb==2\r\n")
+    check("中身が同じなら、改行が違っても同じ印", steps.file_sha256(lf) == steps.file_sha256(crlf)
+          and steps.file_sha256(lf, "crlf") == steps.file_sha256(crlf, "crlf") != steps.file_sha256(lf))
+    import hashlib
+    check("LF の印は LF のファイルそのままの sha256・CRLF の印は CRLF のファイルそのまま（これまでの zip の印と同じ値）",
+          steps.file_sha256(lf) == hashlib.sha256(open(lf, "rb").read()).hexdigest()[:16]
+          and steps.file_sha256(lf, "crlf") == hashlib.sha256(open(crlf, "rb").read()).hexdigest()[:16])
+    all_keys = set(keys)
+    for label, eols in (("LF の zip", ("lf",) * 20), ("CRLF の zip", ("crlf",) * 20), ("混ざった zip", ("lf", "crlf") * 10)):
+        state = {}
+        for i, key in enumerate(keys):   # 段ごとに、その改行で数えた版を印にする
+            state[key] = {k: v for k, _g, _t, v, _gb, _fn in setup.steps(eols[i])}[key]
+        check(f"{label}で入れた印は、全部の段が済みと見る", setup.finished_steps(state) == all_keys,
+              f"済みでない段 {sorted(all_keys - setup.finished_steps(state))}")
+    state = {k: v for k, _g, _t, v, _gb, _fn in setup.steps()}
+    state["kimodo_env"] = "e1c219c/3.10.19/0000000000000000/x"
+    check("中身が違う印は、済みと見ない", setup.finished_steps(state) == all_keys - {"kimodo_env"})
+
     # 3. 試す順
     which = shutil.which
     try:

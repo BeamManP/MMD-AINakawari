@@ -236,7 +236,8 @@ class SetupWindow:
             self.start_btn.configure(state="disabled")
             return
         state = setup.load_state()
-        listed = [(key, title, "skip" if state.get(key) == version else "todo") for key, _g, title, version, _gb, _fn in setup.steps()]
+        done = setup.finished_steps(state)
+        listed = [(key, title, "skip" if key in done else "todo") for key, _g, title, _version, _gb, _fn in setup.steps()]
         self._show_steps(listed)
         need = setup.remaining_gb()
         try:
