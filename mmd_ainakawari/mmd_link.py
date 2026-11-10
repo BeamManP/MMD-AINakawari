@@ -230,6 +230,13 @@ class MMDLink:
             # 長い名前の確認の窓が出る時に 5 回中 1 回）。その時は確認の窓が出ていれば、そこから続ける
             r = self._confirm_after_error(e)
             if r is None:
+                # 確認の窓も出ていない。パスは送った後なので、読み込みそのものは済んでいることが多い（11-10 に検証用の MMD で、
+                # ふつうの名前のモデルでも数十回に 1〜2 回。前は失敗と見て、バックアップを重ねて読み込み、エラーの窓を出していた）。
+                # MMD の中身を見て、ファイルのキーが全部入っていれば読み込めている
+                if self._loaded_after_error(path):
+                    from . import applog
+                    applog.write(f"mmd-mcp の読み込みが例外で返りましたが、MMD にはファイルのキーが入っていました（読み込めたと見ます）: {e}")
+                    return {"status": "completed", "path_submitted": True, "verified_after_error": str(e)}
                 return {"status": type(e).__name__, "dialogs": str(e)}
         if r.get("status") == "dialog_requires_action" and r.get("path_submitted"):
             r = self._accept_other_model(r)
@@ -249,6 +256,38 @@ class MMDLink:
                 return {"status": "dialog_requires_action", "path_submitted": True, "dialogs": dialogs, "error": str(error)}
             time.sleep(0.1)
         return None
+
+    def _loaded_after_error(self, path, wait=10.0):
+        """load_file が例外で返り、確認の窓も出ていない時に、読み込みが実は済んでいるかを MMD のメモリで確かめる。
+
+        読み込む前にボーンのキーを全部消している（load_motion）ので、ファイルのボーンのキー（骨・フレーム）が MMD に全部あれば、
+        読み込めている。読み込めていなければ、MMD に残っているのは消せない 0F のキーだけなので、0F より後ろのキーが見つからない。
+        読み込みの途中かもしれないので、wait 秒までくり返し見る。0F のキーしか無いファイルは見分けられないので False。
+        """
+        import time
+
+        try:
+            want = {(k.name, k.frame) for k in vmd.read(path).bones}
+        except Exception:
+            return False
+        if not any(frame > 0 for _name, frame in want):
+            return False
+        deadline = time.monotonic() + wait
+        while time.monotonic() < deadline:
+            try:
+                model = self.selected_model()
+                morphs, iks = mmd_memory.read_pmx_names(model["path"])
+                reader = mmd_memory.MotionReader(self.hwnd)
+                try:
+                    got = {(k.name, k.frame) for k in reader.read(morphs, iks).bones}
+                finally:
+                    reader.close()
+                if want <= got:
+                    return True
+            except Exception:   # 読み込みの途中・窓が出入りしている。次でまた見る
+                pass
+            time.sleep(0.3)
+        return False
 
     def _accept_other_model(self, result, timeout=60.0):
         """VMD の読み込みで「このファイルは ○○ 用のモーションデータです／同じボーン名のモーションのみを取り込む事になります／
