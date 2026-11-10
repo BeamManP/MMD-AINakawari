@@ -57,7 +57,7 @@ mpmath==1.3.0 \
     --hash=sha256:7a28eb2a9774d00c7bc92411c19a89209d5da7c4c9a9e227be8330a23a25b91f \
     --hash=sha256:a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c
     # via
-    #   -c C:/Users/kokbe/AppData/Local/Temp/claude/4d93f1a267cc84aa/4e6d8b52-b246-4bdb-950f-c13d673f18c7/scratchpad/k_constraints.txt
+    #   -c （環境の今の版の制約）
     #   sympy
 numpy==2.2.6 \
     --hash=sha256:038613e9fb8c72b0a41f025a7e4c3f0b7a1b5d768ece4796b674c8f3fe13efff \
@@ -116,7 +116,7 @@ numpy==2.2.6 \
     --hash=sha256:fe27749d33bb772c80dcd84ae7e8df2adc920ae8297400dabec45f0dedb3f6de \
     --hash=sha256:fee4236c876c4e8369388054d02d0e9bb84821feb1a64dd59e137e6511a551f8
     # via
-    #   -c C:/Users/kokbe/AppData/Local/Temp/claude/4d93f1a267cc84aa/4e6d8b52-b246-4bdb-950f-c13d673f18c7/scratchpad/k_constraints.txt
+    #   -c （環境の今の版の制約）
     #   ml-dtypes
     #   onnx
     #   onnxruntime-directml
@@ -156,7 +156,7 @@ packaging==26.3 \
     --hash=sha256:94edc256424af38762eb31306eed28beb9f0efc50a8837492c9d6fd6004aed79 \
     --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
     # via
-    #   -c C:/Users/kokbe/AppData/Local/Temp/claude/4d93f1a267cc84aa/4e6d8b52-b246-4bdb-950f-c13d673f18c7/scratchpad/k_constraints.txt
+    #   -c （環境の今の版の制約）
     #   onnxruntime-directml
 protobuf==7.36.2 \
     --hash=sha256:497d0463ff3316681da6c0b9e8d06cb465d61abce00b613ab42226175644d1bb \
@@ -178,11 +178,11 @@ sympy==1.14.0 \
     --hash=sha256:d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517 \
     --hash=sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5
     # via
-    #   -c C:/Users/kokbe/AppData/Local/Temp/claude/4d93f1a267cc84aa/4e6d8b52-b246-4bdb-950f-c13d673f18c7/scratchpad/k_constraints.txt
+    #   -c （環境の今の版の制約）
     #   onnxruntime-directml
 typing-extensions==4.16.0 \
     --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8 \
     --hash=sha256:dc983d19a509c94dba722ee6abd33940f7c05a89e243c47e907eb4db6f1a43e5
     # via
-    #   -c C:/Users/kokbe/AppData/Local/Temp/claude/4d93f1a267cc84aa/4e6d8b52-b246-4bdb-950f-c13d673f18c7/scratchpad/k_constraints.txt
+    #   -c （環境の今の版の制約）
     #   onnx
