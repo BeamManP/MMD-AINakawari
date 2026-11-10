@@ -62,6 +62,20 @@ NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 PROGRESS_RE = re.compile(r"\d+%\||\d+(\.\d+)?\s*[kMG]?i?B/s|^\s*(Downloading|Downloaded|Fetching|Building|Built)\b")
 
 
+# 通信の失敗と見る文。uv の実物の文から（11-10 に、つながらない相手・引けない名前で出した: 「error: Failed to fetch」
+# 「error sending request for url」「operation timed out」「client error (Connect)」「dns error」「os error 11001」）と、
+# huggingface_hub（requests）の例外の名前。ここに当たった失敗は、少し待ってやり直す（Setup.call の retries）
+NETWORK_RE = re.compile(
+    r"Failed to (fetch|download)|error sending request|timed out|timeout|dns error|client error|"
+    r"connection (reset|closed|refused|aborted)|os error 1(0053|0054|0060|1001|1002)\b|"
+    r"ConnectionError|ReadTimeout|ConnectTimeout|IncompleteRead|ChunkedEncodingError|MaxRetryError|ProtocolError", re.IGNORECASE)
+NETWORK_HINT = ("通信が途中で切れたようです。少し時間をおいて、もう一度「セットアップ」を押してください。"
+                "済んだ手順は飛ばして、続きから始めます。")
+NETWORK_RETRIES = 2      # 通信の失敗の時に、同じ手順をやり直す回数（最初の 1 回は別）
+NETWORK_WAIT = 10.0      # やり直す前に待つ秒
+DOWNLOAD_RETRIES = 5     # 自前で落とす物（zip・モデル・GGUF）が途中で切れた時に、続きから落とし直す回数
+
+
 class Failed(Exception):
     """段が失敗した（使う人に見せる文）。"""
 
@@ -387,11 +401,40 @@ class Setup:
             HF_HUB_DISABLE_SYMLINKS_WARNING="1",
             PYTHONUTF8="1", PYTHONIOENCODING="utf-8", CUDA_DEVICE_ORDER="PCI_BUS_ID",
         )
+        # 回線が細い・不安定な所でも落とし切れるように（11-10 利用者の声「torch のダウンロードが時間切れ」）。
+        # uv の既定は「30 秒データが来なければ切る」で、1 個 2.5GB の torch が途中で切られていた。
+        # 同時に落とす数も減らす（既定の 50 本を細い回線で分け合うと、1 本ごとがさらに止まりやすい）。
+        # 使う人が自分で決めていれば、そちらを使う
+        for key, value in (("UV_HTTP_TIMEOUT", "300"), ("UV_HTTP_RETRIES", "8"), ("UV_CONCURRENT_DOWNLOADS", "4"),
+                           ("HF_HUB_DOWNLOAD_TIMEOUT", "120"), ("HF_HUB_ETAG_TIMEOUT", "60")):
+            env.setdefault(key, value)
         env.update(extra)
         return env
 
-    def call(self, args, what, cwd=None, **extra_env):
-        """外のプロセスを回し、出力をログ（と上書きの 1 行）に流す。失敗したら Failed。"""
+    def call(self, args, what, cwd=None, retries=0, **extra_env):
+        """外のプロセスを回し、出力をログ（と上書きの 1 行）に流す。失敗したら Failed。
+        retries: 通信の失敗（NETWORK_RE）の時に、少し待って同じ事をやり直す回数（部品やモデルを落とす手順で NETWORK_RETRIES）。
+        落とし終わった物は uv・huggingface_hub の置き場に残るので、やり直しは続きからになる。"""
+        for attempt in range(retries + 1):
+            try:
+                return self._call_once(args, what, cwd, extra_env)
+            except Failed as e:
+                if not getattr(e, "network", False):
+                    raise
+                if attempt == retries:
+                    raise Failed(NETWORK_HINT + "\n" + str(e)) from None
+                self.log(f"  通信が途中で切れたようです。{NETWORK_WAIT:.0f} 秒待って、続きからもう一度試します（{attempt + 2} 回目／全 {retries + 1} 回）")
+                self.progress(f"{what}: 通信が切れたので、少し待ってやり直します…")
+                if self._stop.wait(NETWORK_WAIT):
+                    raise Cancelled()
+
+    def _free_bytes(self):
+        try:
+            return shutil.disk_usage(self.dest).free
+        except OSError:
+            return None
+
+    def _call_once(self, args, what, cwd, extra_env):
         if self._stop.is_set():
             raise Cancelled()
         self.log("> " + subprocess.list2cmdline(args))
@@ -404,6 +447,26 @@ class Setup:
             raise Cancelled()
         buf = b""
         tail = []
+        # 進み具合の 1 行: 「何をしているか・かかった時間・ここまでに落として入れた量」を 2 秒ごとに出し直す。
+        # uv は画面につながっていないと「Downloading torch」の 1 行しか出さないので、大きい物を落としている何十分かの間、
+        # 窓に何も動きが出ず、止まったように見えていた（11-10 利用者の声「セットアップ画面に一つも進展が無い」）。
+        # 量はディスクの空きの減りで見る（落とした物も入れた物も、入れる場所のドライブに置くので）
+        started, free_before, last, done = time.time(), self._free_bytes(), [""], threading.Event()
+
+        def show():
+            elapsed = time.time() - started
+            if elapsed < 4 and not last[0]:
+                return
+            text = f"{what}… {int(elapsed // 60)} 分 {int(elapsed % 60):02d} 秒"
+            free_now = self._free_bytes()
+            if free_before is not None and free_now is not None and free_before - free_now >= 50 * 2**20:
+                text += f"・ここまでに約 {(free_before - free_now) / 2**30:.1f}GB"
+            self.progress(text + (f"　{last[0]}" if last[0] else ""))
+
+        def tick():
+            while not done.wait(2.0) and proc.poll() is None:
+                show()
+        threading.Thread(target=tick, daemon=True).start()
 
         def emit(line, overwrite):
             nonlocal tail
@@ -411,7 +474,8 @@ class Setup:
             if not text:
                 return
             if overwrite or PROGRESS_RE.search(text):
-                self.progress(text[-160:])
+                last[0] = text.strip()[-90:]
+                show()
             else:
                 self.log("  " + text)
                 tail = (tail + [text])[-15:]
@@ -441,11 +505,14 @@ class Setup:
                     buf = buf[cut + 1:]
         emit(buf.rstrip(b"\r"), False)   # 最後の改行の無い行
         rc = proc.wait()
+        done.set()
         self._proc = None
         if self._stop.is_set():
             raise Cancelled()
         if rc != 0:
-            raise Failed(f"「{what}」で失敗しました（終了コード {rc}）。\n" + "\n".join(tail[-6:]))
+            error = Failed(f"「{what}」で失敗しました（終了コード {rc}）。\n" + "\n".join(tail[-6:]))
+            error.network = bool(NETWORK_RE.search("\n".join(tail)))   # call が、待ってやり直すかを決める
+            raise error
 
     def download(self, url, target, label, digest=None, size=None, retry=True):
         """url を target に落とす。途中の .part があれば続きから（サーバーが応じれば）。digest があれば sha256 で照らす。
@@ -460,7 +527,23 @@ class Setup:
             os.remove(part)
             have = 0
         if size is None or have != size:
-            self._fetch(url, part, have, label, size, digest, retry)
+            # 通信が途中で切れたら、少し待って続きから落とし直す（前は「もう一度押してください」で止まっていた。
+            # 8GB の GGUF を細い回線で落とすと、押し直しが何度も要った。11-10）
+            for attempt in range(DOWNLOAD_RETRIES + 1):
+                try:
+                    self._fetch(url, part, have, label, size, digest, retry)
+                    break
+                except Failed as e:
+                    if not getattr(e, "network", False):
+                        raise
+                    if attempt == DOWNLOAD_RETRIES:
+                        raise Failed(NETWORK_HINT + "\n" + str(e)) from None
+                    have = os.path.getsize(part) if os.path.exists(part) else 0
+                    self.log(f"  {label}: 通信が途中で切れました。{NETWORK_WAIT:.0f} 秒待って、続き（{have / 1e6:,.0f} MB）から落とします"
+                             f"（{attempt + 2} 回目／全 {DOWNLOAD_RETRIES + 1} 回）")
+                    self.progress(f"{label}: 通信が切れたので、少し待って続きから落とします…")
+                    if self._stop.wait(NETWORK_WAIT):
+                        raise Cancelled()
             if not os.path.exists(part):   # 断られて照らして合い、もう置いた（_fetch の中）
                 return self._finish_download(target, label, digest, size, verified=True)
         return self._finish_download(target, label, digest, size)
@@ -492,9 +575,13 @@ class Setup:
                 os.remove(part)
                 if retry:
                     return self._fetch(url, part, 0, label, size, digest, False)
-            raise Failed(f"{label} を落とせませんでした（{e}）。もう一度押してください") from None
+            error = Failed(f"{label} を落とせませんでした（{e}）。もう一度押してください")
+            error.network = e.code >= 500 or e.code in (408, 429)   # 相手の都合・混雑は、待ってやり直す（download）
+            raise error from None
         except OSError as e:
-            raise Failed(f"{label} を落とせませんでした（{e}）。ネットにつながっているか確かめて、もう一度押してください") from None
+            error = Failed(f"{label} を落とせませんでした（{e}）。ネットにつながっているか確かめて、もう一度押してください")
+            error.network = True
+            raise error from None
         with response:
             if have and response.status != 206:   # 続きに応じなかった（最初から落とす）
                 have = 0
@@ -509,14 +596,24 @@ class Setup:
                     try:
                         block = response.read(1 << 20)
                     except OSError as e:
-                        raise Failed(f"{label} を落とす途中で切れました（{e}）。もう一度押すと続きから落とします") from None
+                        error = Failed(f"{label} を落とす途中で切れました（{e}）。もう一度押すと続きから落とします")
+                        error.network = True
+                        raise error from None
                     if not block:
+                        # 相手が途中で接続を閉じると、読み取りは例外を出さずに空で終わることがある。届いた量が足りなければ
+                        # 「途中で切れた」と見る（前は落とし終わったと見て、後で「大きさが違います」で止まっていた。11-10 のテストで気づいた）
+                        if total and done < total:
+                            error = Failed(f"{label} を落とす途中で切れました（{done / 1e6:,.0f} / {total / 1e6:,.0f} MB）。"
+                                           f"もう一度押すと続きから落とします")
+                            error.network = True
+                            raise error
                         break
                     f.write(block)
                     done += len(block)
                     if time.time() - last > 0.5:
                         last = time.time()
-                        self.progress(f"{label}: {done / 1e6:,.0f} / {total / 1e6:,.0f} MB" if total else f"{label}: {done / 1e6:,.0f} MB")
+                        self.progress(f"{label}: {done / 1e6:,.0f} / {total / 1e6:,.0f} MB（{done * 100 // total}%）" if total
+                                      else f"{label}: {done / 1e6:,.0f} MB")
 
     def fetch_zip(self, url, name, into, keep=()):
         """GitHub の zip を落として、中の 1 つのフォルダの中身を into に置く。keep の名前の物（.venv など）は into に残す。
@@ -615,10 +712,12 @@ class Setup:
     def kimodo_env(self):
         self.stop_residents()
         venv = os.path.join(self.kimodo, ".venv")
-        self.call([self.uv, "venv", venv, "--python", pins.KIMODO_PYTHON, "--clear"], "Python の用意")
+        self.log("  PyTorch など約 5GB を落として入れます（いちばん大きい物は 1 個で約 2.5GB）。回線によって 10 分〜1 時間ほどかかります")
+        self.log("  下の青い字の時間と量が増えていれば、進んでいます。通信が切れた時は、自動で続きからやり直します")
+        self.call([self.uv, "venv", venv, "--python", pins.KIMODO_PYTHON, "--clear"], "Python の用意", retries=NETWORK_RETRIES)
         py = self.kimodo_python()
         self.call([self.uv, "pip", "install", "--python", py, "--require-hashes", "--index-strategy", "unsafe-best-match",
-                   "-r", REQUIREMENTS], "Kimodo の部品を入れる")
+                   "-r", REQUIREMENTS], "Kimodo の部品を入れる", retries=NETWORK_RETRIES)
         # kimodo 本体は部品表に入れられない（GitHub の zip）ので、部品を入れた後に依存なしで入れる。
         # C++ の部品は組み立てない（SKIP_MOTION_CORRECTION_IN_SETUP は kimodo の setup.py の切り替え）。組み立て済みの物を後で置く
         self.call([self.uv, "pip", "install", "--python", py, "--no-deps", "--no-build-isolation",
@@ -649,7 +748,7 @@ class Setup:
 
     def kimodo_ort(self):
         self.call([self.uv, "pip", "install", "--python", self.kimodo_python(), "--require-hashes", "-r", ORT_KIMODO],
-                  "ONNX Runtime を入れる（Kimodo）")
+                  "ONNX Runtime を入れる（Kimodo）", retries=NETWORK_RETRIES)
         self.call([self.kimodo_python(), "-c",
                    "import onnx, onnxruntime; print('onnxruntime', onnxruntime.__version__, onnxruntime.get_available_providers())"],
                   "ONNX Runtime の読み込み（Kimodo）")
@@ -662,7 +761,7 @@ class Setup:
     def kimodo_model(self):
         cache = os.path.join(self.kimodo, "hf_cache")
         self.call([self.kimodo_python(), FETCH_MODEL, cache, pins.KIMODO_MODEL_REPO, pins.KIMODO_MODEL_REVISION],
-                  "Kimodo のモデルを落とす", HF_HUB_CACHE=cache)
+                  "Kimodo のモデルを落とす", retries=NETWORK_RETRIES, HF_HUB_CACHE=cache)
 
     def text_gguf(self):
         """文の読み取りの GGUF（約 8GB）とライセンスの文を <kimodo>\\text_encoder に置く。GGUF は sha256 で照らしてから名前を付ける。"""
@@ -776,11 +875,13 @@ class Setup:
 
     def mb_env(self):
         self.stop_residents()
-        self.call([self.uv, "sync", "--frozen", "--python", pins.MOTIONBRICKS_PYTHON], "MotionBricks の部品を入れる", cwd=self.mb)
+        self.log("  約 3GB を落として入れます。下の青い字の時間と量が増えていれば、進んでいます")
+        self.call([self.uv, "sync", "--frozen", "--python", pins.MOTIONBRICKS_PYTHON], "MotionBricks の部品を入れる", cwd=self.mb,
+                  retries=NETWORK_RETRIES)
 
     def mb_ort(self):
         self.call([self.uv, "pip", "install", "--python", self.mb_python(), "--require-hashes", "-r", ORT_MOTIONBRICKS],
-                  "ONNX Runtime を入れる（MotionBricks）")
+                  "ONNX Runtime を入れる（MotionBricks）", retries=NETWORK_RETRIES)
         self.call([self.mb_python(), "-c",
                    "import onnx, onnxruntime; print('onnxruntime', onnxruntime.__version__, onnxruntime.get_available_providers())"],
                   "ONNX Runtime の読み込み（MotionBricks）")
