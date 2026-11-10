@@ -71,7 +71,13 @@ def _same_keys(a, b, tol=1e-5):
 
 
 class MMMLink:
-    def __init__(self):
+    def __init__(self, host=None):
+        """host: hosts.Host（窓から作る時）。省くと開いている MMM を探す（mmm_run から）。"""
+        if host is None:
+            from . import hosts
+            host = next((h for h in hosts.all_hosts() if h.kind == "mmm"), None)
+        self.host = host
+        self.hwnd = host.hwnd if host else None
         self._skel = {}   # PMX の場所 → MMDSkeleton（VMD の名前 → PMX のボーン名の対応に使う）
 
     # ---------------- 読む ----------------
@@ -83,9 +89,10 @@ class MMMLink:
 
     @property
     def key(self):
-        """相手の見分け。MMM は 1 つだけ相手にする前提で、選択中のモデルの番号（MMM の中の ID）。"""
-        m = self._active()
-        return f"mmm{m['id'] if m else 0}-0"
+        """相手の見分け（MMD 版と同じく、プロセス番号と起動時刻。MMM を開き直すと変わる）。前回の生成の記録をこれで分ける。"""
+        if self.host is None:
+            raise MMMError("MMM が起動していません")
+        return f"mmm{self.host.pid}-{self.host.process_started:.0f}"
 
     def state(self):
         m = self._active()

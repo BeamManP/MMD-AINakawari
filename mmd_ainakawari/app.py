@@ -22,18 +22,19 @@ import win32event
 import win32gui
 import winerror
 
-from mmd_mcp.windows import list_windows
-
-from . import applog, gpu, panel, paths, pipeline, resident, runner, samples, smooth_stop, thin
+from . import applog, gpu, hosts, panel, paths, pipeline, resident, runner, samples, smooth_stop, thin
 from .installer import window as setup_window
 from .message_window import MessageWindow, register_message
 from . import vmd
-from .mmd_link import MMDLink
 from .mmd_skel import MMDSkeleton
 from .widgets import Fold, PromptRows, ScrollFrame, set_enabled
 
-APP_MUTEX = "Local\\AINakawari.App.v1"
-HUB_CLASS = "AINakawari.Hub"           # プラグインと 2 回目の起動が探す目印（nakawari_plugin.cpp と同じ）
+# 開発版を配布版と並べて動かす時は、環境変数 AINAKAWARI_INSTANCE（例: dev）で「1 つだけ」の印と目印の名前を分ける
+# （11-11 MMM 版を作る時、マスターの MMD で配布版の窓が動いていて、MMM のボタンの知らせがそちらへ行っていた）。
+# 配布版は付けないので、名前は今までと同じ（MMD のプラグイン nakawari_plugin.cpp が探す HUB_CLASS も同じまま）
+_INSTANCE = os.environ.get("AINAKAWARI_INSTANCE", "").strip()
+APP_MUTEX = "Local\\AINakawari.App.v1" + (f".{_INSTANCE}" if _INSTANCE else "")
+HUB_CLASS = "AINakawari.Hub" + (f".{_INSTANCE}" if _INSTANCE else "")   # プラグインと 2 回目の起動が探す目印（nakawari_plugin.cpp と同じ）
 OPEN_MESSAGE = "AINakawari.Open.v1"    # wparam = 開きたい MMD の窓
 ATTACH_MESSAGE = "AINakawari.Attach.v1"   # wparam = MMD の窓。窓を隠したまま作る（MMD の右下のパネル用。nakawari_plugin.cpp）
 ATTACH_WAIT = 30   # 隠したまま作る時に、起動の途中の MMD の窓が見えるようになるまで待つ秒数
@@ -71,11 +72,9 @@ NAKAWARI_NOTE = ("打ったキーとキーの間を、プロンプト無しで M
                  "作るのはキーの間が 17〜57 フレームの所で、それ以外は MMD の補間を使います。")
 
 def front_mmd():
-    """一番手前の MMD の窓。無ければ None。"""
-    mmds = {w.hwnd for w in list_windows()}
-    order = []
-    win32gui.EnumWindows(lambda hwnd, _: order.append(hwnd), None)  # 手前から順に並ぶ
-    return next((h for h in order if h in mmds), None)
+    """一番手前の MMD か MMM（MikuMikuMoving）の窓。無ければ None（hosts.front）。"""
+    host = hosts.front()
+    return host.hwnd if host else None
 
 
 class Hub:
@@ -101,10 +100,10 @@ class Hub:
         隠したまま作るのは MMD の起動の途中（プラグインの start）に頼まれるので、MMD の窓がまだ見えておらず、
         list_windows に出てこない（11-04、それで Python がすぐ終わっていた）。なので見えるまで ATTACH_WAIT 秒待つ。
         """
-        mmd = next((w for w in list_windows() if w.hwnd == hwnd), None)
+        mmd = hosts.find(hwnd)   # MMD か MMM（11-11 MMM 版。hosts.py）
         if mmd is None:
             if show:
-                messagebox.showerror("AIナカワリ", "開こうとした MMD が見つかりません。MMD が開いているか確かめてください")
+                messagebox.showerror("AIナカワリ", "開こうとした MMD・MMM が見つかりません。開いているか確かめてください")
             elif win32gui.IsWindow(hwnd):
                 self.waiting.setdefault(hwnd, time.monotonic() + ATTACH_WAIT)
         else:
@@ -154,13 +153,13 @@ class Hub:
 
 
 class App:
-    """MMD 1 つ分の窓。root はその MMD 用の Toplevel。"""
+    """MMD 1 つ分の窓。root はその MMD 用の Toplevel。mmd は hosts.Host（MMM＝MikuMikuMoving の時もある。やり取りは self.link）。"""
 
     def __init__(self, root, hub, mmd):
         self.root = root
         self.hub = hub
         self.mmd = mmd
-        self.link = MMDLink(mmd.hwnd)
+        self.link = mmd.link()   # MMD なら MMDLink、MMM なら MMMLink（同じ口）
         root.withdraw()  # 出すのは Hub が決める
         root.title("AIナカワリ")
         root.minsize(560, 0)   # 高さの下限は _build で決める（上と下の段が必ず見える高さ）
@@ -668,7 +667,7 @@ class App:
         except Exception as e:  # 読めない理由をそのまま出す（MMD の版が違う・選び替えの途中など）
             text = f"選択中のモデル：（読み取れません: {e}）"
         else:
-            text = f"選択中のモデル：{model['name']}" if model else "選択中のモデル：（なし。MMD のモデル欄でモデルを選んでください）"
+            text = f"選択中のモデル：{model['name']}" if model else self._for_host("選択中のモデル：（なし。MMD のモデル欄でモデルを選んでください）")
         extending = self.mode.get() == "extend" and self.tabs.index("current") == 0
         try:
             keys, frames = self.link.key_scan(with_names=extending) if model else ([], None)
@@ -688,7 +687,21 @@ class App:
             if var.get() != value:
                 var.set(value)
 
+    # 生成の本体（runner）や窓の知らせは「MMD に読み込み中」のように MMD を名指しで書いているので、相手が MMM の時は出す前に読み替える
+    # （11-11 MMM 版。「MMD の補間曲線」のような道具の名前としての MMD はそのまま）
+    HOST_WORDS = [("MMD に読み込み中", "MMM に書き戻し中"), ("MMD から", "MMM から"), ("MMD で", "MMM で"), ("MMD に", "MMM に"),
+                  ("MMD の操作", "MMM の操作"), ("MMD のタイムライン", "MMM のタイムライン"), ("MMD のモデル欄", "MMM のモデルの一覧"),
+                  ("MMD のキー", "MMM のキー"), ("MMD が", "MMM が"), ("MMD は", "MMM は")]
+
+    def _for_host(self, text):
+        if self.mmd.kind != "mmm" or "MMD" not in text:
+            return text
+        for a, b in self.HOST_WORDS:
+            text = text.replace(a, b)
+        return text
+
     def _write_log(self, line):
+        line = self._for_host(line)
         applog.write(line)
         self.log.configure(state="normal")
         self.log.insert("end", line + "\n")
@@ -701,11 +714,13 @@ class App:
             return
         # 次の予約は先に入れる（途中で例外が出ると、パネルとの同期も表示の更新も止まっていた。11-05 Codex のレビュー）
         self.root.after(500, self._tick)
-        scene =win32gui.GetWindowText(self.mmd.hwnd).partition("[")[2].rstrip("]")
-        title = f"AIナカワリ - {os.path.basename(scene)}" if scene else "AIナカワリ"
+        scene = self.mmd.scene_name()
+        title = (f"AIナカワリ - {scene}" if scene else "AIナカワリ") + (" （MMM）" if self.mmd.kind == "mmm" else "")
         if self.root.title() != title:
             self.root.title(title)
         self._read_mmd()
+        if self.mmd.kind == "mmm" and "MMD" in self.status.get():   # 窓の中の知らせ（status.set）も MMM の言い回しに
+            self.status.set(self._for_host(self.status.get()))
         while not self.q.empty():
             kind, payload = self.q.get()
             if kind == "log":
@@ -715,6 +730,7 @@ class App:
             elif kind == "done":
                 self.busy = self.cancellable = False
                 ok, msg = payload
+                msg = self._for_host(msg)
                 self.status.set(msg)
                 if not ok:
                     messagebox.showerror("AIナカワリ", msg, parent=self.root)
@@ -1003,7 +1019,7 @@ def main():
     if not hwnd:
         root = _new_root()
         root.withdraw()
-        messagebox.showerror("AIナカワリ", "MMD が起動していません。MMD を起動してから開いてください")
+        messagebox.showerror("AIナカワリ", "MMD（か MMM）が起動していません。起動してから開いてください")
         root.destroy()
         return
     mutex = win32event.CreateMutex(None, False, APP_MUTEX)  # 終わるまで持っておく

@@ -227,28 +227,38 @@ MotionBricks の directml・cpu と TensorRT は回転で 0.03〜0.11 度（Tens
   やめたら `{"ok": False, "cancelled": True}` を返して次の依頼を待つ（常駐は落とさない）。頼んだ側がいなくなった時もやめる
 - Kimodo（e1c219c）の `_multiprompt` は `progress_bar` を内側の `_generate` に渡していない。生成の間だけ `model._generate` に差し込む（`kimodo_gen.generate`）
 
-## MMM 版（試作・11-11。ブランチ work/mmm）
-MikuMikuMoving（MMM 1.2.9.2）でも、選んだキーの間を中割り・Kimodo で埋められる。AI の部分（`runner`・`pipeline`・`nakawari`）は MMD 版のまま。
+## MMM 版（11-11。ブランチ work/mmm）
+MikuMikuMoving（MMM 1.2.9.2）でも、MMD 版と**同じ窓（app.py）**で、選んだキーの間を Kimodo・MotionBricks で作れる。AI の部分（`runner`・`pipeline`・`nakawari`）も同じ。
 
 ```
-MMM のツールバー「AIナカワリ」（mmm_plugin/・C#）── python -m mmd_ainakawari.mmm_run ── MMMLink（mmm_link.py）
-                                                                                         └ 127.0.0.1:9560 ─ MMM の中の橋渡し（E:\Projects\MMM\mmm-mcp の MmmBridge.dll）
+MMM のツールバー「AIナカワリ」（mmm_plugin/・C#）── pythonw -m mmd_ainakawari.app --open <MMM の窓>
+   └ 窓（app.py の Hub・App）── hosts.Host（相手が MMD か MMM か）── MMMLink（mmm_link.py）
+                                                                        └ 127.0.0.1:9560 ─ MMM の中の橋渡し（E:\Projects\MMM\mmm-mcp の MmmBridge.dll）
 ```
 
-- **`MMMLink`**（`mmm_link.py`）は `MMDLink` と同じ口（`key`・`state`・`current_frame`・`selected_model`・`selected_key_frames`・`read_motion`・`load_motion`・`check_model`・`return_to`）。
-  `runner.generate(…, link=MMMLink())` でそのまま動く。メモリも画面の操作も使わない
+- **相手の見分け**（`hosts.py`）: MMD の窓は mmd-mcp の `list_windows`、MMM の窓は `MikuMikuMoving64.exe` のトップレベルの見える窓。`Hub.open`・`front_mmd` はここを通す。
+  `Host.link()` が MMD なら `MMDLink`、MMM なら `MMMLink` を返す。窓の題の場面の名前も相手ごと（`scene_name`）
+- **`MMMLink`**（`mmm_link.py`）は `MMDLink` と同じ口（`key`・`state`・`current_frame`・`selected_model`・`selected_key_frames`・`key_scan`・`read_motion`・`load_motion`・`check_model`・`return_to`）。
+  メモリも画面の操作も使わない。`key` は MMD 版と同じくプロセス番号＋起動時刻（前回の生成の記録を MMM ごとに分ける）
 - 読む: 選択中のモデルの基本のレイヤ（0 番）のボーンのキーを VMD にする。表情・表示/IK は読まない（触らないので消えない）
-- PMX: MMM の中の `modelfile.FileName` から取る（`model_file`）。その PMX を `MMDSkeleton` で読むと、MMM のボーンと番号・名前・親・初期位置・付与が一致した（239 本）。zip の中のモデルは未対応
+- PMX: MMM の中の `modelfile.FileName` から取る（`model_file`）。その PMX を `MMDSkeleton` で読むと、MMM のボーンと番号・名前・親・初期位置・付与が一致した（239 本）。zip の中のモデルは未対応（断る）
 - 書く: 中身が変わったボーンだけ、全部の範囲を差し替える（`replace_keys`）。1 回の頼みなので **MMM の Ctrl+Z 1 回で生成の前に戻る**。VMD に無いボーンは 0F の既定のキーだけにする（MMD の読み込みの前に全部消すのと同じ）
 - MMM は全ボーンの 0F に既定のキー（位置 0・回転なし・直線）を持つ。MMD も 0F のキーは全ボーンにあるので、そのまま渡している
 - 範囲の外で変わるのは、範囲の後ろの次のキーの補間曲線だけ（`split_interp`。MMD 版と同じ）。位置・回転は変わらない
-- **窓**（`mmm_plugin/`）: MMM のコマンド型プラグイン。押すと中割り／Kimodo とプロンプトの小さい窓を出し、`mmm_run` を別のプロセスで動かして出力を 1 行ずつ見せる（最後の行が `OK:`／`NG:`）。
-  「中断」は書き戻しの前まで（プロセスを終わらせる。常駐は頼んだ側がいなくなると作るのをやめる）。「元に戻す」は `runner.undo`（MMM の Ctrl+Z でも戻る）
-- 設定は DLL の横の `MMM-AINakawari.ini`（`python`＝出力を読むので python.exe・`home`）。例は `mmm_plugin/MMM-AINakawari.ini.example`
+- **言い回し**: 生成の本体の知らせは「MMD に読み込み中」のように MMD を名指しで書いているので、相手が MMM の時は窓に出す前に読み替える（`App._for_host`・`HOST_WORDS`）
+- **パネル**: MMD の右下のパネルにあたる物は、MMM にはまだ無い（`panel.Panel.find` が見つけられず、同期は黙って飛ばす）。操作は窓から
+- **MMM のボタン**（`mmm_plugin/`）: MMM のコマンド型プラグイン。押すと `pythonw -m mmd_ainakawari.app --open <MMM の本体の窓>` を起動するだけ。窓がもう動いていれば、起動した側が Hub に知らせて終わる（`main`・`_notify_running`）。
+  設定は DLL の横の `MMM-AINakawari.ini`（`python`・`home`・開発の時だけ `instance`）。例は `mmm_plugin/MMM-AINakawari.ini.example`
+- **開発版と配布版を並べる**: 窓は「1 つだけ」の作りで、マスターの MMD には配布版の窓が付いている。環境変数 `AINAKAWARI_INSTANCE`（例 `dev`）で「1 つだけ」の印（`APP_MUTEX`）と Hub の目印（`HUB_CLASS`）に名前を足し、別々に動かす。
+  配布版は付けないので名前は変わらない。MMM のボタンは ini の `instance=dev` でこれを付けて起動する。常駐（Kimodo・MotionBricks）の待ち受けの番号は同じなので、配布版の常駐が動いていればそちらを使う（作る中身は同じ）
+- **窓なしの入口**: `python -m mmd_ainakawari.mmm_run --engine motionbricks|kimodo [--prompt …] [--undo]`（試し・コマンドから）。選んだキーの間を作る
 - 組み立て: `dotnet build mmm_plugin/MMM-AINakawari.csproj -c Release`（`MmmDir` を MMM のフォルダに。既定は `E:\Projects\MMM\MikuMikuMoving64\`）。MMM が DLL を握るので、組み立て直す時は MMM を閉じる
-- 確かめた事（11-11・Tda式初音ミクV4X・許してにゃん体操・4000〜4050F）: MMM から読んで VMD にして書き戻す往復で変化 0／中割り 8 秒（生成 0.7 秒）・Kimodo 50 秒（常駐の立ち上げ込み・生成 6.9 秒）／
-  範囲の外で位置・回転の変わったキー 0／Ctrl+Z で生成の前と全キー一致／キーを選ばずに押す・中断（キーはそのまま）・窓の「元に戻す」（前と一致）
-- 配布にはまだ入れていない。入れる時に要る物: 橋渡し（MmmBridge.dll・MmmBridge.Core.dll）とこの DLL の同梱、ini の相対の場所、MMM 用のセットアップの入口（今は MMD 版のセットアップで入れた環境を使う）
+- **踏んだ所**: MMM が起動して橋渡しが待ち受けを始めた直後（1 秒以内）に、橋渡しからモデルを読み込ませると、MMM が DevExpress の描画（`Graphics.get_PageUnit` の `InvalidOperationException`）で落ちた。起動から 15 秒待つと落ちない（11-11）
+- 確かめた事（11-11・Tda式初音ミクV4X・許してにゃん体操・4000〜4050F）: MMM のボタンから窓が開き、選択中のモデル・今のフレーム・選んだキーの間を MMM から読む／
+  窓から Kimodo で生成 35 秒（常駐の立ち上げ込み・生成 4.7 秒）→ MMM の Ctrl+Z で生成の前と全キー一致・やり直すで後と一致／窓の「元に戻す」で生成の前に戻る／
+  MMD を相手にした時の見分け・`MMDLink`・既存のテスト（中断 13・レビュー 13・計算の方式 38）は今までどおり。
+  `mmm_run` からも中割り 8 秒・Kimodo 50 秒・中断・キーを選ばずに押す、を通した
+- 配布にはまだ入れていない。入れる時に要る物: 橋渡し（MmmBridge.dll・MmmBridge.Core.dll）とボタンの DLL の同梱、ini の相対の場所、MMM の Plugins へ置く導入、MMM 用のパネル
 
 ## 速さ（11-04 昼に高速化）
 生成 1 回の内訳を測って順に直した（`runner.generate` の段ごとに時間を記録。Tda ミク）:

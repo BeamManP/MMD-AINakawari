@@ -1,5 +1,6 @@
-; AIナカワリ（MMM 版・試作）の設定。この DLL（MMM-AINakawari.dll）の横に置く。
-; python: 出力を読むので python.exe（pythonw.exe でなく）。home: mmd_ainakawari のあるフォルダ
+; AIナカワリ（MMM 版）の設定。この DLL（MMM-AINakawari.dll）の横に置く。
+; python: 窓を動かす Python（python.exe と書いてあれば横の pythonw.exe を使う）。home: mmd_ainakawari のあるフォルダ
+; instance: 開発版を配布版と並べて動かす時だけ（例 dev）。配布では書かない
 [MMM-AINakawari]
-python=E:\Projects\mmd-mcp\.venv\Scripts\python.exe
+python=E:\Projects\mmd-mcp\.venv\Scripts\pythonw.exe
 home=E:\Projects\MMDKimodo
