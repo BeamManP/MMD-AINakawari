@@ -163,6 +163,21 @@ try:
     finally:
         gpu._gpu, gpu._adapters = real_gpu, real_adapters
 
+    # 6b. GPU を替えたら、試しの生成（方式の選び直し）だけやり直しになる
+    try:
+        gpu._adapters = lambda: [("NVIDIA GeForce RTX 3090", 24.0)]
+        tag_a = steps.gpu_tag()
+        versions_a = {k: v for k, _g, _t, v, _gb, _fn in setup.steps()}
+        gpu._adapters = lambda: [("AMD Radeon RX 7800 XT", 16.0)]
+        tag_b = steps.gpu_tag()
+        versions_b = {k: v for k, _g, _t, v, _gb, _fn in setup.steps()}
+        changed = sorted(k for k in versions_a if versions_a[k] != versions_b[k])
+        check("GPU を替えると、試しの生成の段だけ版が変わる", tag_a != tag_b and changed == ["kimodo_test", "mb_test"], f"{tag_a} → {tag_b}・{changed}")
+        gpu._adapters = lambda: []
+        check("GPU を読めない時の印は決まった字", steps.gpu_tag() == "unknown")
+    finally:
+        gpu._adapters = real_adapters
+
     # 7. 常駐に渡す
     setup.register()
     paths.save_backend("kimodo", "directml")

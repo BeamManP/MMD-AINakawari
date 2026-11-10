@@ -158,6 +158,67 @@ bf16 版との比べ（11-07・RTX 3090・i7-12700F・メインメモリ 64GB。
 - GPU 診断（`gpu.py`）: VRAM 6GB・メインメモリ 16GB（判定は 15GB 以上。16GB の PC は Windows が 15.8GB ほどと数える）の 1 段。足りない・GPU が無い時は判定を赤で出す。NVIDIA の GPU が無い・`CUDA_VISIBLE_DEVICES` で無効にされている時は、どちらのタブも「生成」を押せなくする（MotionBricks も GPU が要る）。足りないかもしれない時と、GPU を調べられなかった時は、試せるように押せるまま
 - 11-04〜11-07 のモードの記録: 低負荷は 1 文 3 秒・生成 15.5 秒、高速は生成 10〜14 秒。差はほぼ文の読み取りの分だけだった（動きを作る本体はどちらも GPU）
 
+## 計算の方式（11-10・0.3.0。NVIDIA 以外の GPU でも動かす）
+
+Kimodo と MotionBricks を、3 つの方式のどれかで動かす。`work\paths.json` の `kimodo_backend`・`motionbricks_backend`（`paths.backend`）。
+書いていなければ cuda（0.2.x までの環境はそのまま）。
+
+| 方式 | Kimodo | MotionBricks |
+|---|---|---|
+| cuda | PyTorch の CUDA（今まで） | 公式のエンジン（TensorRT） |
+| directml | 2 つの Transformer だけ ONNX Runtime の DirectML（`tools/kimodo_ort.py`）。残りは PyTorch の CPU | ONNX Runtime の DirectML（`tools/mb_ort.py`）。前後の計算（Warp）は CPU |
+| cpu | PyTorch の CPU | ONNX Runtime の CPU |
+
+- **決め方**: セットアップの試しの生成（`steps.try_backends`）が cuda（nvidia-smi がある時だけ）→ directml → cpu の順に試し、通った方式を
+  `setup_state.json`（`_backend_kimodo`・`_backend_motionbricks`）と窓の `paths.json` に書く。GPU の世代は決め打ちしない
+  （今の PyTorch や TensorRT で動かない NVIDIA の GPU も、ここで directml に落ちる）。強制終了（終了コード 0xC0000005）も「失敗」として次へ進む
+- **GPU を替えた時**: 試しの生成の段の版に GPU の名前の印（`steps.gpu_tag`）を混ぜてあるので、セットアップが「更新があります」になり、方式を選び直す
+- **常駐への渡し方**: 環境変数 `AINAKAWARI_BACKEND`（`pipeline.kimodo_env`・`smooth_stop._run`）。Kimodo には書き出す ONNX の置き場 `AINAKAWARI_ORT_CACHE`（`<kimodo>\ort_cache`）も
+- **試す時**: 窓のプロセスに `AINAKAWARI_BACKEND=directml` を付けると、設定より先にそれを使う。セットアップの試す順は `AINAKAWARI_SETUP_BACKENDS=directml,cpu`
+- **入れる物**: `installer\ort-kimodo.txt`（onnxruntime-directml 1.23.0・onnx 1.23.2。Python 3.10）と `ort-motionbricks.txt`（1.24.4・1.23.2。Python 3.12）。
+  版と sha256 つき。今ある numpy などの版を動かさないよう、環境の今の版を制約にして `uv pip compile` で作った（頭の行に作り方）。どの方式の PC にも入れる（約 60MB）
+- **GPU の診断**（`gpu.py`）: cuda は今までどおり nvidia-smi。それ以外は、レジストリのディスプレイ アダプターから名前と VRAM（`HardwareInformation.qwMemorySize`）を読む
+
+### Kimodo を ONNX にする所（`tools/kimodo_ort.py`）
+- 時間のほとんどは、ノイズ除去 1 回ごとに呼ばれる 2 つの Transformer（腰用・体用。各 16 層・約 1.4 億個の重み）。この 2 つだけを ONNX（各約 580MB）に書き出し、
+  モデルの中の部品を `OrtBlock` に差し替える。100 回のループ・CFG・キーの条件・後処理は Kimodo のコードのまま
+- **書き出しで踏んだ物**（順に）: ① PyTorch の Transformer の近道（`aten::_transformer_encoder_layer_fwd`）は書き出せない
+  ② マスクを渡す経路は、書き出した時のフレーム数が焼き付く ③ マスクを外しても、`nn.MultiheadAttention` の中の view に「長さ」「人数×ヘッド数」が焼き付く（76×24×128）。
+  → 同じ重みで注意機構を書き下した（`_Exportable._encoder`。形を数字で指定せず、最後の次元をヘッドに割るだけ。掛け算は全部 4 次元）
+- **検算**: 書き下した計算が元の `forward` と同じかを、書き出す前に倍精度で比べる（差 1e-12）。単精度だと元の計算どうしでも 1e-3 ずれるので、違いと見分けられない
+- **形**: ONNX Runtime は形を決めて開いた方が速いので、(人数, フレーム数) ごとに開き、直近 2 つを覚える。新しい長さの最初の 1 回は約 6 秒遅い
+- **AIナカワリの使い方に限った作り**: 1 回に 1 本だけ作る（マスクは常に「全部使う」）・文の並びは 1 個。違う使い方が来たら止める
+
+### MotionBricks を ONNX Runtime で動かす所（`tools/mb_ort.py`）
+- TensorRT に触っているのは `motionbricks.inference.engine.InferenceEngine` の 1 クラス。その口（`device_tensor`・`enqueue_async` など）を `OrtSOMAEngine` で全部上書きする。
+  公式のコードは無改造。`tensorrt` が入っていない・読めない PC でも読めるよう、空の `tensorrt` を先に置く（だから motionbricks より先に import する）
+- 入出力の置き場は Warp の CPU の配列で、numpy と同じメモリ。姿勢の詰め替え・端の合わせ込みは公式の Warp のカーネルを CPU で動かす
+- **DirectML は MatMul を 4 次元までしか受けない**。このモデルには 5 次元（[1, 姿勢, 30 関節, 3, 3]）の MatMul が 4 個あり、そのままだと 80070057 で落ちる。
+  先頭の 1 を Squeeze で外して掛け、Unsqueeze で戻した ONNX を初回に作る（`.ort-cache`。どれが 5 次元かは CPU で 1 回動かして実際の形を見る）
+- ONNX Runtime は DirectML で開けないと**黙って CPU に落ちる**。開いた方式を確かめて、違えば止める（2 つのエンジンとも）
+
+### 測った数字（RTX 3090・Core i7-12700F・11-10）
+
+| | cuda | directml | cpu |
+|---|---|---|---|
+| Kimodo 67 フレーム | 3.1 秒 | 3.2 秒 | 39〜50 秒（PyTorch。ONNX Runtime の CPU だと 155 秒） |
+| Kimodo 300 フレーム | 7.4 秒 | 7.2 秒 | 137〜229 秒 |
+| Kimodo の VRAM・メモリ | 1.1GB・1.5GB | 1.4GB・3.1GB | 0・1.8GB |
+| MotionBricks 81 フレーム（3 区間） | 0.41 秒 | 0.43 秒 | 0.56 秒 |
+| MotionBricks の推論 1 回 | 3.5 ミリ秒 | 9 ミリ秒 | 40 ミリ秒 |
+
+動きの差: Kimodo の directml と PyTorch の CPU は回転で最大 0.006 度（同じ種）。cuda とは乱数の出どころ（GPU か CPU か）が違うので、同じ種でも別の動きになる。
+MotionBricks の directml・cpu と TensorRT は回転で 0.03〜0.11 度（TensorRT が TF32 で精度を落としている分）、directml と cpu の間は 0.05 度未満。
+
+**確かめていない物**: AMD・Intel・GTX 10 シリーズの実機（3090 を DirectML で動かした所まで）。NVIDIA の PC で `CUDA_VISIBLE_DEVICES=-1` を付けると DirectML ごと落ちる（GPU なしの真似には使えない）。
+
+## 生成の中断（11-10・0.3.0）
+- 窓とパネルの「生成」は、生成中は「中断」になる（`App._generate_or_cancel`）。押せるのは MMD に書き戻す前まで（`runner.generate` の `on_commit`）
+- 生成のスレッドは `resident.cancellable(印)` の中で回る。印が立つと、切れ目（`resident.check_cancel`）・常駐の立ち上げ待ち・答え待ちで `resident.Cancelled`
+- 作っている途中の常駐には、頼んだ接続にそのまま `{"cancel": True}` を送る。常駐は Kimodo がノイズ除去の 1 回ごと、MotionBricks が目標ごとに `conn.poll(0)` で見て、
+  やめたら `{"ok": False, "cancelled": True}` を返して次の依頼を待つ（常駐は落とさない）。頼んだ側がいなくなった時もやめる
+- Kimodo（e1c219c）の `_multiprompt` は `progress_bar` を内側の `_generate` に渡していない。生成の間だけ `model._generate` に差し込む（`kimodo_gen.generate`）
+
 ## 速さ（11-04 昼に高速化）
 生成 1 回の内訳を測って順に直した（`runner.generate` の段ごとに時間を記録。Tda ミク）:
 | 段 | 前 | 後 | 直したこと |

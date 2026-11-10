@@ -29,7 +29,7 @@ import urllib.error
 import urllib.request
 import zipfile
 
-from .. import __version__, paths
+from .. import __version__, gpu, paths
 from . import pins
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -167,6 +167,13 @@ def default_folder():
     return os.path.join(best or "C:\\", "AINakawari")
 
 
+def gpu_tag():
+    """この PC の GPU の名前から作る短い印。試しの生成の段の版に混ぜる: GPU を替えると印が変わり、セットアップが
+    「更新があります」と出して、試しの生成（計算の方式の選び直し）をやり直す。GPU を読めない時は "unknown"（毎回同じ）。"""
+    names = sorted(name for name, _vram in gpu._adapters())
+    return hashlib.sha256("|".join(names).encode("utf-8")).hexdigest()[:8] if names else "unknown"
+
+
 class Setup:
     """1 回のセットアップ。run() は時間がかかるので、画面からは裏のスレッドで回す。cancel() は別のスレッドから呼んでよい。
 
@@ -218,7 +225,7 @@ class Setup:
                   file_sha256(ORT_KIMODO), 0.2, self.kimodo_ort))
         k.append(("kimodo_test", "kimodo", "Kimodo が動くか確かめる（2 秒の動きを試しに作る）",
                   f"{pins.KIMODO_COMMIT}/{file_sha256(os.path.join(TOOLS, 'gguf_text.py'))}/{'text' if self.with_text else 'samples'}"
-                  f"/{file_sha256(os.path.join(TOOLS, 'kimodo_ort.py'))}",
+                  f"/{file_sha256(os.path.join(TOOLS, 'kimodo_ort.py'))}/{gpu_tag()}",
                   1.2, self.kimodo_test))   # 1.2GB は DirectML の時に書き出す ONNX（CUDA で動く PC では作らない）
         m = [
             ("mb_src", "mb", "MotionBricks の本体を落とす", pins.MOTIONBRICKS_COMMIT, 0.2, self.mb_src),
@@ -228,7 +235,7 @@ class Setup:
             ("mb_ort", "mb", "ONNX Runtime を MotionBricks の環境に入れる（NVIDIA 以外の GPU でも動かすため）",
              file_sha256(ORT_MOTIONBRICKS), 0.2, self.mb_ort),
             ("mb_test", "mb", "MotionBricks が動くか確かめる（1 秒の動きを試しに作る。初回は数分かかる）",
-             f"{pins.MOTIONBRICKS_COMMIT}/{file_sha256(os.path.join(TOOLS, 'mb_ort.py'))}", 0.8, self.mb_test),
+             f"{pins.MOTIONBRICKS_COMMIT}/{file_sha256(os.path.join(TOOLS, 'mb_ort.py'))}/{gpu_tag()}", 0.8, self.mb_test),
         ]
         # MotionBricks は選ばせずに必ず入れる（11-06 マスター。前は画面で選べた）
         return k + m

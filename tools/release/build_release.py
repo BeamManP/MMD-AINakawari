@@ -66,7 +66,9 @@ APP_FILES = (
     "tools/install_plugin.py",
     "tools/gguf_text.py",
     "tools/kimodo_gen.py",
+    "tools/kimodo_ort.py",
     "tools/mb_gen.py",
+    "tools/mb_ort.py",
 )
 # 窓で読み込んで確かめる物（mmd_ainakawari の部品と、それが使う mmd-mcp の部品）
 SMOKE = (
@@ -80,6 +82,8 @@ SMOKE = (
     "import mmd_ainakawari.app as a, os; assert os.path.isfile(a.ICON), a.ICON;"
     "import os, mmd_mcp.bone_selection as b; assert os.path.isfile(b.DLL_PATH), b.DLL_PATH;"
     "assert os.path.isfile(s.REQUIREMENTS) and os.path.isfile(s.FETCH_MODEL), s.REQUIREMENTS;"
+    "assert os.path.isfile(s.ORT_KIMODO) and os.path.isfile(s.ORT_MOTIONBRICKS), s.ORT_KIMODO;"
+    "assert all(os.path.isfile(os.path.join(s.TOOLS, n)) for n in ('kimodo_gen.py', 'kimodo_ort.py', 'mb_gen.py', 'mb_ort.py')), s.TOOLS;"
     "folder, info = s.motion_correction_info(); assert folder == os.path.join(os.path.dirname(s.paths.HOME), s.PREBUILT), folder;"
     "assert info['kimodo_commit'] == s.pins.KIMODO_COMMIT and s.sha256(os.path.join(folder, info['file'])) == info['sha256'];"
     "uv = os.path.join(os.path.dirname(s.paths.HOME), 'uv', 'uv.exe'); assert os.path.isfile(uv), uv;"
@@ -119,6 +123,8 @@ AI のモデル（Kimodo・MotionBricks・Llama 3・LLM2Vec）と llama.cpp、�
   - Meta Llama 3: Meta Llama 3 Community License・Acceptable Use Policy。Built with Meta Llama 3
   - LLM2Vec: MIT
 - llama.cpp（ggml-org）: MIT。公式の CPU 版を落とし、llama-server.exe だけ使う
+- ONNX Runtime（onnxruntime-directml・Microsoft）: MIT。中の DirectML.dll は Microsoft の再頒布の条件（入れた環境の
+  onnxruntime_directml-*.dist-info の中）。ONNX（onnx）: Apache-2.0。NVIDIA 以外の GPU で動かす時に使う
 
 サンプルの文（mmd_ainakawari\\prompt_samples.txt）の読み取り結果（上のプロンプトの読み取りで作った 4096 個の数・44 文）は、
 Llama を入れない人も作れるように app\\mmd_ainakawari\\text_cache に入れている。Built with Meta Llama 3
