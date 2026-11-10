@@ -246,7 +246,11 @@ MMM のツールバー「AIナカワリ」（mmm_plugin/・C#）── pythonw -
 - MMM は全ボーンの 0F に既定のキー（位置 0・回転なし・直線）を持つ。MMD も 0F のキーは全ボーンにあるので、そのまま渡している
 - 範囲の外で変わるのは、範囲の後ろの次のキーの補間曲線だけ（`split_interp`。MMD 版と同じ）。位置・回転は変わらない
 - **言い回し**: 生成の本体の知らせは「MMD に読み込み中」のように MMD を名指しで書いているので、相手が MMM の時は窓に出す前に読み替える（`App._for_host`・`HOST_WORDS`）
-- **パネル**: MMD の右下のパネルにあたる物は、MMM にはまだ無い（`panel.Panel.find` が見つけられず、同期は黙って飛ばす）。操作は窓から
+- **パネル**（`mmm_plugin/AINakawariPanel.cs`）: MMD の右下のパネルと同じ部品・同じ番号（101〜108）・同じ字の C#（WinForms）のパネル。`IHaveUserControl` で返すと、MMM が左の欄の「プラグイン」のタブの中のタブに入れる。
+  窓の同期（`panel.py`・`App._sync_panel`）はそのまま使う。違うのは探し方だけで、MMM のパネルは本体の窓の孫以下なので、`Panel(nested=True)` が奥まで探して窓の字 `AINakawari.Panel` で見分ける。
+  WinForms は部品に番号を付けないので、窓ができた時に `GWLP_ID` を書く（`GetDlgItem` は直下の子しか見ないので、部品はパネルの直下に並べる）。
+  外から `WM_SETTEXT` で書かれたラベル・ボタンは描き直す（`SyncLabel`・`SyncButton`）。`WM_APP+2`（押せる押せない）・`WM_APP+3`（状態の行を赤く）に応える。ボタンは Hub に `AINakawari.Panel.v1` を送る（MMD のパネルと同じ）
+- **パネルの窓はタブを開くまで作られない**（WinForms・DevExpress は見えない部品の窓を後で作る）。なので窓を起こす 15 秒のタイマーは、窓ができた時でなく、パネルが MMM の本体に入った時（`ParentChanged`）から数える。起動から 15 秒で `--attach`（窓を隠したまま作る）。タブを開けば、窓の側から見えて同期が始まる
 - **MMM のボタン**（`mmm_plugin/`）: MMM のコマンド型プラグイン。押すと `pythonw -m mmd_ainakawari.app --open <MMM の本体の窓>` を起動するだけ。窓がもう動いていれば、起動した側が Hub に知らせて終わる（`main`・`_notify_running`）。
   設定は DLL の横の `MMM-AINakawari.ini`（`python`・`home`・開発の時だけ `instance`）。例は `mmm_plugin/MMM-AINakawari.ini.example`
 - **開発版と配布版を並べる**: 窓は「1 つだけ」の作りで、マスターの MMD には配布版の窓が付いている。環境変数 `AINAKAWARI_INSTANCE`（例 `dev`）で「1 つだけ」の印（`APP_MUTEX`）と Hub の目印（`HUB_CLASS`）に名前を足し、別々に動かす。
@@ -254,11 +258,12 @@ MMM のツールバー「AIナカワリ」（mmm_plugin/・C#）── pythonw -
 - **窓なしの入口**: `python -m mmd_ainakawari.mmm_run --engine motionbricks|kimodo [--prompt …] [--undo]`（試し・コマンドから）。選んだキーの間を作る
 - 組み立て: `dotnet build mmm_plugin/MMM-AINakawari.csproj -c Release`（`MmmDir` を MMM のフォルダに。既定は `E:\Projects\MMM\MikuMikuMoving64\`）。MMM が DLL を握るので、組み立て直す時は MMM を閉じる
 - **踏んだ所**: MMM が起動して橋渡しが待ち受けを始めた直後（1 秒以内）に、橋渡しからモデルを読み込ませると、MMM が DevExpress の描画（`Graphics.get_PageUnit` の `InvalidOperationException`）で落ちた。起動から 15 秒待つと落ちない（11-11）
+- 確かめた事（パネル・11-11 02:3x）: MMM の起動の 25 秒後に窓が隠れたまま起き（タブを開かなくても）、タブを開くとパネルに範囲（MMM の選択）・プロンプト（窓の設定）・状態（MMM の言い回し）が出る。パネルでエンジンを MotionBricks にして「生成」→ 窓のタブも替わって中割り（21 秒）・Ctrl+Z で前と一致／パネルでプロンプトを書き換えて Kimodo で「生成」→ 窓に写ってそのプロンプトで作る（39 秒）／パネルの「元に戻す」→ 前と一致。**プロンプトの欄に打つ時に MMM のショートカットに取られないか**（MMD のパネルは `filter` で止めている）は、まだ人の手で試していない
 - 確かめた事（11-11・Tda式初音ミクV4X・許してにゃん体操・4000〜4050F）: MMM のボタンから窓が開き、選択中のモデル・今のフレーム・選んだキーの間を MMM から読む／
   窓から Kimodo で生成 35 秒（常駐の立ち上げ込み・生成 4.7 秒）→ MMM の Ctrl+Z で生成の前と全キー一致・やり直すで後と一致／窓の「元に戻す」で生成の前に戻る／
   MMD を相手にした時の見分け・`MMDLink`・既存のテスト（中断 13・レビュー 13・計算の方式 38）は今までどおり。
   `mmm_run` からも中割り 8 秒・Kimodo 50 秒・中断・キーを選ばずに押す、を通した
-- 配布にはまだ入れていない。入れる時に要る物: 橋渡し（MmmBridge.dll・MmmBridge.Core.dll）とボタンの DLL の同梱、ini の相対の場所、MMM の Plugins へ置く導入、MMM 用のパネル
+- 配布にはまだ入れていない。入れる時に要る物: 橋渡し（MmmBridge.dll・MmmBridge.Core.dll）とボタン・パネルの DLL の同梱、ini の相対の場所、MMM の Plugins へ置く導入
 
 ## 速さ（11-04 昼に高速化）
 生成 1 回の内訳を測って順に直した（`runner.generate` の段ごとに時間を記録。Tda ミク）:

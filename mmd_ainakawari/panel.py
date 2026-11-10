@@ -45,14 +45,25 @@ class Busy(Exception):
 
 
 class Panel:
-    def __init__(self, mmd_hwnd):
+    def __init__(self, mmd_hwnd, nested=False):
+        """nested: MMM（MikuMikuMoving）の時。MMM はプラグインのパネルを本体の窓の中のタブに入れるので、直下の子でなく奥まで探し、
+        クラス名でなく窓の字（CLASS と同じ目印。mmm_plugin/AINakawariPanel.cs）で見分ける。部品の番号と読み書きは MMD のパネルと同じ。"""
         self.mmd = mmd_hwnd
+        self.nested = nested
         self.hwnd = None
 
     def find(self):
         """パネルを探す（無い時は None。プラグインが古い・空き地が無くて作っていない）。"""
         if not (self.hwnd and win32gui.IsWindow(self.hwnd)):
-            self.hwnd = win32gui.FindWindowEx(self.mmd, 0, CLASS, None) or None
+            if self.nested:
+                found = []
+                try:
+                    win32gui.EnumChildWindows(self.mmd, lambda h, _: found.append(h) if win32gui.GetWindowText(h) == CLASS else None, None)
+                except win32gui.error:   # 相手の窓がちょうど閉じた
+                    pass
+                self.hwnd = found[0] if found else None
+            else:
+                self.hwnd = win32gui.FindWindowEx(self.mmd, 0, CLASS, None) or None
         return self.hwnd
 
     def visible(self):

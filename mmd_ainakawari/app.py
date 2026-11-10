@@ -192,7 +192,7 @@ class App:
         self.last_backup = self.last_run["backup"] if self.last_run else None
         self._build()
         # MMD の右下のパネル。窓と同じ設定を、変わった方からもう一方へ写す（_sync_panel）
-        self.panel = panel.Panel(mmd.hwnd)
+        self.panel = panel.Panel(mmd.hwnd, nested=mmd.kind == "mmm")   # MMM のパネルはプラグインのタブの中（mmm_plugin/AINakawariPanel.cs）
         self._seen = {}   # 最後に同期した時の値 {("panel"|"window", 項目): 値}
         root.protocol("WM_DELETE_WINDOW", root.withdraw)
         self._tick()
