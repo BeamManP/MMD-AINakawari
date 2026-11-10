@@ -60,8 +60,23 @@ class SetupWindow:
         win = self.win = tk.Toplevel(root)
         win.title("AIナカワリ のセットアップ")
         win.protocol("WM_DELETE_WINDOW", self.close)
-        f = ttk.Frame(win, padding=12)
-        f.pack(fill="both", expand=True)
+        # 下に固定する欄: 始めるボタン・状態の一言・閉じる。中身（下の _scroll_area）より先に積んで、画面が低くても削られないようにする
+        # （11-10 高さ 768 のノート PC で、ボタン・ログ欄・失敗の一言が画面の外に押し出されて、始められなかった）
+        foot = self.foot = ttk.Frame(win, padding=(12, 0, 12, 12))
+        foot.pack(side="bottom", fill="x")
+        bottom = self.bottom = ttk.Frame(foot)
+        bottom.pack(side="bottom", fill="x", pady=(8, 0))
+        ttk.Button(bottom, text="閉じる", command=self.close).pack(side="right", ipady=4)
+        self.status = tk.StringVar()
+        ttk.Label(bottom, textvariable=self.status, wraplength=560, justify="left").pack(side="left", anchor="w")
+        bf = self.btn_row = ttk.Frame(foot)   # 入れる場所などを畳んでいる時は、この行も隠す（_show_form）
+        bf.pack(fill="x", pady=(8, 0), before=bottom)
+        self.start_btn = ttk.Button(bf, text="セットアップを始める", command=self._start)
+        self.start_btn.pack(side="left", ipady=4)
+        self.cancel_btn = ttk.Button(bf, text="中止", command=self._cancel, state="disabled")
+        self.cancel_btn.pack(side="left", padx=(6, 0), ipady=4)
+
+        f = self._scroll_area(win)
 
         if diagnosis is not None:
             self._show_environment(f, diagnosis)
@@ -135,22 +150,58 @@ class SetupWindow:
         self.log = tk.Text(lg, height=10, width=96, wrap="word", state="disabled", background="#f6f6f6", yscrollcommand=bar.set)
         self.log.pack(fill="both", expand=True)
         bar.configure(command=self.log.yview)
-
-        bf = ttk.Frame(f)
-        bf.pack(fill="x", pady=(8, 0))
-        self.start_btn = ttk.Button(bf, text="セットアップを始める", command=self._start)
-        self.start_btn.pack(side="left", ipady=4)
-        self.cancel_btn = ttk.Button(bf, text="中止", command=self._cancel, state="disabled")
-        self.cancel_btn.pack(side="left", padx=(6, 0), ipady=4)
-        bottom = ttk.Frame(outer)
-        bottom.pack(side="bottom", fill="x", pady=(8, 0))
-        ttk.Button(bottom, text="閉じる", command=self.close).pack(side="right", ipady=4)
-        self.status = tk.StringVar()
-        ttk.Label(bottom, textvariable=self.status, wraplength=560, justify="left").pack(side="left", anchor="w")
         self._refresh()
         self._poll()
 
     # ---- 表示 ----
+    def _scroll_area(self, win):
+        """見出し〜ログ欄を入れる、縦にスクロールできる枠。中の Frame を返す。
+        窓の高さは中身に合わせるが、画面に収まる高さ（_max_height）で止めて、あふれた分はスクロールで見せる。
+        スクロールバーは、あふれている時だけ出す。"""
+        area = ttk.Frame(win)
+        area.pack(fill="both", expand=True)
+        canvas = self.canvas = tk.Canvas(area, highlightthickness=0, borderwidth=0, yscrollincrement=20,
+                                         background=ttk.Style().lookup("TFrame", "background"))
+        bar = self.scroll_bar = ttk.Scrollbar(area, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=bar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        inner = self.inner = ttk.Frame(canvas, padding=(12, 12, 12, 0))
+        item = canvas.create_window(0, 0, window=inner, anchor="nw")
+
+        def on_inner(_e):   # 中身の大きさが変わった（畳む・広げる・段の一覧の出し直し）
+            w, h = inner.winfo_reqwidth(), inner.winfo_reqheight()
+            canvas.configure(scrollregion=(0, 0, w, h), width=w, height=min(h, self._max_height()))
+            self._toggle_bar()
+
+        def on_canvas(e):   # 窓の大きさが変わった: 中身の幅を窓に合わせる
+            canvas.itemconfigure(item, width=e.width)
+            self._toggle_bar()
+
+        inner.bind("<Configure>", on_inner)
+        canvas.bind("<Configure>", on_canvas)
+        win.bind("<MouseWheel>", self._wheel)   # 窓の中のどこでホイールを回しても届く（窓の bindtag）
+        return inner
+
+    def _max_height(self):
+        """スクロールの枠の高さの上限: 画面の高さから、下の固定欄・タイトルバー・タスクバーの分を引く。"""
+        return max(200, self.win.winfo_screenheight() - self.foot.winfo_reqheight() - 110)
+
+    def _toggle_bar(self):
+        """中身が枠からあふれている時だけ、スクロールバーを出す。"""
+        over = self.inner.winfo_reqheight() > self.canvas.winfo_height() + 1
+        if over and not self.scroll_bar.winfo_manager():
+            self.scroll_bar.pack(side="right", fill="y")
+        elif not over and self.scroll_bar.winfo_manager():
+            self.scroll_bar.pack_forget()
+            self.canvas.yview_moveto(0)
+
+    def _wheel(self, e):
+        # ログ欄の上ではログ欄だけを送る（Text 自身が送るので、ここでは何もしない）
+        if e.widget is self.log or not self.scroll_bar.winfo_manager():
+            return
+        step = max(1, abs(e.delta) // 120)
+        self.canvas.yview_scroll(-step if e.delta > 0 else step, "units")
+
     @staticmethod
     def _show_environment(f, d):
         """一番上の「現在の環境: GPU・メインメモリ → MotionBricks ○ Kimodo ○」（11-06 マスター。11-07 に動作モードの 2 つを 1 つに）。
@@ -198,8 +249,10 @@ class SetupWindow:
         if show and not self.form.winfo_manager():
             self.more_btn.pack_forget()
             self.form.pack(fill="both", expand=True)
+            self.btn_row.pack(fill="x", pady=(8, 0), before=self.bottom)
         elif not show and self.form.winfo_manager():
             self.form.pack_forget()
+            self.btn_row.pack_forget()
         if not show and not self.more_btn.winfo_manager():
             self.more_btn.pack(anchor="w", pady=(8, 0))
         if not text_box:
