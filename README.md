@@ -1,5 +1,7 @@
 # AIナカワリ（MMD-AINakawari）
 
+English: [README.en.md](README.en.md)
+
 MMD（MikuMikuDance）で打ったキーとキーの間を、AI が中割りして埋めるプラグインです。
 タイムラインでキーを選んで、右下の「AIナカワリ簡易操作」で「生成」を押すだけ。間のフレームのキーが、MMD のタイムラインにそのまま入ります。
 

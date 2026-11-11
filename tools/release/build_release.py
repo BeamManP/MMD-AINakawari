@@ -61,6 +61,7 @@ MMDPLUGIN_FILES = {
 APP_FILES = (
     "LICENSE",
     "README.md",
+    "README.en.md",
     "mmd_ainakawari/",
     "tools/export_skeleton.py",
     "tools/install_plugin.py",
