@@ -20,6 +20,9 @@ constexpr wchar_t kModelModeTextEn[] = L"To model";   // 英語モードでの�
 // 前は「カメラ編」の下端＋26px で決めていたが、カメラ用のモードではカメラ編が 3D 画面の下（606）に上がるので、
 // パネルが 170px 上から始まって窓の下まで伸びていた（11-04 マスター「クソデカサイズ」）
 constexpr wchar_t kFoldText[] = L"－";
+// 英語モードでは同じボタンの字が半角の「-」（11-12 に MMD 9.32 の英語モードで読んだ。0x2d）。全角だけを見ていたので、
+// 英語モードでは下の段が見つからず、パネルを隠したままにしていた（11-12 Iris Xe の動作報告のスクショで、パネルが無かった）
+constexpr wchar_t kFoldTextEn[] = L"-";
 constexpr int kFoldSize = 14;
 constexpr int kFoldGap = 2;
 // 三行式（11-05 マスター）: モード選択と範囲の字・プロンプト 1 行（下に「サンプル」）・生成／元に戻す／詳細、と下に状態の 1 行。
@@ -84,7 +87,7 @@ BOOL CALLBACK find_fold(HWND child, LPARAM param) {
     if (r.right - r.left != kFoldSize || r.bottom - r.top != kFoldSize) return TRUE;
     wchar_t text[4]{};
     GetWindowTextW(child, text, 4);
-    if (wcscmp(text, kFoldText) == 0 && (strip->top < 0 || r.top < strip->top)) strip->top = r.top;
+    if ((wcscmp(text, kFoldText) == 0 || wcscmp(text, kFoldTextEn) == 0) && (strip->top < 0 || r.top < strip->top)) strip->top = r.top;
     return TRUE;
 }
 }  // namespace
