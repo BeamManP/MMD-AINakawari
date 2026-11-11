@@ -52,6 +52,8 @@ def run(select=None, delete=None, load=None, cleared=True, loaded=True, still_op
     link.state = lambda: {"model_selected": True, "model": "model"}
     link.selected_model = lambda: {"path": PMX, "name": "model"}
     link.current_frame = lambda: 0
+    link.english = lambda: False   # 範囲選択の対象の名前（_track）。日本語モードの MMD の作り物
+    link._range_ui = lambda: None   # 範囲選択の欄を控えて戻す所は、作り物の MMD では読まない
     link._dismiss_notices = lambda r, timeout=3.0: (log.append("dismiss"), ["不足しているボーン／モーフはありません。", "スタティック"])[1]
     link._still_open = lambda dialogs: still_open
     link._keys_cleared = lambda track, wait=5.0: (log.append(("cleared?", track)), cleared)[1]

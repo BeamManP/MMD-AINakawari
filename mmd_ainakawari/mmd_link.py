@@ -9,6 +9,7 @@ from mmd_mcp import scene_controls as scene
 from mmd_mcp import timeline
 from mmd_mcp.bone_controls import get_selected_bone_transform
 from mmd_mcp.bone_selection import select_bone
+from mmd_mcp.ui_language import english_mode
 from mmd_mcp.ui_state import UIReader, get_ui_state
 from mmd_mcp.windows import list_windows
 
@@ -17,6 +18,10 @@ from . import mmd_memory, vmd
 # MMD の中のモデルのデータでの、読み込んだファイルの場所（UTF-16・256 文字）。
 # MMDPlugin のヘッダ（MMDModelData::file_path・9.31 の解析）の位置で、9.32 でもそのまま読めた（11-03）。
 MODEL_FILE_PATH = 9544
+
+# 範囲選択の対象の、英語モード（ヘルプ → English Mode）での名前（11-11 に MMD 9.32 で並びの位置を突き合わせて読んだ）。
+# 中では日本語の名前で扱い、MMD に渡す時だけ替える（_track）
+TRACKS_EN = {"全ﾌﾚｰﾑ": "All frame", "全ボーンﾌﾚｰﾑ": "All bone", "全表情ﾌﾚｰﾑ": "All facial"}
 
 
 class MMDLink:
@@ -120,7 +125,7 @@ class MMDLink:
 
     def export_motion(self, path):
         """選択中のモデルのモーションを丸ごと書き出す。MMD は選択したキーだけを書き出す（何も選んでいないと断る）ので、先に全部選ぶ。"""
-        r = timeline.select_range(0, 999999, "全ﾌﾚｰﾑ", self.hwnd)
+        r = timeline.select_range(0, 999999, self._track("全ﾌﾚｰﾑ"), self.hwnd)
         if r.get("status") != "completed":
             raise RuntimeError(f"MMD で全部のキーを選択できませんでした: {r.get('status')} {r.get('dialogs', '')}")
         r = files.export_file("motion", path, True, self.hwnd)
@@ -268,7 +273,7 @@ class MMDLink:
     def _delete_keys(self, track, stage):
         """タイムラインの範囲選択で track（「全ボーンﾌﾚｰﾑ」など）の 0〜999999F を選んで消す。mmd-mcp の返事を返す。
         消す操作を送ったら、返事に delete_sent を付ける（その後で止まったら、キーが一部消えているかもしれないので戻しを通す）。"""
-        r = timeline.select_range(0, 999999, track, self.hwnd)
+        r = timeline.select_range(0, 999999, self._track(track), self.hwnd)
         # 選ぶだけの段では中身を確かめようがないので、お知らせの窓だけなら閉じて先へ進む（消えたかは下で確かめる）
         r = self._settle(r, f"{stage}（範囲選択）", lambda: True)
         if r.get("status") != "completed":
@@ -276,6 +281,14 @@ class MMDLink:
         r = edit_actions.perform(["delete_keys"], self.hwnd)
         r = self._settle(r, stage, lambda: self._keys_cleared(track))
         return {**r, "delete_sent": True}
+
+    def english(self):
+        """MMD が英語モード（ヘルプ → English Mode）か。mmd-mcp の english_mode（カメラ編／モデル編のボタンの文字で見る）。"""
+        return english_mode(UIReader(self.hwnd))
+
+    def _track(self, track):
+        """範囲選択の対象の日本語の名前を、今の MMD の言葉の名前にする（英語モードでは「全ボーンﾌﾚｰﾑ」が無く、キーを消せなかった）。"""
+        return TRACKS_EN[track] if self.english() else track
 
     def _settle(self, result, stage, verify):
         """mmd-mcp の返事が MMD の窓で止まっていたら、その窓をログに残し、ボタン 1 つのお知らせの窓だけ閉じる。
@@ -442,12 +455,15 @@ class MMDLink:
 
         def confirm(d):
             """その窓が「〜用のモーションデータです 続行しますか？」なら (OK のボタン, 文)。違えば None。"""
-            if d.get("title") != "モーションデータ読込":
+            # 英語モード（11-11 に MMD 9.32 で出して読んだ）: 「load motion data」
+            # 「This motion file is the data for '○○'. / You can regist the motion only same bone name. / Are you OK?」
+            if d.get("title") not in ("モーションデータ読込", "load motion data"):
                 return None
             controls = d.get("controls") or []
             texts = [c.get("text") or "" for c in controls if c.get("class") == "Static"]
             ok = [c for c in controls if c.get("class") == "Button" and c.get("id") == 1]
-            if len(ok) != 1 or not any("用のモーションデータです" in t and "続行しますか" in t for t in texts):
+            if len(ok) != 1 or not any(("用のモーションデータです" in t and "続行しますか" in t)
+                                       or ("This motion file is the data for" in t and "Are you OK?" in t) for t in texts):
                 return None
             return ok[0]["hwnd"], texts
 
