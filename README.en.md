@@ -168,7 +168,7 @@ The prompt and the generation method (Kimodo / MotionBricks) are shared between 
 - Up to about 20 keys is a good guide. With more, the motion gets stiff because it is tied to the keys
 - Kimodo handles up to 300 frames (10 seconds) per section (the few frames that carry momentum from outside the range also count, so choose a range a little shorter than that). For longer motion, split the range and generate in parts
 - If a key sits just after a section boundary, the boundary is shifted back by 1 frame automatically to keep the connection
-- The first generation takes an extra 10-20 seconds to load the models. From the second time on it takes about 10-15 seconds
+- The first generation takes an extra 10-20 seconds to load the models. From the second time on it takes about 25 seconds (including key thinning at "Normal")
 
 ## Updating and uninstalling
 
