@@ -144,11 +144,57 @@ class MMDLink:
         model: 読み込む先のモデルの PMX の場所。キーを消す直前に、選ばれているモデルがこれかを確かめ、違えば何も消さずに止める
                （生成の途中で別のモデルを選ぶと、そのモデルのキーを全部消して前のモデルの動きを入れていた。11-07 Codex のレビュー）。
         restore: キーを消した後で読み込みに失敗した時に、読み込み直すバックアップ（消したキーを戻す）。
+        キーを消すのに使うタイムラインの範囲選択の欄（対象・開始〜終了）は、終わったら押す前の入力に戻す（_range_ui）。
         """
         # 再生中は MMD の場面を編集できない（mmd-mcp が断る）。生成した動きを再生して確かめている途中で「元に戻す」や
         # 「生成」を押すことがあるので、先に止める（11-04 マスター「元に戻すを押すとたまに Stop MMD playback が出る」）
         if playback.get(self.hwnd)["playing"]:
             playback.set_playback(False, hwnd=self.hwnd)
+        saved = self._range_ui()
+        try:
+            self._replace_motion(path, frame, model, restore)
+        finally:
+            if saved:
+                self._restore_range_ui(saved)
+
+    def _range_ui(self):
+        """タイムラインの下の範囲選択の欄の今の入力（対象の名前・開始・終了の文字）。読めなければ None（戻さないだけ）。"""
+        try:
+            ctx = timeline.get_context(self.hwnd)
+            return ctx["range_tracks"]["selected_name"], ctx["range_start_text"], ctx["range_end_text"]
+        except Exception as e:
+            from . import applog
+            applog.write(f"範囲選択の欄を読めませんでした（終わった後に戻しません）: {type(e).__name__}: {e}")
+            return None
+
+    def _restore_range_ui(self, saved):
+        """範囲選択の欄を saved（_range_ui）の入力に戻す（11-11 マスター。キーを消すたびに「全表情ﾌﾚｰﾑ 0〜999999」になっていた）。
+        「範囲選択」のボタンは押さない（キーの選択はそのまま）。対象は名前で探す（並びはモデルで変わる）。無ければ対象はそのまま。
+        対象は MMD に選び直したと知らせる（mmd-mcp の select_range と同じ。知らせないと、見た目だけ戻って MMD の中は全表情のまま）。
+        戻せなくても生成は失敗にしない（記録にだけ残す）。"""
+        import ctypes
+
+        from mmd_mcp.bone_controls import _message
+        name, start, end = saved
+        try:
+            reader = UIReader(self.hwnd)
+            tracks = reader.combo(434)
+            if name and tracks and tracks["items"].count(name) == 1 and tracks["selected_name"] != name:
+                combo = reader.control(434, "ComboBox")
+                index = tracks["items"].index(name)
+                _message(combo, 0x14E, index)   # CB_SETCURSEL
+                _message(self.hwnd, 0x111, 434 | (1 << 16), combo)   # WM_COMMAND・CBN_SELCHANGE
+            for cid, text in ((425, start), (426, end)):
+                edit = reader.control(cid, "Edit")
+                if text is not None and reader.text(edit) != text:
+                    buffer = ctypes.create_unicode_buffer(text)
+                    _message(edit, 0xC, 0, ctypes.addressof(buffer))   # WM_SETTEXT
+        except Exception as e:
+            from . import applog
+            applog.write(f"範囲選択の欄を戻せませんでした（{saved}）: {type(e).__name__}: {e}")
+
+    def _replace_motion(self, path, frame, model, restore):
+        """load_motion の中身（キーを消して読み込む）。"""
         if not self.state()["model_selected"]:
             raise RuntimeError("MMD でカメラ・照明・アクセサリが選ばれています。モデルを選んでからもう一度押してください")
         if model is not None:
