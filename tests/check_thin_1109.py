@@ -84,9 +84,12 @@ def main():
 
     class FakeLink:
         """runner.generate・undo が使う MMDLink の口だけを持つ作り物。読み込んだファイルを覚え、次に読む中身にする。"""
-        key = "check-thin"
+        made = 0
 
         def __init__(self, motion):
+            # 回すたびに別の MMD にする（同じ MMD の 2 回目の生成は前回の控えを消すので、モード 1 の控えで 6・7 を確かめられなくなる。11-11）
+            FakeLink.made += 1
+            self.key = f"check-thin-{FakeLink.made}"
             self.motion, self.loaded = motion, []
 
         def current_frame(self):

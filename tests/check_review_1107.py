@@ -125,6 +125,8 @@ def fake_link(selected, calls):
     link.state = lambda: {"model_selected": True, "model": os.path.basename(selected)}
     link.selected_model = lambda: {"path": selected, "name": os.path.basename(selected)}
     link.current_frame = lambda: 0
+    link.english = lambda: False   # 範囲選択の対象の名前（_track）。日本語モードの MMD の作り物（11-11）
+    link._range_ui = lambda: None   # 範囲選択の欄を控えて戻す所は、作り物の MMD では読まない（11-11）
     mmd_link.playback.get = lambda hwnd=None: {"playing": False}
     def select_range(start, end, track, hwnd=None):
         calls.log.append("select"); calls.tracks.append(track)
