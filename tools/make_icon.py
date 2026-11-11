@@ -60,6 +60,7 @@ for s in sizes[:-1]:
         sheet.paste(imgs[s], (x, y0 + (64 - s) // 2 if s <= 64 else y0), imgs[s])
     x += s + 14
 sheet.paste(imgs[256], (630, 37), imgs[256])
-if len(sys.argv) > 1:   # 見本は、出す場所を指定した時だけ（リポジトリには置かない）
+if len(sys.argv) > 1:   # 見本と大きい PNG は、出す場所を指定した時だけ（リポジトリには置かない）
     sheet.save(f"{OUT}/icon_sheet.png")
+    full.save(f"{OUT}/AINakawari_icon_1024.png")   # 告知やサムネに使う透過 PNG（11-09 マスター）
 print("ok")
