@@ -177,6 +177,7 @@ bf16 版との比べ（11-07・RTX 3090・i7-12700F・メインメモリ 64GB。
 - これまでの zip で入れた印はどちらの改行の物もあるので、済んだかどうかは LF・CRLF の両方の数え方と比べる（`Setup.finished_steps`）。新しく書く印は LF
 - 配布物を作る時は、未コミットの物を避けるために一時の作業ツリー（`git worktree add --detach`）で作る。その時は
   `AINAKAWARI_SDK`（`work\mmdplugin\dev`）と `--motion-correction`（`work\prebuilt`）を元の作業フォルダの物に向け、`work\release\cache` を写しておく
+  （11-11 から: 作業ツリーの `work` を元の `work` へのジャンクションにすれば、どれも向け直し・写しが要らない。手順は [RELEASE.md](RELEASE.md)）
 
 ## 計算の方式（11-10・0.3.0。NVIDIA 以外の GPU でも動かす）
 
@@ -367,7 +368,7 @@ Kimodo の公式のコード・説明書・デモ、よその連携（Blender Br
   - Python の環境は 2 つのまま（Kimodo 3.10・MotionBricks 3.12）。MotionBricks の環境に torch は無く、まとめても数百 MB しか減らない
   - 窓は zip に同梱の Python（tkinter 入り）で動かす
   - 検証用のまっさらな MMD: `F:\AINakawari_検証\MikuMikuDance_v932x64\`（MMDPlugin・MME 無し。exe はいつもの物と同じ）
-- **配布の zip（11-05 夜に作った・検証用の MMD で通った）**: `python tools\release\build_release.py --mmdplugin <MMDPlugin_v0.41_x64.zip>`（`--allow-dirty` で試し作り）。できた物は `work\release\`。70MB
+- **配布の zip（11-05 夜に作った・検証用の MMD で通った）**: `python tools\release\build_release.py --mmdplugin <MMDPlugin_v0.41_x64.zip>`（`--allow-dirty` で試し作り）。できた物は `work\release\`。70MB。版を上げて配る時の手順は [RELEASE.md](RELEASE.md)
   - 形: 直下に `AIナカワリ導入.cmd`・`MMD-AINakawari\`（`python\`＝python-build-standalone 3.10.19 ＋ 窓の部品 8 つ（`tools/release/requirements.txt`、sha256 つき）＋ mmd-mcp を `--no-deps` で・`app\`・`uv\uv.exe` 0.9.26・`mmdplugin\`）・`plugin\MMD-AINakawari\`（DLL と ini だけ。ini は `..\..\MMD-AINakawari\…` の相対。プラグインは相対の場所を DLL のフォルダから読む）
   - **MMDPlugin は `plugin\` の下の DLL を奥まで全部読み込もうとする**。最初は Python を `plugin\MMD-AINakawari\python\` に置いて、MMD が起動直後に 0xC0000005（ntdll）で落ちた。部品を外して切り分け（AIナカワリの DLL を外しても・MME を外しても落ち、Python のフォルダを `plugin\` の外に出すと動く。日本語のフォルダ名は関係なし）。組み立てのスクリプトは `plugin\` の下に DLL と ini 以外があれば止まる
   - 導入の本体は `tools/install_plugin.py`（cmd は同梱の Python で呼ぶだけの ASCII。日本語の案内を cmd に書くと化けやすい）。exe の sha256（mmd-mcp の `VERIFIED_SHA256`）・MMD が開いていないかを見てから、MME を `plugin\mme\` に移し（移す先に中身の違う同名があれば止まる）、MMDPlugin を置く（d3d9.dll を最後に置く。MME でも MMDPlugin でもない d3d9.dll・MMDPlugin の物でない d3dx9_43.dll があれば止まる）。zip を MMD の外に展開した時は、フォルダを選ぶ窓を出して写す（この道は未確認）

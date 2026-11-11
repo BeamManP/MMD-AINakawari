@@ -300,6 +300,7 @@ class Thinner:
         def pose(tracks, frames):
             T = len(frames)
             ident = np.tile(Q.IDENTITY, (T, 1))
+            zero = np.zeros((T, 3))
             anim_r, anim_t = {}, {}
             for i in order:
                 keys = tracks.get(sk.names[i])
@@ -323,9 +324,13 @@ class Thinner:
                 p = sk.parent[i]
                 offset = sk.rest[i] - (sk.rest[p] if p >= 0 else 0) + anim_t[i] + app_t
                 if p >= 0:
-                    g = _mul(G[p], local)
+                    # 親が子より後に回るモデルがある（親の変形階層が高い・親が物理後。計算の順は sk.order）。その時の親は、
+                    # mmd_skel.pose と同じく、まだ計算していない値（回転なし・原点）を使う（11-11 issue #1「レミリア・S」で
+                    # KeyError: 146 になり、生成のたびに間引きで止まっていた）
+                    gp, pp = G.get(p, ident), P.get(p, zero)
+                    g = _mul(gp, local)
                     G[i] = g / np.linalg.norm(g, axis=1, keepdims=True)
-                    P[i] = P[p] + Q.rotate(G[p].T, offset.T).T
+                    P[i] = pp + Q.rotate(gp.T, offset.T).T
                 else:
                     G[i], P[i] = local, offset
             return np.stack([P[i] for i in watch_i], axis=1)
