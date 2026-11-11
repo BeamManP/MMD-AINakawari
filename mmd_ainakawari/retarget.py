@@ -12,27 +12,28 @@ import json
 import numpy as np
 
 from . import quat as Q
+from .i18n import _
 
 # SOMA の関節 → MMD のボーン（左右は「左」「右」を前に付ける）。None は前後の骨から作る
 SOMA_TO_MMD = {
-    "Hips": "下半身", "Spine1": "上半身", "Spine2": None, "Chest": "上半身2",
-    "Neck1": "首", "Neck2": None, "Head": "頭", "Jaw": None, "LeftEye": None, "RightEye": None,
-    "LeftShoulder": "左肩", "LeftArm": "左腕", "LeftForeArm": "左ひじ", "LeftHand": "左手首",
+    "Hips": "下半身", "Spine1": "上半身", "Spine2": None, "Chest": "上半身2",   # i18n: skip
+    "Neck1": "首", "Neck2": None, "Head": "頭", "Jaw": None, "LeftEye": None, "RightEye": None,   # i18n: skip
+    "LeftShoulder": "左肩", "LeftArm": "左腕", "LeftForeArm": "左ひじ", "LeftHand": "左手首",   # i18n: skip
     "LeftHandThumbEnd": None, "LeftHandMiddleEnd": None,
-    "RightShoulder": "右肩", "RightArm": "右腕", "RightForeArm": "右ひじ", "RightHand": "右手首",
+    "RightShoulder": "右肩", "RightArm": "右腕", "RightForeArm": "右ひじ", "RightHand": "右手首",   # i18n: skip
     "RightHandThumbEnd": None, "RightHandMiddleEnd": None,
-    "LeftLeg": "左足", "LeftShin": "左ひざ", "LeftFoot": "左足首", "LeftToeBase": None,
-    "RightLeg": "右足", "RightShin": "右ひざ", "RightFoot": "右足首", "RightToeBase": None,
+    "LeftLeg": "左足", "LeftShin": "左ひざ", "LeftFoot": "左足首", "LeftToeBase": None,   # i18n: skip
+    "RightLeg": "右足", "RightShin": "右ひざ", "RightFoot": "右足首", "RightToeBase": None,   # i18n: skip
 }
 
 # 基準での向きを測る「骨の先」: SOMA の子の関節 / MMD の子のボーン。無いものは C = 回転なし
 DIRECTION_PAIRS = {
-    "LeftShoulder": ("LeftArm", "左腕"), "LeftArm": ("LeftForeArm", "左ひじ"),
-    "LeftForeArm": ("LeftHand", "左手首"), "LeftHand": ("LeftHandMiddleEnd", "左中指１"),
-    "RightShoulder": ("RightArm", "右腕"), "RightArm": ("RightForeArm", "右ひじ"),
-    "RightForeArm": ("RightHand", "右手首"), "RightHand": ("RightHandMiddleEnd", "右中指１"),
-    "LeftLeg": ("LeftShin", "左ひざ"), "LeftShin": ("LeftFoot", "左足首"), "LeftFoot": ("LeftToeBase", "左つま先"),
-    "RightLeg": ("RightShin", "右ひざ"), "RightShin": ("RightFoot", "右足首"), "RightFoot": ("RightToeBase", "右つま先"),
+    "LeftShoulder": ("LeftArm", "左腕"), "LeftArm": ("LeftForeArm", "左ひじ"),   # i18n: skip
+    "LeftForeArm": ("LeftHand", "左手首"), "LeftHand": ("LeftHandMiddleEnd", "左中指１"),   # i18n: skip
+    "RightShoulder": ("RightArm", "右腕"), "RightArm": ("RightForeArm", "右ひじ"),   # i18n: skip
+    "RightForeArm": ("RightHand", "右手首"), "RightHand": ("RightHandMiddleEnd", "右中指１"),   # i18n: skip
+    "LeftLeg": ("LeftShin", "左ひざ"), "LeftShin": ("LeftFoot", "左足首"), "LeftFoot": ("LeftToeBase", "左つま先"),   # i18n: skip
+    "RightLeg": ("RightShin", "右ひざ"), "RightShin": ("RightFoot", "右足首"), "RightFoot": ("RightToeBase", "右つま先"),   # i18n: skip
 }
 
 # 基準での向きの差を、上から見た向きだけで測る骨（足の裏が床に着いている基準どうしを合わせる。Retargeter.__init__）
@@ -42,7 +43,7 @@ FLAT_FEET = ("LeftFoot", "RightFoot")
 TOE_GROUND = 0.02
 
 # 書き戻しで 0（回転なし・移動なし）にする中継のボーン。体の動きはセンター・下半身・上半身などに全部載せる
-NEUTRAL_BONES = ["グルーブ", "腰", "左肩P", "右肩P", "左腕捩", "右腕捩", "左手捩", "右手捩"]
+NEUTRAL_BONES = ["グルーブ", "腰", "左肩P", "右肩P", "左腕捩", "右腕捩", "左手捩", "右手捩"]   # i18n: skip
 
 
 def conv_p(p):
@@ -58,8 +59,8 @@ def conv_q(q):
 
 # 無いと計算が成り立たない骨（体の位置を書き込む先と、SOMA の腰の根っこ）。ほかの SOMA_TO_MMD の骨は、無ければ飛ばす（11-06 マスター
 # 「無いなら無いで無視（ログに警告）」）。脚は左右どちらかの 足・ひざ・足首 がそろっていれば足りる（体格を測る）
-REQUIRED_BONES = ("センター", "下半身")
-LEG_CHAINS = {"左": ("LeftLeg", "LeftShin", "LeftFoot"), "右": ("RightLeg", "RightShin", "RightFoot")}
+REQUIRED_BONES = ("センター", "下半身")   # i18n: skip
+LEG_CHAINS = {"左": ("LeftLeg", "LeftShin", "LeftFoot"), "右": ("RightLeg", "RightShin", "RightFoot")}   # i18n: skip
 
 
 class Retargeter:
@@ -77,15 +78,15 @@ class Retargeter:
         self.missing = [m for m in SOMA_TO_MMD.values() if m is not None and m not in mmd_skel]
         # 上半身2 が無いモデル: 背骨を上半身 1 本で受け持つ。書き戻しでは Chest（背骨の曲がりの合計）の向きを上半身に入れる
         # （Spine1 の向きだと、胸の曲がりの分だけ首と肩の付け根の位置がずれる）
-        self.chest_on_spine = "上半身2" in self.missing and "上半身" in mmd_skel
+        self.chest_on_spine = "上半身2" in self.missing and "上半身" in mmd_skel   # i18n: skip
         sides = [side for side, chain in LEG_CHAINS.items() if all(SOMA_TO_MMD[s] in mmd_skel for s in chain)]
         lacking = [n for n in REQUIRED_BONES if n not in mmd_skel]
         if not sides:
-            lacking.append("左右どちらかの 足・ひざ・足首")
+            lacking.append(_("左右どちらかの 足・ひざ・足首"))
         if lacking:
-            raise KeyError(f"モデルにボーンがありません: {'・'.join(lacking)}（体の位置と大きさを決めるのに要ります）")
+            raise KeyError(_("モデルにボーンがありません: {names}（体の位置と大きさを決めるのに要ります）", names=_("・").join(lacking)))
         # 腰の位置の基準にする脚の付け根（ある方だけ。両方あれば真ん中）
-        self.leg_roots = [(soma, m) for soma, m in (("LeftLeg", "左足"), ("RightLeg", "右足")) if m in mmd_skel]
+        self.leg_roots = [(soma, m) for soma, m in (("LeftLeg", "左足"), ("RightLeg", "右足")) if m in mmd_skel]   # i18n: skip
 
         # 基準での向きの差 C（Kimodo 座標）
         self.C = [Q.IDENTITY.copy() for _ in range(self.J)]
@@ -147,11 +148,11 @@ class Retargeter:
         chain_bones = {sk.i(m) for m in self.mapped} | {sk.i(s) for s in self.proxies.values()}
         iks = sorted({ik for link, ik in ik_links.items() if link in chain_bones}, key=lambda i: sk.rank[i])
         self.our_iks = [sk.names[i] for i in iks]
-        self.neutral_bones = [n for n in NEUTRAL_BONES + ["センター"] if n in sk]
+        self.neutral_bones = [n for n in NEUTRAL_BONES + ["センター"] if n in sk]   # i18n: skip
         self.written_bones = set(self.mapped) | set(self.proxies.values()) | set(self.our_iks) | set(self.neutral_bones)
         self.idle_iks = self._idle_iks()
         # IK がどの手足を動かすか: IK のボーンかその目標の基準の位置が、手首・足首の基準の位置に重なるもの（つま先ＩＫなどは当たらない）
-        ends = {j: m for j, m in (("LeftHand", "左手首"), ("RightHand", "右手首"), ("LeftFoot", "左足首"), ("RightFoot", "右足首"))
+        ends = {j: m for j, m in (("LeftHand", "左手首"), ("RightHand", "右手首"), ("LeftFoot", "左足首"), ("RightFoot", "右足首"))   # i18n: skip
                 if m in sk}
         self.ik_effector = {}
         for k in self.our_iks:
@@ -282,10 +283,10 @@ class Retargeter:
         # センターの移動: 両脚の付け根の真ん中を、SOMA の位置へ合わせる（センターの親の向きで直す）
         legmid_target = conv_p((np.asarray(hips, float) + Q.rotate(Gs[0], self.legmid_offset)) / self.scale)
         G0, P0 = fk(targets)
-        c = sk.i("センター")
+        c = sk.i("センター")   # i18n: skip
         pc = sk.parent[c]
         delta = legmid_target - np.mean([P0[sk.i(m)] for _s, m in self.leg_roots], axis=0)
-        pos["センター"] = Q.rotate(Q.inv(G0[pc]), delta) if pc >= 0 else delta
+        pos["センター"] = Q.rotate(Q.inv(G0[pc]), delta) if pc >= 0 else delta   # i18n: skip
         fk(targets)
         for m in self.mapped:
             rots[m] = sk.anim_rot(m)

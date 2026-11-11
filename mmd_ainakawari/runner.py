@@ -14,6 +14,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from . import nakawari, paths, pipeline, resident, smooth_stop, thin, vmd
+from .i18n import _
 from .mmd_link import MMDLink
 from .mmd_skel import MMDSkeleton
 
@@ -207,12 +208,12 @@ def _generate(settings, log, link, previous, on_commit):
     cursor = link.current_frame()   # 押した時のフレーム。読み込みは 0F で行うので、終わったらここへ戻す（11-06 マスター）
     st = link.state()
     if not st["model_selected"]:
-        raise RuntimeError("MMD でモデルを選んでください（今はカメラ・照明・アクセサリが選ばれています）")
+        raise RuntimeError(_("MMD でモデルを選んでください（今はカメラ・照明・アクセサリが選ばれています）"))
     pmx = settings.pmx or link.selected_model()["path"]
     if not pmx.lower().endswith(".pmx"):
-        raise RuntimeError(f"PMX のモデルだけに対応しています（「{st['model']}」は {os.path.basename(pmx)}）")
+        raise RuntimeError(_("PMX のモデルだけに対応しています（「{model}」は {file}）", model=st['model'], file=os.path.basename(pmx)))
     if not os.path.exists(pmx):
-        raise FileNotFoundError(f"PMX が見つかりません: {pmx}")
+        raise FileNotFoundError(_("PMX が見つかりません: {path}", path=pmx))
     os.makedirs(WORK_DIR, exist_ok=True)
     cache = paths.cache_dir()   # 控えと結果の VMD の置き場（詳しい設定。11-11 マスター）
     # MMD のプロセス番号も付ける（MMD が 2 つあって同じ秒に生成すると、控えと結果のファイルがぶつかって、
@@ -220,19 +221,20 @@ def _generate(settings, log, link, previous, on_commit):
     stamp = time.strftime("%Y%m%d_%H%M%S") + "_" + link.key.split("-")[0]
     backup = os.path.join(cache, f"original_{stamp}.vmd")
 
-    log(f"MMD から「{st['model']}」のモーションを読み込み中…")
+    log(_("MMD から「{model}」のモーションを読み込み中…", model=st['model']))
     original = link.read_motion(backup)
-    log(f"  キー {len(original.bones)} 個")
+    log(_("  キー {n} 個", n=len(original.bones)))
     if original.dropped:   # mmd_memory.MotionReader.read
-        log(f"注意: 同じ名前のボーンが 2 本以上あります（{'・'.join(sorted(set(original.dropped)))}）。"
-            "MMD は同じ名前のキーを前の方のボーンに入れるので、2 本目以降のキーは残せません（生成のあとは 0 に戻ります）")
+        log(_("注意: 同じ名前のボーンが 2 本以上あります（{names}）。"
+              "MMD は同じ名前のキーを前の方のボーンに入れるので、2 本目以降のキーは残せません（生成のあとは 0 に戻ります）",
+              names=_("・").join(sorted(set(original.dropped)))))
     skel = MMDSkeleton(pmx)
     fixed_pos = {vmd.vmd_name(b["name"]) for b in skel.bones if not b["flags"] & 0x0004}
     # 照合は書き戻す骨だけ（それ以外は元のキーをそのまま通しているので、比べても意味が無い）
     rt = pipeline.Retargeter(skel, paths.soma_json())
     if rt.missing:   # 無い骨は飛ばして作る（retarget.py の REQUIRED_BONES と脚だけは要る）
-        log(f"注意: モデルに無いボーンは飛ばして作ります: {'・'.join(rt.missing)}"
-            + ("（上半身2 の分の曲がりは上半身に入れます）" if rt.chest_on_spine else ""))
+        log(_("注意: モデルに無いボーンは飛ばして作ります: {names}", names=_("・").join(rt.missing))
+            + (_("（上半身2 の分の曲がりは上半身に入れます）") if rt.chest_on_spine else ""))
     written = {vmd.vmd_name(n) for n in pipeline.body_bone_names(skel, rt)}
     # 前回の元のキーから作り直すのは、前回と同じ範囲の時だけ。違う範囲で戻すと、前回作った範囲の結果が消えていた
     # （範囲 A を作った後に範囲 B を作ると、B の外の A が元に戻った。11-05 Codex のレビュー）
@@ -246,9 +248,9 @@ def _generate(settings, log, link, previous, on_commit):
         # （前はモーションを丸ごと前回の元に差し替えていて、生成の後に直した指や表情が戻っていた。11-07 Codex のレビュー）
         original = _rebase(original, vmd.read(previous["backup"]), written)
         vmd.write(backup, original)
-        log(f"  書き戻す骨は前回の結果のままなので、前回の元のキーから作り直します（ほかの骨・表情は今のまま。バックアップ: {backup}）")
+        log(_("  書き戻す骨は前回の結果のままなので、前回の元のキーから作り直します（ほかの骨・表情は今のまま。バックアップ: {backup}）", backup=backup))
     else:
-        log(f"  バックアップ: {backup}")
+        log(_("  バックアップ: {backup}", backup=backup))
 
     mb = settings.engine == "motionbricks"
     extend = settings.extend is not None and not mb
@@ -271,43 +273,43 @@ def _generate(settings, log, link, previous, on_commit):
     keyed = set(original.key_frames())
     real = [f for f in job.frames if f not in job.mmd_frames and (f not in job.anchors or f in keyed)]
     if extend:
-        shown = f"{rng[0] + 1}〜{rng[1]}F・{rng[1] - rng[0]} フレーム"
-        log(f"{rng[0]}F の姿勢から続けて、後ろに {settings.extend} フレーム（{rng[0] + 1}〜{rng[1]}F）を足します"
-            + (f"。{rng[1]}F の姿勢は MMD のまま（後ろの動きにつなぎます）" if len(job.anchors) > 1 else "")
-            + f"（手前 {pipeline.RANGE_CONTEXT} フレームの動きも渡します）")
+        shown = _("{a}〜{b}F・{n} フレーム", a=rng[0] + 1, b=rng[1], n=rng[1] - rng[0])
+        log(_("{a}F の姿勢から続けて、後ろに {n} フレーム（{b}〜{c}F）を足します", a=rng[0], n=settings.extend, b=rng[0] + 1, c=rng[1])
+            + (_("。{a}F の姿勢は MMD のまま（後ろの動きにつなぎます）", a=rng[1]) if len(job.anchors) > 1 else "")
+            + _("（手前 {n} フレームの動きも渡します）", n=pipeline.RANGE_CONTEXT))
         if overwritten:
-            log(f"注意: 足す所にあった体のキー（{'・'.join(map(str, overwritten))}F）は上書きしました（指・表情などのキーはそのまま）")
+            log(_("注意: 足す所にあった体のキー（{frames}F）は上書きしました（指・表情などのキーはそのまま）", frames=_("・").join(map(str, overwritten))))
     elif rng:
         lo, hi = (job.anchors[0], job.anchors[-1]) if len(job.anchors) > 1 else (rng[0], rng[1])
-        shown = f"{rng[0]}〜{rng[1]}F・{rng[1] - rng[0] + 1} フレーム"
-        log(f"範囲 {rng[0]}〜{rng[1]}F を作り直します: "
-            + (f"始まりと終わり（{lo}F・{hi}F）の姿勢を MMD から取り、外の動きにつなぎます"
-               if len(job.anchors) > 1 else f"始まり（{lo}F）の姿勢を MMD から取ってつなぎます（後ろにキーが無いので、終わりは決めません）")
-            + f"（外側 {pipeline.RANGE_CONTEXT} フレームの動きも渡します）")
+        shown = _("{a}〜{b}F・{n} フレーム", a=rng[0], b=rng[1], n=rng[1] - rng[0] + 1)
+        log(_("範囲 {a}〜{b}F を作り直します: ", a=rng[0], b=rng[1])
+            + (_("始まりと終わり（{lo}F・{hi}F）の姿勢を MMD から取り、外の動きにつなぎます", lo=lo, hi=hi)
+               if len(job.anchors) > 1 else _("始まり（{lo}F）の姿勢を MMD から取ってつなぎます（後ろにキーが無いので、終わりは決めません）", lo=lo))
+            + _("（外側 {n} フレームの動きも渡します）", n=pipeline.RANGE_CONTEXT))
         if settings.length is not None and not mb:
-            log("  範囲の終わりまで作ります（範囲を使う時は、長さの欄は効きません）")
+            log(_("  範囲の終わりまで作ります（範囲を使う時は、長さの欄は効きません）"))
     else:
-        shown = f"{job.first}〜{job.first + job.num_frames - 1}F・{job.num_frames} フレーム"
+        shown = _("{a}〜{b}F・{n} フレーム", a=job.first, b=job.first + job.num_frames - 1, n=job.num_frames)
     if not mb:
-        shown += f"・プロンプトの効き {settings.cfg_text}・キーの効き {settings.cfg_key}"
+        shown += _("・プロンプトの効き {cfg_text}・キーの効き {cfg_key}", cfg_text=settings.cfg_text, cfg_key=settings.cfg_key)
     if settings.use_keys:
-        log(f"体のキー {len(real)} 個: {real}（{shown}）")
+        log(_("体のキー {n} 個: {frames}（{shown}）", n=len(real), frames=real, shown=shown))
     elif settings.use_center:
-        log(f"センターに合わせて作る: キーのポーズは使わず、{len(job.root_frames)} フレームで腰の位置と高さを"
-            f"センター（キーと補間）に合わせます。ポーズと動きはプロンプトから作ります（{shown}）")
+        log(_("センターに合わせて作る: キーのポーズは使わず、{n} フレームで腰の位置と高さを"
+              "センター（キーと補間）に合わせます。ポーズと動きはプロンプトから作ります（{shown}）", n=len(job.root_frames), shown=shown))
     else:
-        log(f"プロンプトだけで作る: {job.first}F の場所と向きから作ります（{shown}）")
+        log(_("プロンプトだけで作る: {a}F の場所と向きから作ります（{shown}）", a=job.first, shown=shown))
     if settings.use_center:   # 腰の目印は毎フレーム（全ての親のキーとは別。前は use_keys の時だけ出し、ほかは全ての親のキーと出していた）
         if settings.use_keys:
-            log(f"腰の位置をセンターに合わせる: {len(job.root_frames)} フレームで腰の位置と高さを目印にします")
+            log(_("腰の位置をセンターに合わせる: {n} フレームで腰の位置と高さを目印にします", n=len(job.root_frames)))
     elif job.root_frames:
-        log(f"全ての親だけのキー {len(job.root_frames)} 個: {job.root_frames}（腰がそこを通るように作る）")
+        log(_("全ての親だけのキー {n} 個: {frames}（腰がそこを通るように作る）", n=len(job.root_frames), frames=job.root_frames))
     if job.stop_frames:
         outside = job.stop_frames[-1] - (job.first + job.num_frames - 1)
-        log(f"最後のキー（{job.stop_frames[0] - 1}F）で止まる: {job.stop_frames[0]}〜{job.stop_frames[-1]}F は腰を動かさない"
-            + (f"（後ろ {outside} フレームは止まるために余分に作るだけで、書き戻さない）" if outside > 0 else ""))
+        log(_("最後のキー（{key}F）で止まる: {a}〜{b}F は腰を動かさない", key=job.stop_frames[0] - 1, a=job.stop_frames[0], b=job.stop_frames[-1])
+            + (_("（後ろ {n} フレームは止まるために余分に作るだけで、書き戻さない）", n=outside) if outside > 0 else ""))
     if job.limb_frames:
-        log(f"手足の IK だけのキー {len(job.limb_frames)} 個: {job.limb_frames}（手足の位置だけ合わせ、体は任せる）")
+        log(_("手足の IK だけのキー {n} 個: {frames}（手足の位置だけ合わせ、体は任せる）", n=len(job.limb_frames), frames=job.limb_frames))
     if job.sunk_keys:
         runs = []   # 続いたフレーム（範囲の外の文脈など）は 1 つにまとめる [始め, 終わり, 一番低い]
         for f, d in job.sunk_keys:
@@ -315,52 +317,53 @@ def _generate(settings, log, link, previous, on_commit):
                 runs[-1][1], runs[-1][2] = f, max(runs[-1][2], d)
             else:
                 runs.append([f, f, d])
-        shown = "・".join(f"{a}F（{d * 100:.0f}cm）" if a == b else f"{a}〜{b}F（{d * 100:.0f}cm）" for a, b, d in runs)
-        log(f"注意: 足の裏がほかのキーより低いキーがあります: {shown}。床は一番低い足で決めるので、"
-            f"ほかのフレームもそのぶん沈みます。足が床に埋まっていないか、足ＩＫの高さを確かめてください")
+        shown = _("・").join(_("{a}F（{cm:.0f}cm）", a=a, cm=d * 100) if a == b else _("{a}〜{b}F（{cm:.0f}cm）", a=a, b=b, cm=d * 100) for a, b, d in runs)
+        log(_("注意: 足の裏がほかのキーより低いキーがあります: {shown}。床は一番低い足で決めるので、"
+              "ほかのフレームもそのぶん沈みます。足が床に埋まっていないか、足ＩＫの高さを確かめてください", shown=shown))
     for old, new, key in job.segment_moves:
-        log(f"区間の始め {old}F の直後にキー（{key}F）があるので、区間の始めを {new}F にずらしました（キーで跳ばないように）")
+        log(_("区間の始め {old}F の直後にキー（{key}F）があるので、区間の始めを {new}F にずらしました（キーで跳ばないように）", old=old, key=key, new=new))
     if not mb:
-        short = [(s0, n) for s0, n, _ in job.segments if n < pipeline.SHORT_SEGMENT] if len(job.segments) > 1 else []
+        short = [(s0, n) for s0, n, _t in job.segments if n < pipeline.SHORT_SEGMENT] if len(job.segments) > 1 else []
         for s0, n in short:
-            log(f"注意: {s0}F からの区間は {n} フレームしかありません。Kimodo はつなぎに前の区間の 5 フレームを使うので、"
-                f"動きが出きらないことがあります（公式のデモは 1 区間 2 秒以上）")
-        if any("぀" <= ch <= "ヿ" or "一" <= ch <= "鿿" for _, _, t in job.segments for ch in t):
-            log("注意: プロンプトに日本語があります。日本語はほとんど効かないので、英語で書いてください"
-                "（例: A person poses cutely, tilting the head.）")
+            log(_("注意: {s0}F からの区間は {n} フレームしかありません。Kimodo はつなぎに前の区間の 5 フレームを使うので、"
+                  "動きが出きらないことがあります（公式のデモは 1 区間 2 秒以上）", s0=s0, n=n))
+        if any("぀" <= ch <= "ヿ" or "一" <= ch <= "鿿" for _s, _n, t in job.segments for ch in t):   # i18n: skip
+            log(_("注意: プロンプトに日本語があります。日本語はほとんど効かないので、英語で書いてください"
+                  "（例: A person poses cutely, tilting the head.）"))
         if len(real) > pipeline.MANY_KEYS:
-            log(f"注意: 体のキーが {len(real)} 個あります。Kimodo の推奨は {pipeline.MANY_KEYS} 個未満です"
-                f"（多いとキーに縛られて動きが硬くなることがあります）")
-    if not mb and not any(t.strip() for _, _, t in job.segments):
-        log("プロンプトが空なので、キー（と腰・手足の目印）だけを手がかりに作ります（プロンプトの効きは関係しません）")
+            log(_("注意: 体のキーが {n} 個あります。Kimodo の推奨は {max} 個未満です"
+                  "（多いとキーに縛られて動きが硬くなることがあります）", n=len(real), max=pipeline.MANY_KEYS))
+    if not mb and not any(t.strip() for _s, _n, t in job.segments):
+        log(_("プロンプトが空なので、キー（と腰・手足の目印）だけを手がかりに作ります（プロンプトの効きは関係しません）"))
     if len(job.segments) > 1 and not mb:
         for s, n, text in job.segments:
-            log(f"  区間 {s}〜{s + n - 1}F: {text}")
+            log(_("  区間 {a}〜{b}F: {prompt}", a=s, b=s + n - 1, prompt=text))
 
     resident.check_cancel()
     if mb:
-        log("MotionBricks で中割り中…")
+        log(_("MotionBricks で中割り中…"))
         result = nakawari.generate(job, os.path.join(WORK_DIR, "motionbricks"), key_stop=settings.key_stop,
                                    wrist_lerp=settings.wrist_lerp, log=log)
     else:
-        log("Kimodo で生成中…")
+        log(_("Kimodo で生成中…"))
         result = pipeline.run_kimodo(job, os.path.join(WORK_DIR, "kimodo"), on_line=lambda l: log("  " + l),
                                      use_llama=settings.use_llama)
     resident.check_cancel()
     if settings.smooth_stop and job.stop_frames:
-        log("MotionBricks で止まり方を作り直し中…")
+        log(_("MotionBricks で止まり方を作り直し中…"))
         result = smooth_stop.apply(job, result, os.path.join(WORK_DIR, "motionbricks"), log=log)
     resident.check_cancel()
     generated = pipeline.build_motion(job, result)
     merged = pipeline.merge(original, generated, job)
     out = os.path.join(cache, f"kimodo_{stamp}.vmd")
-    log(f"間のフレームのキー {len(generated.bones)} 個を差し込みました" + ("" if settings.thin else f" → {out}"))
+    log(_("間のフレームのキー {n} 個を差し込みました", n=len(generated.bones)) + ("" if settings.thin else f" → {out}"))
     if settings.thin:   # 後から手で直しやすいように、曲線で表せる所のキーを落とす（thin.py。11-09 マスター）
-        log(f"キーを間引き中（{thin.level_name(settings.thin)}）…")
+        log(_("キーを間引き中（{level}）…", level=thin.level_name(settings.thin)))
         merged, info = thin.thin_motion(merged, generated, skel, rt, settings.thin)
         if info:   # 1 単位はおよそ 8cm
-            log(f"  モデル全体のキー {info['before']} → {info['after']} 個（キーを置いたフレーム {info['aligned']}・"
-                f"手足や頭のずれ最大 {info['world_max'] * 8:.1f}cm・{info['seconds']:.0f} 秒） → {out}")
+            log(_("  モデル全体のキー {before} → {after} 個（キーを置いたフレーム {aligned}・"
+                  "手足や頭のずれ最大 {cm:.1f}cm・{sec:.0f} 秒） → {out}",
+                  before=info['before'], after=info['after'], aligned=info['aligned'], cm=info['world_max'] * 8, sec=info['seconds'], out=out))
     vmd.write(out, merged)
 
     # ここから MMD に書き戻す。この先は中断しない（キーを消してから読み込むので、途中で止めるとキーが消えたままになる）
@@ -371,17 +374,17 @@ def _generate(settings, log, link, previous, on_commit):
     # 前の記録が指していた控えと結果は、ここで消す（もう「元に戻す」にも作り直しにも使わない。11-11 マスター）。
     # 始めた時ではなくここ: 作り直しは前回の控えを読み、中断・失敗した時の「元に戻す」は前回の控えに戻すので
     _remove_cache_files(_save_last_run(link, backup, out, span, pmx))
-    log("MMD に読み込み中…")
+    log(_("MMD に読み込み中…"))
     # 始めた時のモデルかを確かめてからキーを消す。読み込みに失敗したら、バックアップを読み込み直して消したキーを戻す
     link.load_motion(out, 0, model=pmx, restore=backup)
     back = job.first if cursor is None else cursor   # 読めなかった時は、作った範囲の始め（前の動き）
     why = link.return_to(back)
     if why:   # 動きは入っているので失敗にしない（11-07 マスター。前はエラーの窓で「失敗」と出て、うまくいったのに失敗に見えた）
-        log(f"注意: {back}F へ戻せませんでした（MMD は 0F のままです）: {why}")
+        log(_("注意: {frame}F へ戻せませんでした（MMD は 0F のままです）: {why}", frame=back, why=why))
     err = result.get("key_max_error_m") or [0]
     root_err = result.get("root_key_error_m") or []
-    extra = f"・全ての親のキーとの腰のずれ最大 {max(root_err) * 100:.0f}cm" if root_err else ""
-    log(f"できました（{time.time() - t0:.0f} 秒・生成 {result.get('seconds_generate', 0):.1f} 秒・キーとのずれ最大 {max(err) * 100:.1f}cm{extra}）")
+    extra = _("・全ての親のキーとの腰のずれ最大 {cm:.0f}cm", cm=max(root_err) * 100) if root_err else ""
+    log(_("できました（{sec:.0f} 秒・生成 {gen:.1f} 秒・キーとのずれ最大 {cm:.1f}cm{extra}）", sec=time.time() - t0, gen=result.get('seconds_generate', 0), cm=max(err) * 100, extra=extra))
     return {"backup": backup, "output": out, "job": job, "span": span, "model": pmx}
 
 
@@ -389,7 +392,7 @@ def undo(backup, log=print, link=None, model=None):
     """控えておいた元のモーションを読み込み直す。model: バックアップを取ったモデルの PMX（違うモデルが選ばれていたら止める）。"""
     link = link or MMDLink()
     if not backup or not os.path.exists(backup):
-        raise RuntimeError("元に戻すためのバックアップがありません")
+        raise RuntimeError(_("元に戻すためのバックアップがありません"))
     cursor = link.current_frame()   # 押した時のフレームへ戻す（読めなければ 0F のまま）
     # 読み込みに失敗した時に戻せるよう、押した時の動きも控えておく
     now = os.path.join(paths.cache_dir(), f"before_undo_{time.strftime('%Y%m%d_%H%M%S')}_{link.key.split('-')[0]}.vmd")
@@ -398,9 +401,9 @@ def undo(backup, log=print, link=None, model=None):
     link.read_motion(now)
     link.load_motion(backup, 0, model=model, restore=now)
     why = link.return_to(cursor) if cursor is not None else None
-    log(f"元に戻しました（{backup}）")
+    log(_("元に戻しました（{backup}）", backup=backup))
     if why:
-        log(f"注意: {cursor}F へ戻せませんでした（MMD は 0F のままです）: {why}")
+        log(_("注意: {frame}F へ戻せませんでした（MMD は 0F のままです）: {why}", frame=cursor, why=why))
 
 
 if __name__ == "__main__":

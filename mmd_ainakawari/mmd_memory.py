@@ -12,6 +12,7 @@ from mmd_mcp import bone_state
 from mmd_mcp.windows import list_windows
 
 from . import vmd
+from .i18n import _
 
 # MMDModelData の中の位置（バイト）。ヘッダの static_assert（name_jp 8896・keyframe_editor_toplevel_rows 10104・bone_count 12560）から数えた
 BONE_KEYFRAMES = 10128
@@ -34,7 +35,7 @@ def _chain(read_entry, head):
     out, seen, i = [], set(), head
     while True:
         if i < 0 or i in seen or len(out) >= MAX_KEYS:
-            raise RuntimeError("MMD のキーの並びを読めませんでした（つながりが壊れています）。MMD の操作が終わってからもう一度押してください")
+            raise RuntimeError(_("MMD のキーの並びを読めませんでした（つながりが壊れています）。MMD の操作が終わってからもう一度押してください"))
         seen.add(i)
         e = read_entry(i)
         out.append(e)
@@ -62,7 +63,7 @@ class MotionReader:
     def __init__(self, hwnd):
         target = next((w for w in list_windows() if w.hwnd == hwnd), None)
         if target is None:
-            raise RuntimeError("MMD が閉じられました")
+            raise RuntimeError(_("MMD が閉じられました"))
         self.m = bone_state.BoneMemory(target)
 
     def close(self):
@@ -73,10 +74,10 @@ class MotionReader:
         main = m.pointer(m.base + bone_state.MAIN_POINTER_RVA)
         slot = m.integer(main + bone_state.SELECTED_MODEL)
         if not 0 <= slot < 255:
-            raise RuntimeError("MMD でモデルが選ばれていません")
+            raise RuntimeError(_("MMD でモデルが選ばれていません"))
         model = m.pointer(main + bone_state.MODEL_TABLE + slot * 8)
         if not model:
-            raise RuntimeError("MMD でモデルが選ばれていません")
+            raise RuntimeError(_("MMD でモデルが選ばれていません"))
         return model
 
     def bone_names(self, model, count):
@@ -132,7 +133,8 @@ class MotionReader:
         morphs = m.integer(model + MORPH_COUNT)
         iks = m.integer(model + IK_COUNT)
         if morphs != len(morph_names) or iks != len(ik_names):
-            raise RuntimeError(f"MMD の表情 {morphs}・IK {iks} 個が、PMX の {len(morph_names)}・{len(ik_names)} 個と合いません")
+            raise RuntimeError(_("MMD の表情 {morphs}・IK {iks} 個が、PMX の {pmx_morphs}・{pmx_iks} 個と合いません",
+                                 morphs=morphs, iks=iks, pmx_morphs=len(morph_names), pmx_iks=len(ik_names)))
         names = self.bone_names(model, count)
         bones_at = m.pointer(model + BONE_KEYFRAMES)
 
@@ -196,7 +198,7 @@ class _Reader:
     def take(self, n):
         out = self.data[self.off:self.off + n]
         if len(out) != n:
-            raise ValueError("PMX が途中で終わっています")
+            raise ValueError(_("PMX が途中で終わっています"))
         self.off += n
         return out
 
@@ -214,21 +216,21 @@ def read_pmx_names(path):
     """PMX の (表情の名前の並び, IK のボーンの名前の並び)。MMD のメモリの表情・IK はこの並び。"""
     r = _Reader(open(path, "rb").read())
     if r.take(4) != b"PMX ":
-        raise ValueError(f"PMX ではありません: {path}")
+        raise ValueError(_("PMX ではありません: {path}", path=path))
     r.take(4)   # 版（2.0・2.1）。表情の項目の大きさは 2.1 の種類まで下の item で扱う
     r.take(1)
     enc, uv, vs, ts, ms, bs, mos, rs = r.unpack("<8B")
     r.encoding = "utf-16-le" if enc == 0 else "utf-8"
-    for _ in range(4):
+    for __ in range(4):
         r.text()
-    for _ in range(r.count()):   # 頂点
+    for __ in range(r.count()):   # 頂点
         r.take(32 + 16 * uv)
         skin, = r.unpack("<B")
         r.take({0: bs, 1: 2 * bs + 4, 2: 4 * bs + 16, 3: 2 * bs + 40, 4: 4 * bs + 16}[skin] + 4)
     r.take(r.count() * vs)        # 面
-    for _ in range(r.count()):   # テクスチャ
+    for __ in range(r.count()):   # テクスチャ
         r.text()
-    for _ in range(r.count()):   # 材質
+    for __ in range(r.count()):   # 材質
         r.text()
         r.text()
         r.take(44 + 1 + 20 + 2 * ts + 1)
@@ -237,7 +239,7 @@ def read_pmx_names(path):
         r.text()
         r.take(4)
     iks = []
-    for _ in range(r.count()):   # ボーン
+    for __ in range(r.count()):   # ボーン
         name = r.text()
         r.text()
         r.take(12 + bs + 4)
@@ -254,7 +256,7 @@ def read_pmx_names(path):
         if flags & 0x20:
             iks.append(name)
             r.take(bs + 8)
-            for _ in range(r.count()):
+            for __ in range(r.count()):
                 r.take(bs)
                 limited, = r.unpack("<B")
                 if limited:
@@ -262,7 +264,7 @@ def read_pmx_names(path):
     morphs = []
     item = {0: mos + 4, 1: vs + 12, 2: bs + 28, 3: vs + 16, 4: vs + 16, 5: vs + 16, 6: vs + 16, 7: vs + 16,
             8: ms + 113, 9: mos + 4, 10: rs + 25}
-    for _ in range(r.count()):   # 表情
+    for __ in range(r.count()):   # 表情
         morphs.append(r.text())
         r.text()
         r.take(1)

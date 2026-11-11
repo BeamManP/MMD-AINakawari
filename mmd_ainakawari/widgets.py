@@ -3,7 +3,9 @@ import re
 import tkinter as tk
 from tkinter import ttk
 
-_SEGMENT = re.compile(r"\s*(\d+)\s*[:：]\s*(.*)")
+from .i18n import _
+
+_SEGMENT = re.compile(r"\s*(\d+)\s*[:：]\s*(.*)")   # i18n: skip
 
 
 def set_enabled(widget, on):
@@ -85,11 +87,11 @@ class PromptRows(ttk.Frame):
         for r in others:
             value = r["frame"].get().strip()
             if not value.isdigit():
-                raise ValueError(f"区間の開始フレーム「{value}」が数字ではありません")
+                raise ValueError(_("区間の開始フレーム「{value}」が数字ではありません", value=value))
             segments.append((int(value), r["text"].get().strip()))
         frames = [f for f, _ in segments]
         if len(set(frames)) != len(frames):
-            raise ValueError("同じフレームから始まる区間が 2 つあります")
+            raise ValueError(_("同じフレームから始まる区間が 2 つあります"))
         head = first["text"].get().strip()
         # 最初の行が空で区間がほかにある時は「0:」（空の区間）と書く。ただの空行だと pipeline も load も読み飛ばして、
         # 2 行目の区間が範囲の始まりからになっていた（11-04 Codex のレビュー。空のプロンプトはキーだけで作る）
@@ -99,7 +101,7 @@ class PromptRows(ttk.Frame):
     def _add(self, frame, text):
         text_var = tk.StringVar(value=text)
         if frame is None:
-            head = [ttk.Label(self, text="始め", width=6, anchor="e")]
+            head = [ttk.Label(self, text=_("始め"), width=6, anchor="e")]
             frame_var = None
         else:
             frame_var = tk.StringVar(value=str(frame))

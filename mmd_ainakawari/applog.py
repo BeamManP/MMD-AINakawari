@@ -104,11 +104,11 @@ def setup():
         sys.stdout = _Stream("stdout")
     if sys.stderr is None:
         sys.stderr = _Stream("stderr")
-    sys.excepthook = lambda t, e, tb: _hook("拾われなかった例外:", t, e, tb)
-    threading.excepthook = lambda a: _hook(f"スレッド {a.thread.name if a.thread else '?'} で拾われなかった例外:",
+    sys.excepthook = lambda t, e, tb: _hook("拾われなかった例外:", t, e, tb)   # i18n: skip
+    threading.excepthook = lambda a: _hook(f"スレッド {a.thread.name if a.thread else '?'} で拾われなかった例外:",   # i18n: skip
                                            a.exc_type, a.exc_value, a.exc_traceback)
 
 
 def hook_tk(root):
     """tk のコールバック（ボタン・after など）の例外。tk は既定では stderr に出すだけ。"""
-    root.report_callback_exception = lambda t, e, tb: _hook("窓の処理で拾われなかった例外:", t, e, tb)
+    root.report_callback_exception = lambda t, e, tb: _hook("窓の処理で拾われなかった例外:", t, e, tb)   # i18n: skip

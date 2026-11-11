@@ -29,7 +29,8 @@ import urllib.error
 import urllib.request
 import zipfile
 
-from .. import __version__, gpu, paths
+from .. import __version__, gpu, i18n, paths
+from ..i18n import N_, _
 from . import pins
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -38,6 +39,7 @@ REQUIREMENTS = os.path.join(HERE, "kimodo-requirements.txt")
 ORT_KIMODO = os.path.join(HERE, "ort-kimodo.txt")
 ORT_MOTIONBRICKS = os.path.join(HERE, "ort-motionbricks.txt")
 FETCH_MODEL = os.path.join(HERE, "fetch_kimodo_model.py")
+FETCH_DONE = N_("できました: {path}")   # fetch_kimodo_model.py が落とし終えた時に出す文（Kimodo の Python で回るので、文は引数で渡す）
 TOOLS = os.path.join(paths.HOME, "tools")
 STATE_FILE = "setup_state.json"
 FINISHED = "_finished"   # setup_state.json の中の「最後まで済んだ時の AIナカワリ の版」（段の名前とぶつからない名前）
@@ -72,8 +74,8 @@ NETWORK_RE = re.compile(
     r"Failed to (fetch|download)|error sending request|timed out|timeout|dns error|client error|"
     r"connection (reset|closed|refused|aborted)|os error 1(0053|0054|0060|1001|1002)\b|"
     r"ConnectionError|ReadTimeout|ConnectTimeout|IncompleteRead|ChunkedEncodingError|MaxRetryError|ProtocolError", re.IGNORECASE)
-NETWORK_HINT = ("通信が途中で切れたようです。少し時間をおいて、もう一度「セットアップ」を押してください。"
-                "済んだ手順は飛ばして、続きから始めます。")
+NETWORK_HINT = N_("通信が途中で切れたようです。少し時間をおいて、もう一度「セットアップ」を押してください。"
+                  "済んだ手順は飛ばして、続きから始めます。")
 NETWORK_RETRIES = 2      # 通信の失敗の時に、同じ手順をやり直す回数（最初の 1 回は別）
 NETWORK_WAIT = 10.0      # やり直す前に待つ秒
 DOWNLOAD_RETRIES = 5     # 自前で落とす物（zip・モデル・GGUF）が途中で切れた時に、続きから落とし直す回数
@@ -85,6 +87,11 @@ class Failed(Exception):
 
 class Cancelled(Exception):
     """中止のボタンで止めた。"""
+
+
+def short_title(title):
+    """段の見出しの、（ ）より前の短い名前（日本語は全角の（、英語は " (" で切る）。画面に出す物なので、見分けには使わない。"""
+    return re.split(r"（| \(", title)[0]   # i18n: skip
 
 
 def sha256(path, stop=None):
@@ -119,7 +126,7 @@ def find_uv():
     found = shutil.which("uv")
     if found:
         return found
-    raise Failed(f"セットアップの道具（uv）が見つかりません: {bundled}。zip の中身を全部展開し直してください")
+    raise Failed(_("セットアップの道具（uv）が見つかりません: {path}。zip の中身を全部展開し直してください", path=bundled))
 
 
 def tls_context():
@@ -141,32 +148,33 @@ def motion_correction_info():
         if os.path.isfile(path):
             with open(path, encoding="utf-8") as f:
                 return folder, json.load(f)
-    raise Failed(f"zip の中身が足りません（{PREBUILT}\\{MOTION_CORRECTION_JSON} がありません）。zip の中身を全部展開し直してください")
+    raise Failed(_("zip の中身が足りません（{name} がありません）。zip の中身を全部展開し直してください",
+                   name=f"{PREBUILT}\\{MOTION_CORRECTION_JSON}"))
 
 
 def check_vc_runtime():
     """torch と MotionCorrection は Visual C++ のランタイム（System32 の msvcp140.dll）を要る。zip には入れられないので、無ければ案内する。"""
     system = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
     if not os.path.isfile(os.path.join(system, "msvcp140.dll")):
-        raise Failed("Microsoft Visual C++ 再頒布可能パッケージ（x64）が入っていません。\n"
-                     f"{VC_REDIST_URL} から落として入れてから、もう一度押してください（Microsoft の公式の物です）")
+        raise Failed(_("Microsoft Visual C++ 再頒布可能パッケージ（x64）が入っていません。") + "\n"
+                     + _("{url} から落として入れてから、もう一度押してください（Microsoft の公式の物です）", url=VC_REDIST_URL))
 
 
 def check_folder(dest):
     """入れる場所に使えるか。使えなければ Failed（理由と直し方）。"""
     if not FOLDER_RE.match(dest or ""):
-        raise Failed("入れる場所は「D:\\AINakawari」のような、ドライブから始まる半角の英数字だけのフォルダにしてください。\n"
-                     "日本語・空白・記号（& ( ) など）が入ると、途中の部品が動かないことがあります。")
+        raise Failed(_("入れる場所は「D:\\AINakawari」のような、ドライブから始まる半角の英数字だけのフォルダにしてください。") + "\n"
+                     + _("日本語・空白・記号（& ( ) など）が入ると、途中の部品が動かないことがあります。"))
     drive = os.path.splitdrive(dest)[0] + "\\"
     if not os.path.isdir(drive):
-        raise Failed(f"ドライブ {drive} がありません")
+        raise Failed(_("ドライブ {drive} がありません", drive=drive))
     if (os.path.normcase(os.path.abspath(dest)) + os.sep).startswith(os.path.normcase(paths.HOME) + os.sep):
-        raise Failed(f"AIナカワリ 本体のフォルダ（{paths.HOME}）の中には入れられません。別のフォルダにしてください")
+        raise Failed(_("{name} 本体のフォルダ（{path}）の中には入れられません。別のフォルダにしてください", name=i18n.name(), path=paths.HOME))
     # MMD の plugin\ の下は、MMDPlugin が DLL を奥まで全部読み込もうとして MMD が落ちる（11-05 に踏んだ。11-06 Codex のレビュー）
     folder = os.path.abspath(dest)
     while True:
         if os.path.basename(folder).lower() == "plugin" and os.path.isfile(os.path.join(os.path.dirname(folder), "MikuMikuDance.exe")):
-            raise Failed(f"MMD の plugin フォルダ（{folder}）の中には入れられません。MMD が起動しなくなります。別のフォルダにしてください")
+            raise Failed(_("MMD の plugin フォルダ（{path}）の中には入れられません。MMD が起動しなくなります。別のフォルダにしてください", path=folder))
         parent = os.path.dirname(folder)
         if parent == folder:
             break
@@ -234,38 +242,38 @@ class Setup:
             return globals()["file_sha256"](path, eol)
 
         k = [
-            ("kimodo_src", "kimodo", "Kimodo の本体を落とす", pins.KIMODO_COMMIT, 0.2, self.kimodo_src),
-            ("kimodo_env", "kimodo", "Kimodo の Python の環境を作る（約 5GB）",
+            ("kimodo_src", "kimodo", _("Kimodo の本体を落とす"), pins.KIMODO_COMMIT, 0.2, self.kimodo_src),
+            ("kimodo_env", "kimodo", _("Kimodo の Python の環境を作る（約 5GB）"),
              f"{pins.KIMODO_COMMIT}/{pins.KIMODO_PYTHON}/{file_sha256(REQUIREMENTS)}/{self._prebuilt_version()}", 5.5,
              self.kimodo_env),
-            ("skeleton", "kimodo", "Kimodo の骨格を用意する", file_sha256(os.path.join(TOOLS, "export_skeleton.py")), 0, self.skeleton),
-            ("kimodo_model", "kimodo", "Kimodo のモデルを落とす（約 1GB）", pins.KIMODO_MODEL_REVISION, 1.2, self.kimodo_model),
+            ("skeleton", "kimodo", _("Kimodo の骨格を用意する"), file_sha256(os.path.join(TOOLS, "export_skeleton.py")), 0, self.skeleton),
+            ("kimodo_model", "kimodo", _("Kimodo のモデルを落とす（約 1GB）"), pins.KIMODO_MODEL_REVISION, 1.2, self.kimodo_model),
         ]
         if self.with_text:
             k += [
                 # 文の読み取り（11-07 に bf16 の Llama 約 16GB から GGUF Q8_0 約 8GB ＋ llama.cpp に替えた）
-                ("text_gguf", "kimodo", "プロンプトを読み取るモデルを落とす（約 8GB。いちばん長くかかります）",
+                ("text_gguf", "kimodo", _("プロンプトを読み取るモデルを落とす（約 8GB。いちばん長くかかります）"),
                  f"{pins.TEXT_GGUF_REVISION}/{pins.TEXT_GGUF_FILE[1]}", 8.0, self.text_gguf),
-                ("llamacpp", "kimodo", "プロンプトの読み取りに使う llama.cpp を落とす", pins.LLAMACPP_ZIP[1], 0.1, self.llamacpp),
+                ("llamacpp", "kimodo", _("プロンプトの読み取りに使う llama.cpp を落とす"), pins.LLAMACPP_ZIP[1], 0.1, self.llamacpp),
             ]
         elif any(os.path.isdir(os.path.join(self.kimodo, d)) for d in ("text_encoder", "llamacpp")):
             # 前に入れた Llama を外した時だけ出る段（消し終われば出なくなる）
-            k.append(("text_remove", "kimodo", "プロンプトの読み取り（Llama 3）を消す（約 8GB 空きます）", "removed", 0, self.text_remove))
+            k.append(("text_remove", "kimodo", _("プロンプトの読み取り（Llama 3）を消す（約 8GB 空きます）"), "removed", 0, self.text_remove))
         # 環境を作り直した時に入れ直すように、Kimodo の環境の段より後ろ・試しの生成の前に置く（run は後ろの段をやり直させる）
-        k.append(("kimodo_ort", "kimodo", "ONNX Runtime を Kimodo の環境に入れる（NVIDIA 以外の GPU でも動かすため）",
+        k.append(("kimodo_ort", "kimodo", _("ONNX Runtime を Kimodo の環境に入れる（NVIDIA 以外の GPU でも動かすため）"),
                   file_sha256(ORT_KIMODO), 0.2, self.kimodo_ort))
-        k.append(("kimodo_test", "kimodo", "Kimodo が動くか確かめる（2 秒の動きを試しに作る）",
+        k.append(("kimodo_test", "kimodo", _("Kimodo が動くか確かめる（2 秒の動きを試しに作る）"),
                   f"{pins.KIMODO_COMMIT}/{file_sha256(os.path.join(TOOLS, 'gguf_text.py'))}/{'text' if self.with_text else 'samples'}"
                   f"/{file_sha256(os.path.join(TOOLS, 'kimodo_ort.py'))}/{gpu_tag()}",
                   1.2, self.kimodo_test))   # 1.2GB は DirectML の時に書き出す ONNX（CUDA で動く PC では作らない）
         m = [
-            ("mb_src", "mb", "MotionBricks の本体を落とす", pins.MOTIONBRICKS_COMMIT, 0.2, self.mb_src),
-            ("mb_models", "mb", "MotionBricks のモデルを落とす（約 1.1GB）", pins.MOTIONBRICKS_COMMIT, 1.2, self.mb_models),
-            ("mb_env", "mb", "MotionBricks の Python の環境を作る（約 3GB）",
+            ("mb_src", "mb", _("MotionBricks の本体を落とす"), pins.MOTIONBRICKS_COMMIT, 0.2, self.mb_src),
+            ("mb_models", "mb", _("MotionBricks のモデルを落とす（約 1.1GB）"), pins.MOTIONBRICKS_COMMIT, 1.2, self.mb_models),
+            ("mb_env", "mb", _("MotionBricks の Python の環境を作る（約 3GB）"),
              f"{pins.MOTIONBRICKS_COMMIT}/{pins.MOTIONBRICKS_PYTHON}", 3.3, self.mb_env),
-            ("mb_ort", "mb", "ONNX Runtime を MotionBricks の環境に入れる（NVIDIA 以外の GPU でも動かすため）",
+            ("mb_ort", "mb", _("ONNX Runtime を MotionBricks の環境に入れる（NVIDIA 以外の GPU でも動かすため）"),
              file_sha256(ORT_MOTIONBRICKS), 0.2, self.mb_ort),
-            ("mb_test", "mb", "MotionBricks が動くか確かめる（1 秒の動きを試しに作る。初回は数分かかる）",
+            ("mb_test", "mb", _("MotionBricks が動くか確かめる（1 秒の動きを試しに作る。初回は数分かかる）"),
              f"{pins.MOTIONBRICKS_COMMIT}/{file_sha256(os.path.join(TOOLS, 'mb_ort.py'))}/{gpu_tag()}", 0.8, self.mb_test),
         ]
         # MotionBricks は選ばせずに必ず入れる（11-06 マスター。前は画面で選べた）
@@ -372,29 +380,30 @@ class Setup:
         os.makedirs(self.dest, exist_ok=True)
         need, free = self.remaining_gb(), free_gb(self.dest)
         if free < need:
-            raise Failed(f"空きが足りません。残りの手順で約 {need:.0f}GB 使いますが、{os.path.splitdrive(self.dest)[0]} の空きは "
-                         f"{free:.0f}GB です。空きを作るか、別のドライブを選んでください")
+            raise Failed(_("空きが足りません。残りの手順で約 {need:.0f}GB 使いますが、{drive} の空きは {free:.0f}GB です。"
+                           "空きを作るか、別のドライブを選んでください", need=need, drive=os.path.splitdrive(self.dest)[0], free=free))
         check_vc_runtime()
         motion_correction_info()   # 部品が欠けた zip なら、落とし始める前に止める
         self.uv = find_uv()
-        self.log(f"入れる場所: {self.dest}（空き {free:.0f}GB・残りの手順で約 {need:.0f}GB）")
+        self.log(_("入れる場所: {path}（空き {free:.0f}GB・残りの手順で約 {need:.0f}GB）", path=self.dest, free=free, need=need))
         self.log(f"uv: {self.uv}")
         state = self.load_state()
         state[WITH_TEXT] = self.with_text
         if not self.with_text:   # 後でまた入れる時に、落とし直すように
             for key in TEXT_STEPS:
                 state.pop(key, None)
-        self.log("プロンプトの読み取り（Llama 3）: " + ("入れます" if self.with_text else "入れません（「サンプルから選ぶ」の文だけで作ります）"))
+        self.log(_("プロンプトの読み取り（Llama 3）: 入れます") if self.with_text
+                 else _("プロンプトの読み取り（Llama 3）: 入れません（「サンプルから選ぶ」の文だけで作ります）"))
         steps = self.steps()
         ran = 0
         for i, (key, group, title, version, _gb, fn) in enumerate(steps):
             if key in self.finished_steps(state):
                 # 済んだ印があっても、中身を確かめてから飛ばす（intact）。欠けていれば、印を無視してやり直す
-                self.progress(f"点検しています: {title.split('（')[0]}")
+                self.progress(_("点検しています: {name}", name=short_title(title)))
                 if self.intact(key):
                     self.on_step(key, "skip")
                     continue
-                self.log(f"―― 点検: 「{title.split('（')[0]}」は済んだ印がありますが、中身が欠けているので、やり直します")
+                self.log(_("―― 点検: 「{name}」は済んだ印がありますが、中身が欠けているので、やり直します", name=short_title(title)))
             ran += 1
             for later in steps[i + 1:]:   # 後ろの段は作り直しの影響を受けうるので、やり直させる
                 if later[1] == group:
@@ -417,13 +426,13 @@ class Setup:
             state.update(self.found)
             self.save_state(state)
             self.on_step(key, "done")
-            self.log(f"   済み（{time.time() - t0:.0f} 秒）")
+            self.log("   " + _("済み（{s:.0f} 秒）", s=time.time() - t0))
         shutil.rmtree(self.downloads, ignore_errors=True)
         state[FINISHED] = __version__   # 最後まで済んだ印（status の「途中」と「更新あり」を分ける）
         self.save_state(state)
         self.register()
         self.progress("")
-        self.log("セットアップが終わりました" if ran else "点検しました。欠けている物はありませんでした")
+        self.log(_("セットアップが終わりました") if ran else _("点検しました。欠けている物はありませんでした"))
 
     def register(self):
         """この窓の paths.json に場所を書く。全部の段が済んでいて飛ばした時も書く（別の MMD に入れた AIナカワリから、
@@ -434,7 +443,7 @@ class Setup:
         state = self.load_state()
         for name, key in BACKEND_STATE.items():   # 0.2.x までにセットアップした場所には印が無い（cuda で動いていた）
             paths.save_backend(name, state.get(key) if state.get(key) in paths.BACKENDS else "cuda")
-        self.log(f"この場所を使うように設定しました（{paths.PATHS_FILE}）")
+        self.log(_("この場所を使うように設定しました（{path}）", path=paths.PATHS_FILE))
 
     def cancel(self):
         self._stop.set()
@@ -481,9 +490,10 @@ class Setup:
                 if not getattr(e, "network", False):
                     raise
                 if attempt == retries:
-                    raise Failed(NETWORK_HINT + "\n" + str(e)) from None
-                self.log(f"  通信が途中で切れたようです。{NETWORK_WAIT:.0f} 秒待って、続きからもう一度試します（{attempt + 2} 回目／全 {retries + 1} 回）")
-                self.progress(f"{what}: 通信が切れたので、少し待ってやり直します…")
+                    raise Failed(_(NETWORK_HINT) + "\n" + str(e)) from None
+                self.log("  " + _("通信が途中で切れたようです。{s:.0f} 秒待って、続きからもう一度試します（{n} 回目／全 {total} 回）",
+                                   s=NETWORK_WAIT, n=attempt + 2, total=retries + 1))
+                self.progress(_("{what}: 通信が切れたので、少し待ってやり直します…", what=what))
                 if self._stop.wait(NETWORK_WAIT):
                     raise Cancelled()
 
@@ -517,15 +527,18 @@ class Setup:
             elapsed = time.time() - started
             if elapsed < 4 and not last[0]:
                 return
-            text = f"{what}… {int(elapsed // 60)} 分 {int(elapsed % 60):02d} 秒"
+            text = _("{what}… {m} 分 {s:02d} 秒", what=what, m=int(elapsed // 60), s=int(elapsed % 60))
             free_now = self._free_bytes()
             if free_before is not None and free_now is not None and free_before - free_now >= 50 * 2**20:
-                text += f"・ここまでに約 {(free_before - free_now) / 2**30:.1f}GB"
-            self.progress(text + (f"　{last[0]}" if last[0] else ""))
+                text += _("・ここまでに約 {gb:.1f}GB", gb=(free_before - free_now) / 2**30)
+            self.progress(text + (_("　") + last[0] if last[0] else ""))
+
+        lang = i18n.lang()   # この裏のスレッドの言葉（新しいスレッドには引き継がれない）
 
         def tick():
-            while not done.wait(2.0) and proc.poll() is None:
-                show()
+            with i18n.use(lang):
+                while not done.wait(2.0) and proc.poll() is None:
+                    show()
         threading.Thread(target=tick, daemon=True).start()
 
         def emit(line, overwrite):
@@ -542,8 +555,9 @@ class Setup:
                 elif end:
                     active.pop(end.group(1), None)
                 if start or end:
-                    names = [f"{name}（{size}）" for name, size in list(active.items())[:2]]
-                    last[0] = ("落としている物: " + "・".join(names) + (f" ほか {len(active) - 2} 個" if len(active) > 2 else "")) if names else ""
+                    names = [_("{name}（{size}）", name=name, size=size) for name, size in list(active.items())[:2]]
+                    last[0] = (_("落としている物: ") + _("・").join(names)
+                               + (_(" ほか {n} 個", n=len(active) - 2) if len(active) > 2 else "")) if names else ""
                 else:
                     last[0] = text.strip()[-90:]
                 show()
@@ -581,7 +595,7 @@ class Setup:
         if self._stop.is_set():
             raise Cancelled()
         if rc != 0:
-            error = Failed(f"「{what}」で失敗しました（終了コード {rc}）。\n" + "\n".join(tail[-6:]))
+            error = Failed(_("「{what}」で失敗しました（終了コード {rc}）。", what=what, rc=rc) + "\n" + "\n".join(tail[-6:]))
             error.network = bool(NETWORK_RE.search("\n".join(tail)))   # call が、待ってやり直すかを決める
             raise error
 
@@ -608,11 +622,11 @@ class Setup:
                     if not getattr(e, "network", False):
                         raise
                     if attempt == DOWNLOAD_RETRIES:
-                        raise Failed(NETWORK_HINT + "\n" + str(e)) from None
+                        raise Failed(_(NETWORK_HINT) + "\n" + str(e)) from None
                     have = os.path.getsize(part) if os.path.exists(part) else 0
-                    self.log(f"  {label}: 通信が途中で切れました。{NETWORK_WAIT:.0f} 秒待って、続き（{have / 1e6:,.0f} MB）から落とします"
-                             f"（{attempt + 2} 回目／全 {DOWNLOAD_RETRIES + 1} 回）")
-                    self.progress(f"{label}: 通信が切れたので、少し待って続きから落とします…")
+                    self.log("  " + _("{label}: 通信が途中で切れました。{s:.0f} 秒待って、続き（{mb:,.0f} MB）から落とします（{n} 回目／全 {total} 回）",
+                                       label=label, s=NETWORK_WAIT, mb=have / 1e6, n=attempt + 2, total=DOWNLOAD_RETRIES + 1))
+                    self.progress(_("{label}: 通信が切れたので、少し待って続きから落とします…", label=label))
                     if self._stop.wait(NETWORK_WAIT):
                         raise Cancelled()
             if not os.path.exists(part):   # 断られて照らして合い、もう置いた（_fetch の中）
@@ -624,12 +638,13 @@ class Setup:
         if verified:
             return
         if size is not None and os.path.getsize(part) != size:
-            raise Failed(f"{label} の大きさが違います（{os.path.getsize(part)} バイト・正しくは {size}）。もう一度押してください")
+            raise Failed(_("{label} の大きさが違います（{actual} バイト・正しくは {size}）。もう一度押してください",
+                           label=label, actual=os.path.getsize(part), size=size))
         if digest:
-            self.progress(f"{label}: 中身を確かめています")
+            self.progress(_("{label}: 中身を確かめています", label=label))
             if sha256(part, self._stop) != digest:
                 os.remove(part)
-                raise Failed(f"{label} の中身が違います（壊れて届いたかもしれません）。もう一度押してください")
+                raise Failed(_("{label} の中身が違います（壊れて届いたかもしれません）。もう一度押してください", label=label))
         os.replace(part, target)
 
     def _fetch(self, url, part, have, label, size, digest, retry):
@@ -646,11 +661,11 @@ class Setup:
                 os.remove(part)
                 if retry:
                     return self._fetch(url, part, 0, label, size, digest, False)
-            error = Failed(f"{label} を落とせませんでした（{e}）。もう一度押してください")
+            error = Failed(_("{label} を落とせませんでした（{error}）。もう一度押してください", label=label, error=e))
             error.network = e.code >= 500 or e.code in (408, 429)   # 相手の都合・混雑は、待ってやり直す（download）
             raise error from None
         except OSError as e:
-            error = Failed(f"{label} を落とせませんでした（{e}）。ネットにつながっているか確かめて、もう一度押してください")
+            error = Failed(_("{label} を落とせませんでした（{error}）。ネットにつながっているか確かめて、もう一度押してください", label=label, error=e))
             error.network = True
             raise error from None
         with response:
@@ -667,15 +682,15 @@ class Setup:
                     try:
                         block = response.read(1 << 20)
                     except OSError as e:
-                        error = Failed(f"{label} を落とす途中で切れました（{e}）。もう一度押すと続きから落とします")
+                        error = Failed(_("{label} を落とす途中で切れました（{error}）。もう一度押すと続きから落とします", label=label, error=e))
                         error.network = True
                         raise error from None
                     if not block:
                         # 相手が途中で接続を閉じると、読み取りは例外を出さずに空で終わることがある。届いた量が足りなければ
                         # 「途中で切れた」と見る（前は落とし終わったと見て、後で「大きさが違います」で止まっていた。11-10 のテストで気づいた）
                         if total and done < total:
-                            error = Failed(f"{label} を落とす途中で切れました（{done / 1e6:,.0f} / {total / 1e6:,.0f} MB）。"
-                                           f"もう一度押すと続きから落とします")
+                            error = Failed(_("{label} を落とす途中で切れました（{done:,.0f} / {total:,.0f} MB）。もう一度押すと続きから落とします",
+                                             label=label, done=done / 1e6, total=total / 1e6))
                             error.network = True
                             raise error
                         break
@@ -683,8 +698,9 @@ class Setup:
                     done += len(block)
                     if time.time() - last > 0.5:
                         last = time.time()
-                        self.progress(f"{label}: {done / 1e6:,.0f} / {total / 1e6:,.0f} MB（{done * 100 // total}%）" if total
-                                      else f"{label}: {done / 1e6:,.0f} MB")
+                        self.progress(_("{label}: {done:,.0f} / {total:,.0f} MB（{pct}%）", label=label, done=done / 1e6, total=total / 1e6,
+                                        pct=done * 100 // total) if total
+                                      else _("{label}: {done:,.0f} MB", label=label, done=done / 1e6))
 
     def fetch_zip(self, url, name, into, keep=()):
         """GitHub の zip を落として、中の 1 つのフォルダの中身を into に置く。keep の名前の物（.venv など）は into に残す。
@@ -700,19 +716,19 @@ class Setup:
             shutil.rmtree(keep_dir, ignore_errors=True)
         archive = os.path.join(self.downloads, f"{name}.zip")
         if not os.path.isfile(archive):
-            self.download(url, archive, f"{name} の zip")
+            self.download(url, archive, _("{name} の zip", name=name))
         work = into + ".extract"
         shutil.rmtree(work, ignore_errors=True)
-        self.progress(f"{name} の zip を展開しています")
+        self.progress(_("{name} の zip を展開しています", name=name))
         try:
             with zipfile.ZipFile(archive) as z:
                 z.extractall(work)
         except zipfile.BadZipFile:
             os.remove(archive)
-            raise Failed(f"{name} の zip が壊れていました。もう一度押すと落とし直します") from None
+            raise Failed(_("{name} の zip が壊れていました。もう一度押すと落とし直します", name=name)) from None
         tops = os.listdir(work)
         if len(tops) != 1:
-            raise Failed(f"{name} の zip の中身が正しくありません（{tops[:3]}）")
+            raise Failed(_("{name} の zip の中身が正しくありません（{tops}）", name=name, tops=tops[:3]))
         top = os.path.join(work, tops[0])
         if os.path.isdir(into):
             os.makedirs(keep_dir, exist_ok=True)
@@ -740,7 +756,8 @@ class Setup:
         forced = [b.strip() for b in os.environ.get(BACKEND_ORDER_ENV, "").split(",") if b.strip()]
         if forced:
             if any(b not in paths.BACKENDS for b in forced):
-                raise Failed(f"{BACKEND_ORDER_ENV}={os.environ[BACKEND_ORDER_ENV]!r} は {' / '.join(paths.BACKENDS)} の並びにしてください")
+                raise Failed(_("{env}={value} は {choices} の並びにしてください", env=BACKEND_ORDER_ENV, value=repr(os.environ[BACKEND_ORDER_ENV]),
+                           choices=" / ".join(paths.BACKENDS)))
             return forced
         return (["cuda"] if shutil.which("nvidia-smi") else []) + ["directml", "cpu"]
 
@@ -750,13 +767,13 @@ class Setup:
         GPU の世代を決め打ちしないための作り: 今の PyTorch（CUDA 12.8）や TensorRT で動かない NVIDIA の GPU も、ここで DirectML に落ちる。"""
         order = self.backends_to_try()
         for i, backend in enumerate(order):
-            self.log(f"  計算の方式: {paths.BACKEND_LABEL[backend]} で試します")
+            self.log("  " + _("計算の方式: {backend} で試します", backend=_(paths.BACKEND_LABEL[backend])))
             try:
                 attempt(backend)
             except Failed as e:
                 if i == len(order) - 1:
                     raise
-                self.log(f"  {label} は {paths.BACKEND_LABEL[backend]} では動きませんでした。次の方式で試します:")
+                self.log("  " + _("{label} は {backend} では動きませんでした。次の方式で試します:", label=label, backend=_(paths.BACKEND_LABEL[backend])))
                 for line in str(e).splitlines():
                     self.log("    " + line)
                 continue
@@ -767,7 +784,7 @@ class Setup:
     def kimodo_src(self):
         self.fetch_zip(pins.KIMODO_ZIP, f"kimodo-{pins.KIMODO_COMMIT[:7]}", os.path.join(self.kimodo, "repo"))
 
-    def stop_residents(self, why="環境を作り直すため"):
+    def stop_residents(self, why=N_("環境を作り直すため")):
         """常駐の Kimodo・MotionBricks がいれば終わらせる。
         環境を作り直す前: 常駐が環境のファイルをつかんでいると、uv が古い環境を消せずに「アクセスが拒否されました」で止まり、
         環境が途中まで消えた形で残る（11-10 に検証用の MMD で踏んだ）。
@@ -776,23 +793,23 @@ class Setup:
             from .. import pipeline, resident, smooth_stop
             for name, port in ((pipeline.KIMODO_NAME, pipeline.KIMODO_PORT), ("MotionBricks", smooth_stop.MB_PORT)):
                 if resident.stop(name, port):
-                    self.log(f"  常駐の {name} を終わらせました（{why}）")
+                    self.log("  " + _("常駐の {name} を終わらせました（{why}）", name=name, why=_(why)))
         except Exception as e:   # 終わらせられなくても、作り直しは試す（だめなら uv の失敗がそのまま出る）
-            self.log(f"  常駐を終わらせられませんでした（{type(e).__name__}: {e}）")
+            self.log("  " + _("常駐を終わらせられませんでした（{kind}: {error}）", kind=type(e).__name__, error=e))
 
     def kimodo_env(self):
         self.stop_residents()
         venv = os.path.join(self.kimodo, ".venv")
-        self.log("  PyTorch など約 5GB を落として入れます（いちばん大きい物は 1 個で約 2.5GB）。回線によって 10 分〜1 時間ほどかかります")
-        self.log("  下の青い字の時間と量が増えていれば、進んでいます。通信が切れた時は、自動で続きからやり直します")
-        self.call([self.uv, "venv", venv, "--python", pins.KIMODO_PYTHON, "--clear"], "Python の用意", retries=NETWORK_RETRIES)
+        self.log("  " + _("PyTorch など約 5GB を落として入れます（いちばん大きい物は 1 個で約 2.5GB）。回線によって 10 分〜1 時間ほどかかります"))
+        self.log("  " + _("下の青い字の時間と量が増えていれば、進んでいます。通信が切れた時は、自動で続きからやり直します"))
+        self.call([self.uv, "venv", venv, "--python", pins.KIMODO_PYTHON, "--clear"], _("Python の用意"), retries=NETWORK_RETRIES)
         py = self.kimodo_python()
         self.call([self.uv, "pip", "install", "--python", py, "--require-hashes", "--index-strategy", "unsafe-best-match",
-                   "-r", REQUIREMENTS], "Kimodo の部品を入れる", retries=NETWORK_RETRIES)
+                   "-r", REQUIREMENTS], _("Kimodo の部品を入れる"), retries=NETWORK_RETRIES)
         # kimodo 本体は部品表に入れられない（GitHub の zip）ので、部品を入れた後に依存なしで入れる。
         # C++ の部品は組み立てない（SKIP_MOTION_CORRECTION_IN_SETUP は kimodo の setup.py の切り替え）。組み立て済みの物を後で置く
         self.call([self.uv, "pip", "install", "--python", py, "--no-deps", "--no-build-isolation",
-                   os.path.join(self.kimodo, "repo")], "Kimodo を入れる", SKIP_MOTION_CORRECTION_IN_SETUP="1")
+                   os.path.join(self.kimodo, "repo")], _("Kimodo を入れる"), SKIP_MOTION_CORRECTION_IN_SETUP="1")
         self.place_motion_correction()
 
     def _prebuilt_version(self):
@@ -805,34 +822,34 @@ class Setup:
         """motion_correction の .py（kimodo の zip から）と、組み立て済みの pyd を Kimodo の環境に置いて、読めるか確かめる。"""
         folder, info = motion_correction_info()
         if info.get("kimodo_commit") != pins.KIMODO_COMMIT:
-            raise Failed(f"zip の中の部品が、別の版の Kimodo 用です（{info.get('kimodo_commit')}）。zip を落とし直してください")
+            raise Failed(_("zip の中の部品が、別の版の Kimodo 用です（{commit}）。zip を落とし直してください", commit=info.get("kimodo_commit")))
         pyd = os.path.join(folder, info["file"])
         if not os.path.isfile(pyd) or sha256(pyd) != info["sha256"]:
-            raise Failed(f"zip の中の部品（{pyd}）が無いか、壊れています。zip を落とし直してください")
+            raise Failed(_("zip の中の部品（{path}）が無いか、壊れています。zip を落とし直してください", path=pyd))
         src = os.path.join(self.kimodo, "repo", "MotionCorrection", "python", "motion_correction")
         site = os.path.join(self.kimodo, ".venv", "Lib", "site-packages", "motion_correction")
         shutil.rmtree(site, ignore_errors=True)
         shutil.copytree(src, site, ignore=shutil.ignore_patterns("__pycache__", "*.pyd", "*.so"))
         shutil.copyfile(pyd, os.path.join(site, info["file"]))
         self.call([self.kimodo_python(), "-c", "import torch, motion_correction._motion_correction; print('motion_correction ok')"],
-                  "組み立て済みの部品の読み込み")
+                  _("組み立て済みの部品の読み込み"))
 
     def kimodo_ort(self):
         self.call([self.uv, "pip", "install", "--python", self.kimodo_python(), "--require-hashes", "-r", ORT_KIMODO],
-                  "ONNX Runtime を入れる（Kimodo）", retries=NETWORK_RETRIES)
+                  _("ONNX Runtime を入れる（Kimodo）"), retries=NETWORK_RETRIES)
         self.call([self.kimodo_python(), "-c",
                    "import onnx, onnxruntime; print('onnxruntime', onnxruntime.__version__, onnxruntime.get_available_providers())"],
-                  "ONNX Runtime の読み込み（Kimodo）")
+                  _("ONNX Runtime の読み込み（Kimodo）"))
 
     def skeleton(self):
         os.makedirs(os.path.join(self.kimodo, "tools"), exist_ok=True)
         self.call([self.kimodo_python(), os.path.join(TOOLS, "export_skeleton.py"),
-                   os.path.join(self.kimodo, "tools", "somaskel30.json")], "骨格の書き出し")
+                   os.path.join(self.kimodo, "tools", "somaskel30.json")], _("骨格の書き出し"))
 
     def kimodo_model(self):
         cache = os.path.join(self.kimodo, "hf_cache")
-        self.call([self.kimodo_python(), FETCH_MODEL, cache, pins.KIMODO_MODEL_REPO, pins.KIMODO_MODEL_REVISION],
-                  "Kimodo のモデルを落とす", retries=NETWORK_RETRIES, HF_HUB_CACHE=cache)
+        self.call([self.kimodo_python(), FETCH_MODEL, cache, pins.KIMODO_MODEL_REPO, pins.KIMODO_MODEL_REVISION, _(FETCH_DONE)],
+                  _("Kimodo のモデルを落とす"), retries=NETWORK_RETRIES, HF_HUB_CACHE=cache)
 
     def text_gguf(self):
         """文の読み取りの GGUF（約 8GB）とライセンスの文を <kimodo>\\text_encoder に置く。GGUF は sha256 で照らしてから名前を付ける。"""
@@ -842,23 +859,23 @@ class Setup:
         url = lambda n: pins.TEXT_GGUF_URL.format(repo=pins.TEXT_GGUF_REPO, revision=pins.TEXT_GGUF_REVISION, name=n)
         os.makedirs(folder, exist_ok=True)
         if os.path.isfile(target) and os.path.getsize(target) == size:
-            self.progress(f"{name}: 中身を確かめています")
+            self.progress(_("{label}: 中身を確かめています", label=name))
             if sha256(target, self._stop) == digest:
-                self.log(f"  もう置いてありました: {name}")
+                self.log("  " + _("もう置いてありました: {name}", name=name))
                 target = None
         if target and self.reuse_text_gguf:   # 開発用: 手元の物を照らしてから写す（同じドライブならハードリンク）
-            self.progress(f"{self.reuse_text_gguf}: 中身を確かめています")
+            self.progress(_("{label}: 中身を確かめています", label=self.reuse_text_gguf))
             if sha256(self.reuse_text_gguf, self._stop) != digest:
-                raise Failed(f"写す元の GGUF の中身が違います（{self.reuse_text_gguf}）")
+                raise Failed(_("写す元の GGUF の中身が違います（{path}）", path=self.reuse_text_gguf))
             try:
                 os.link(self.reuse_text_gguf, target)
             except OSError:
                 shutil.copyfile(self.reuse_text_gguf, target)
-            self.log(f"  写しました: {self.reuse_text_gguf}")
+            self.log("  " + _("写しました: {path}", path=self.reuse_text_gguf))
             target = None
         if target:
             self.download(url(name), target, name, digest=digest, size=size)
-            self.log(f"  落としました: {name}")
+            self.log("  " + _("落としました: {name}", name=name))
         for n in pins.TEXT_GGUF_LICENSES:   # Llama 3 のライセンスの文などを、モデルの横に置く（ライセンスの決まり）
             self.download(url(n), os.path.join(folder, n), n)
 
@@ -866,27 +883,27 @@ class Setup:
         """llama.cpp の CPU 版の zip（sha256 で照らす）を <kimodo>\\llamacpp に展開する。使うのは llama-server.exe だけ。"""
         url, digest, size = pins.LLAMACPP_ZIP
         archive = os.path.join(self.downloads, os.path.basename(url))
-        self.download(url, archive, "llama.cpp の zip", digest=digest, size=size)
+        self.download(url, archive, _("llama.cpp の zip"), digest=digest, size=size)
         into = os.path.join(self.kimodo, "llamacpp")
         work = into + ".extract"
         shutil.rmtree(work, ignore_errors=True)
-        self.progress("llama.cpp の zip を展開しています")
+        self.progress(_("llama.cpp の zip を展開しています"))
         with zipfile.ZipFile(archive) as z:
             z.extractall(work)
         if not os.path.isfile(os.path.join(work, "llama-server.exe")):
-            raise Failed("llama.cpp の zip の中身が正しくありません（llama-server.exe がありません）")
+            raise Failed(_("llama.cpp の zip の中身が正しくありません（llama-server.exe がありません）"))
         shutil.rmtree(into, ignore_errors=True)
         os.replace(work, into)
-        self.call([os.path.join(into, "llama-server.exe"), "--version"], "llama.cpp の版を確かめる")
+        self.call([os.path.join(into, "llama-server.exe"), "--version"], _("llama.cpp の版を確かめる"))
 
     def text_remove(self):
         """前に入れたプロンプトの読み取り（GGUF 約 8GB・llama.cpp）を消す（セットアップで外した時。消す前に窓で確かめる）。"""
         for d in ("text_encoder", "llamacpp"):
             folder = os.path.join(self.kimodo, d)
             if os.path.isdir(folder):
-                self.progress(f"{folder} を消しています")
+                self.progress(_("{path} を消しています", path=folder))
                 shutil.rmtree(folder)
-                self.log(f"  消しました: {folder}")
+                self.log("  " + _("消しました: {path}", path=folder))
 
     def kimodo_test(self):
         """常駐と同じ置き方で 1 回作る。通ったら paths.json に書く。
@@ -898,18 +915,18 @@ class Setup:
         with open(req, "w", encoding="utf-8") as f:
             json.dump({"prompt": "A person walks forward.", "num_frames": 60, "seed": 0}, f)
         if self.with_text:
-            self.log("  初めての読み込みなので 1〜2 分かかります（プロンプトを読み取るモデル約 8GB をメインメモリに読みます）")
+            self.log("  " + _("初めての読み込みなので 1〜2 分かかります（プロンプトを読み取るモデル約 8GB をメインメモリに読みます）"))
         else:
-            self.log("  初めての読み込みなので 1 分ほどかかります（プロンプトはサンプルの読み取り結果を使います）")
+            self.log("  " + _("初めての読み込みなので 1 分ほどかかります（プロンプトはサンプルの読み取り結果を使います）"))
 
         def attempt(backend):
             if os.path.exists(out):
                 os.remove(out)
             if backend == "directml":
-                self.log("  DirectML では、初回だけ Kimodo のモデルを ONNX に書き出します（約 1.2GB・1 分ほど）")
+                self.log("  " + _("DirectML では、初回だけ Kimodo のモデルを ONNX に書き出します（約 1.2GB・1 分ほど）"))
             elif backend == "cpu":
-                self.log("  GPU を使わずに作ります（2 秒の動きに 1 分ほどかかります）")
-            self.call([self.kimodo_python(), os.path.join(TOOLS, "kimodo_gen.py"), req, out], "Kimodo の試しの生成", cwd=self.kimodo,
+                self.log("  " + _("GPU を使わずに作ります（2 秒の動きに 1 分ほどかかります）"))
+            self.call([self.kimodo_python(), os.path.join(TOOLS, "kimodo_gen.py"), req, out], _("Kimodo の試しの生成"), cwd=self.kimodo,
                       HF_HUB_CACHE=os.path.join(self.kimodo, "hf_cache"), LOCAL_CACHE="true", HF_HUB_OFFLINE="1",
                       AINAKAWARI_LLAMA_SERVER=os.path.join(self.kimodo, "llamacpp", "llama-server.exe"),
                       AINAKAWARI_TEXT_GGUF=os.path.join(self.kimodo, "text_encoder", pins.TEXT_GGUF_FILE[0]), AINAKAWARI_LOG_DIR=work,
@@ -917,7 +934,7 @@ class Setup:
                       AINAKAWARI_BACKEND=backend, AINAKAWARI_ORT_CACHE=os.path.join(self.kimodo, "ort_cache"))
             with open(out, encoding="utf-8") as f:
                 if not json.load(f).get("num_frames"):
-                    raise Failed(f"Kimodo の試しの生成の結果が空でした（{out}）")
+                    raise Failed(_("Kimodo の試しの生成の結果が空でした（{path}）", path=out))
 
         backend = self.try_backends("kimodo", "Kimodo", attempt)
         with open(out, encoding="utf-8") as f:
@@ -925,8 +942,9 @@ class Setup:
         paths.check(self.kimodo, "Kimodo")
         paths.save(kimodo=self.kimodo)   # 通ってから、場所と方式を書く
         paths.save_backend("kimodo", backend)
-        self.stop_residents("次の生成から、選んだ計算の方式で動かすため")
-        self.log(f"  Kimodo で {frames} フレーム作れました（計算の方式: {paths.BACKEND_LABEL[backend]}）。この場所を使うように設定しました")
+        self.stop_residents(N_("次の生成から、選んだ計算の方式で動かすため"))
+        self.log("  " + _("Kimodo で {frames} フレーム作れました（計算の方式: {backend}）。この場所を使うように設定しました",
+                        frames=frames, backend=_(paths.BACKEND_LABEL[backend])))
 
     # ---- MotionBricks -------------------------------------------------------------------------------
     def mb_src(self):
@@ -937,32 +955,32 @@ class Setup:
             target = os.path.join(self.mb, *path.split("/"))
             name = path.rsplit("/", 1)[-1]
             if os.path.isfile(target) and os.path.getsize(target) == size:
-                self.progress(f"{name}: 中身を確かめています")
+                self.progress(_("{label}: 中身を確かめています", label=name))
                 if sha256(target, self._stop) == digest:
                     continue
             url = pins.MOTIONBRICKS_LFS_URL.format(commit=pins.MOTIONBRICKS_COMMIT, path=path)
             self.download(url, target, name, digest=digest, size=size)
-            self.log(f"  落としました: {name}")
+            self.log("  " + _("落としました: {name}", name=name))
 
     def mb_env(self):
         self.stop_residents()
-        self.log("  約 3GB を落として入れます。下の青い字の時間と量が増えていれば、進んでいます")
-        self.call([self.uv, "sync", "--frozen", "--python", pins.MOTIONBRICKS_PYTHON], "MotionBricks の部品を入れる", cwd=self.mb,
+        self.log("  " + _("約 3GB を落として入れます。下の青い字の時間と量が増えていれば、進んでいます"))
+        self.call([self.uv, "sync", "--frozen", "--python", pins.MOTIONBRICKS_PYTHON], _("MotionBricks の部品を入れる"), cwd=self.mb,
                   retries=NETWORK_RETRIES)
 
     def mb_ort(self):
         self.call([self.uv, "pip", "install", "--python", self.mb_python(), "--require-hashes", "-r", ORT_MOTIONBRICKS],
-                  "ONNX Runtime を入れる（MotionBricks）", retries=NETWORK_RETRIES)
+                  _("ONNX Runtime を入れる（MotionBricks）"), retries=NETWORK_RETRIES)
         self.call([self.mb_python(), "-c",
                    "import onnx, onnxruntime; print('onnxruntime', onnxruntime.__version__, onnxruntime.get_available_providers())"],
-                  "ONNX Runtime の読み込み（MotionBricks）")
+                  _("ONNX Runtime の読み込み（MotionBricks）"))
 
     def mb_test(self):
         """T ポーズから T ポーズへ 1 回つなぐ。通った計算の方式と場所を paths.json に書く。
         CUDA の初回は TensorRT のエンジンを作る（.trt-cache。GPU ごとに数分）。DirectML の初回は手直しした ONNX を作る（.ort-cache。数秒）。"""
         skeleton = os.path.join(self.kimodo, "tools", "somaskel30.json")
         if not os.path.isfile(skeleton):
-            raise Failed("Kimodo の骨格がありません。先に Kimodo のセットアップを済ませてください")
+            raise Failed(_("Kimodo の骨格がありません。先に Kimodo のセットアップを済ませてください"))
         with open(skeleton, encoding="utf-8") as f:
             soma = json.load(f)
         pose = {"root": soma["neutral_joints"][soma["root_idx"]], "local_rot": [0.0, 0.0, 0.0, 1.0] * len(soma["names"])}
@@ -977,12 +995,12 @@ class Setup:
             if os.path.exists(out):
                 os.remove(out)
             if backend == "cuda":
-                self.log("  初回は GPU に合わせた TensorRT の準備で数分かかります（止まって見えても進んでいます）")
-            self.call([self.mb_python(), os.path.join(TOOLS, "mb_gen.py"), req, out], "MotionBricks の試しの生成", cwd=self.mb,
+                self.log("  " + _("初回は GPU に合わせた TensorRT の準備で数分かかります（止まって見えても進んでいます）"))
+            self.call([self.mb_python(), os.path.join(TOOLS, "mb_gen.py"), req, out], _("MotionBricks の試しの生成"), cwd=self.mb,
                       AINAKAWARI_BACKEND=backend)
             with open(out, encoding="utf-8") as f:
                 if not json.load(f).get("num_frames"):
-                    raise Failed(f"MotionBricks の試しの生成の結果が空でした（{out}）")
+                    raise Failed(_("MotionBricks の試しの生成の結果が空でした（{path}）", path=out))
 
         backend = self.try_backends("motionbricks", "MotionBricks", attempt)
         with open(out, encoding="utf-8") as f:
@@ -990,8 +1008,9 @@ class Setup:
         paths.check(self.mb, "MotionBricks")
         paths.save(motionbricks=self.mb)   # 通ってから、場所と方式を書く
         paths.save_backend("motionbricks", backend)
-        self.stop_residents("次の生成から、選んだ計算の方式で動かすため")
-        self.log(f"  MotionBricks で {frames} フレーム作れました（計算の方式: {paths.BACKEND_LABEL[backend]}）。この場所を使うように設定しました")
+        self.stop_residents(N_("次の生成から、選んだ計算の方式で動かすため"))
+        self.log("  " + _("MotionBricks で {frames} フレーム作れました（計算の方式: {backend}）。この場所を使うように設定しました",
+                        frames=frames, backend=_(paths.BACKEND_LABEL[backend])))
 
 
 def main():
@@ -1010,7 +1029,7 @@ def main():
                       with_text=args.with_text)
         setup.run()
     except (Failed, Cancelled) as e:
-        print(f"止まりました: {e}", file=sys.stderr)
+        print(f"止まりました: {e}", file=sys.stderr)   # i18n: skip  開発用の手回しの出力
         return 1
     return 0
 

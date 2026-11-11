@@ -2,6 +2,7 @@
 
 MMD の右下のパネル（mmd_plugin/nakawari_panel.cpp の show_samples）も同じファイルを同じ書き方で読む。
 書き方: [種類] の行で種類を分け、その下に「動作：英語のプロンプト」を 1 行ずつ。# で始まる行は読み飛ばす。
+種類は [日本語|English] と書くと、英語の時（MMD の英語モード）は | の後ろを出す。英語の時は動作の名前（日本語）は出さず、英語の文だけ出す。
 """
 import os
 
@@ -18,10 +19,16 @@ def load(path=PATH):
         if line.startswith("[") and line.endswith("]"):
             groups.append((line[1:-1], []))
             continue
-        label, sep, prompt = line.partition("：")
+        label, sep, prompt = line.partition("：")   # i18n: skip
         if not sep:
             continue
         if not groups:
             groups.append(("", []))
         groups[-1][1].append((label, prompt))
     return groups
+
+
+def group_name(name, lang):
+    """種類の名前 [日本語|English] の、lang（"ja"・"en"）の方。| が無ければそのまま。"""
+    ja, sep, en = name.partition("|")
+    return en.strip() if sep and lang == "en" else ja.strip()

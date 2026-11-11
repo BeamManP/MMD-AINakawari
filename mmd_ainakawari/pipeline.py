@@ -15,6 +15,7 @@ import numpy as np
 from . import paths
 from . import quat as Q
 from . import resident, text_keys, vmd
+from .i18n import _
 from .mmd_skel import MMDSkeleton, sample, split_interp
 from .retarget import TOE_GROUND, Retargeter, conv_p, conv_q
 
@@ -33,8 +34,8 @@ SUNK_KEY = 0.05
 SPLIT_MOVE_TOLERANCE = 0.05   # 曲線を分けた後、範囲の外で元と違ってよい移動（MMD の単位）。超える部分は元の値のキーで埋める
 SPLIT_ANGLE_TOLERANCE = 0.5   # 同じく回転（度）
 PARALLEL_SECONDS = 10   # 書き戻しの計算の残りがこれ以上かかりそうなら、子プロセスに分けて並べる
-ROOT_BONE = "全ての親"
-IGNORED_ROOTS = ("操作中心",)
+ROOT_BONE = "全ての親"   # i18n: skip
+IGNORED_ROOTS = ("操作中心",)   # i18n: skip
 
 
 @dataclass
@@ -103,12 +104,12 @@ def extend_plan(frames_by_name, body, start, add):
     終わりより後ろにもキーがあれば、終わりの姿勢は MMD のまま（つなぐ）ので、終わりのキーは上書きしない。
     """
     if add is None or add < 1:
-        raise ValueError("足す長さは 1 フレーム以上にしてください")
+        raise ValueError(_("足す長さは 1 フレーム以上にしてください"))
     anchor = body | {ROOT_BONE}
     if start is None:
         keyed = [f for n in anchor for f in frames_by_name.get(n, ())]
         if not keyed:
-            raise ValueError("キーが 1 つもありません（0F にキーを打ってください）")
+            raise ValueError(_("キーが 1 つもありません（0F にキーを打ってください）"))
         start = max(keyed)
     end = start + add
     later = any(f > end for n in anchor for f in frames_by_name.get(n, ()))
@@ -145,7 +146,7 @@ def root_transform(skel, root_track, frame):
         return Q.IDENTITY.copy(), np.zeros(3)
     i = skel.i(ROOT_BONE)
     if skel.parent[i] >= 0:
-        raise ValueError(f"「{ROOT_BONE}」に親のボーンがあります。「{ROOT_BONE}」がいちばん上のボーンのモデルだけに対応しています")
+        raise ValueError(_("「{bone}」に親のボーンがあります。「{bone}」がいちばん上のボーンのモデルだけに対応しています", bone=ROOT_BONE))
     t, q = sample({ROOT_BONE: root_track}, ROOT_BONE, frame)
     return q, skel.rest[i] + t
 
@@ -179,7 +180,7 @@ def snap_segments(segments, key_frames):
     """
     if len(segments) <= 1:
         return list(segments), []
-    starts = [s for s, _, _ in segments]
+    starts = [s for s, _n, _t in segments]
     end = segments[-1][0] + segments[-1][1]
     moves = []
     for i in range(1, len(starts)):
@@ -187,16 +188,17 @@ def snap_segments(segments, key_frames):
         if near:
             new = max(near) + 1
             if any(new <= k <= new + TRANSITION for k in key_frames):
-                raise ValueError(f"{starts[i]}F の直後にキーが続いているので、ここでは区間を分けられません。"
-                                 f"毎フレームにキーがある時は、先に「元に戻す」を押してください")
+                raise ValueError(_("{frame}F の直後にキーが続いているので、ここでは区間を分けられません。"
+                                   "毎フレームにキーがある時は、先に「元に戻す」を押してください", frame=starts[i]))
             moves.append((starts[i], new, max(near)))
             starts[i] = new
     out = []
-    for i, (st, text) in enumerate(zip(starts, [t for _, _, t in segments])):
+    for i, (st, text) in enumerate(zip(starts, [t for _s, _n, t in segments])):
         e = starts[i + 1] if i + 1 < len(starts) else end
         if e - st < MIN_SEGMENT:
-            raise ValueError(f"区間の始めをキーの次へずらしたら、{st}F の区間が {e - st} フレームになりました"
-                             f"（{MIN_SEGMENT} フレーム以上要ります）。区間の始めをキーから離してください")
+            raise ValueError(_("区間の始めをキーの次へずらしたら、{st}F の区間が {n} フレームになりました"
+                               "（{min} フレーム以上要ります）。区間の始めをキーから離してください",
+                               st=st, n=e - st, min=MIN_SEGMENT))
         out.append((st, e - st, text))
     return out, moves
 
@@ -211,7 +213,7 @@ def prompt_segments(prompt, first, num):
     import re
     starts, texts = [], []
     for line in prompt.splitlines():
-        m = re.match(r"\s*(\d+)\s*[:：]\s*(.*)", line)
+        m = re.match(r"\s*(\d+)\s*[:：]\s*(.*)", line)   # i18n: skip
         if m:
             starts.append(int(m.group(1)))
             texts.append(m.group(2).strip())
@@ -225,15 +227,15 @@ def prompt_segments(prompt, first, num):
     if len(starts) <= 1:
         return [(first, num, " ".join(texts) if texts else prompt.strip())]
     if starts != sorted(starts) or len(set(starts)) != len(starts):
-        raise ValueError("区間の開始フレームは小さい順に、重ならないように書いてください")
+        raise ValueError(_("区間の開始フレームは小さい順に、重ならないように書いてください"))
     starts[0] = first   # 最初の区間は範囲の始まりから
     out = []
     for i, (s, text) in enumerate(zip(starts, texts)):
         e = starts[i + 1] if i + 1 < len(starts) else last + 1
         if not first <= s <= last:
-            raise ValueError(f"{s}F の区間が生成する範囲（{first}〜{last}F）の外です")
+            raise ValueError(_("{s}F の区間が生成する範囲（{first}〜{last}F）の外です", s=s, first=first, last=last))
         if e - s < MIN_SEGMENT:
-            raise ValueError(f"{s}F の区間が {e - s} フレームしかありません（{MIN_SEGMENT} フレーム以上にしてください）")
+            raise ValueError(_("{s}F の区間が {n} フレームしかありません（{min} フレーム以上にしてください）", s=s, n=e - s, min=MIN_SEGMENT))
         out.append((s, e - s, text))
     return out
 
@@ -276,9 +278,9 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
         # 前は範囲の中のキーを絞るだけで、範囲の端は使っていなかった（30〜90F でキーが 45・60F なら 45〜60F だけ作っていた）
         a, b = frame_range
         if a > b:
-            raise ValueError(f"範囲の始まり（{a}F）が終わり（{b}F）より後ろです")
+            raise ValueError(_("範囲の始まり（{a}F）が終わり（{b}F）より後ろです", a=a, b=b))
         if b - a < 1:
-            raise ValueError("範囲は 2 フレーム以上にしてください")
+            raise ValueError(_("範囲は 2 フレーム以上にしてください"))
         continues = any(f > b for f in key_frames_of(tracks, body | {ROOT_BONE}))
         anchors = [a, b] if continues else [a]
         before = [f for f in range(a - RANGE_CONTEXT, a) if f >= 0]
@@ -300,16 +302,16 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
         body_frames = sorted(set(pose_frames) | set(limb_frames))
         candidates = sorted(set(body_frames) | set(root_all))
         if not candidates:
-            raise ValueError("キーが 1 つもありません（0F にキーを打ってください）")
+            raise ValueError(_("キーが 1 つもありません（0F にキーを打ってください）"))
         first = candidates[0]
         if length is not None:
             num = int(length)
             if num < 2:
-                raise ValueError("長さは 2 フレーム以上にしてください")
+                raise ValueError(_("長さは 2 フレーム以上にしてください"))
         else:
             num = candidates[-1] - first + 1
             if num < 2:
-                raise ValueError("キーが 1 つしかありません。長さ（フレーム）を入れるか、キーをもう 1 つ打ってください")
+                raise ValueError(_("キーが 1 つしかありません。長さ（フレーム）を入れるか、キーをもう 1 つ打ってください"))
         last = first + num - 1
     real = [f for f in pose_frames if f <= last] if use_keys else []   # マスターが打った体のキー
     context = (before + after) if context_keys else []
@@ -371,7 +373,7 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
     # 全ての親を回している（回転のキーがある）時は、全ての親だけのキーで腰の向きも合わせる。
     # 回していない時（スラロームなど）に向きまで固定すると、毎回正面を向かされるので位置だけにする
     # センターに合わせて作る時は、センターの回転も向きとして扱う
-    turning = job.root_track + (list(tracks.get("センター", [])) if use_center else [])
+    turning = job.root_track + (list(tracks.get("センター", [])) if use_center else [])   # i18n: skip
     use_heading = any(abs(k.rot[3]) < 0.9999 for k in turning)
     root_keys, root_y_keys = [], []
     for f in root_frames:
@@ -410,15 +412,15 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
         # （数えると、区間の始めがキーと同じ時に「すぐ後ろに目印が続いて置けない」で止まっていた。11-04 MMD で確認）
         constrained = sorted({f for f in frames + root_frames + list(limb_keys)})
         job.segments, job.segment_moves = snap_segments(job.segments, constrained)
-    segments = [{"prompt": t, "frames": n} for _, n, t in job.segments]
+    segments = [{"prompt": t, "frames": n} for _s, n, t in job.segments]
     segments[-1]["frames"] += pad
     # 1 区間の上限は、区間をキーの次へずらして、止まるための延長も足した後の長さで見る
     # （ずらす前に見ていたので、300F で分けて 300F にキーがあると 301 フレームの区間を頼んでいた。11-04 Codex のレビュー）
-    long = [(s, seg["frames"]) for (s, _, _), seg in zip(job.segments, segments) if seg["frames"] > max_frames] if max_frames else []
+    long = [(s, seg["frames"]) for (s, _n, _t), seg in zip(job.segments, segments) if seg["frames"] > max_frames] if max_frames else []
     if long:
         s, n = long[0]
-        raise ValueError(f"{s}F からの区間が {n} フレームあります。Kimodo の 1 区間は {max_frames} フレーム（10 秒）までです。"
-                         f"区間を分けるか、範囲か長さを絞ってください")
+        raise ValueError(_("{s}F からの区間が {n} フレームあります。Kimodo の 1 区間は {max_frames} フレーム（10 秒）までです。"
+                           "区間を分けるか、範囲か長さを絞ってください", s=s, n=n, max_frames=max_frames))
     job.request = {"prompt": job.segments[0][2], "num_frames": num + pad, "steps": int(steps), "seed": int(seed),
                    "segments": segments,
                    "post_processing": bool(post_processing), "keys": keys, "root_keys": root_keys,
@@ -452,10 +454,10 @@ def run_kimodo(job, work_dir, on_line=None, use_llama=True):
     if job.request["text_cache_only"]:   # 読み取り結果の無い文は、常駐を起こす前に止める
         lost = text_keys.missing(s["prompt"] for s in job.request["segments"])
         if lost:
-            why, how = (("「プロンプトの読み取り（Llama 3）を使う」を外している", "詳細の窓でチェックを入れてください") if installed else
-                        ("プロンプトの読み取り（Llama 3）を入れていない", "セットアップで入れてください"))
-            raise ValueError(f"{why}ので、「サンプルから選ぶ」の文だけが使えます。"
-                             f"読み取れない文: {' / '.join(lost)}（自由に書くには、{how}）")
+            why, how = ((_("「プロンプトの読み取り（Llama 3）を使う」を外している"), _("詳細の窓でチェックを入れてください")) if installed else
+                        (_("プロンプトの読み取り（Llama 3）を入れていない"), _("セットアップで入れてください")))
+            raise ValueError(_("{why}ので、「サンプルから選ぶ」の文だけが使えます。"
+                               "読み取れない文: {lost}（自由に書くには、{how}）", why=why, lost=' / '.join(lost), how=how))
     # 頼み終わるまでを 1 つずつにする（MMD ごとの窓が同時に頼んでも、常駐はどのみち 1 つずつ作る）。
     # 待っている間・作っている間に中断されたら resident.Cancelled（resident.cancellable の中で呼ばれた時）
     resident.acquire(_KIMODO_LOCK)
@@ -591,7 +593,7 @@ def _build_frames(args):
     skel = MMDSkeleton(job.pmx)
     rt = Retargeter(skel, paths.soma_json())
     if names != rt.soma_names:
-        raise ValueError("Kimodo の結果の関節の並びが SOMA の骨格ファイルと違います")
+        raise ValueError(_("Kimodo の結果の関節の並びが SOMA の骨格ファイルと違います"))
     from_canon = Q.from_axis_angle([0, 1, 0], job.ref_yaw)
     rows = []
     for k in ks:
@@ -604,8 +606,8 @@ def _build_frames(args):
         target = job.hip_targets.get(job.first + k)
         if target is not None:
             # センターに合わせて作る時: 腰の高さを目印ぴったりに。足ＩＫは動かさないので、差は MMD の IK が膝の曲げで吸収する
-            target_local, _ = to_root_local(rt, target, Q.IDENTITY, root_q, root_p)
-            poss["センター"] = poss["センター"] + np.array([0.0, (target_local[1] - hips[1]) / rt.scale, 0.0])
+            target_local, _rot = to_root_local(rt, target, Q.IDENTITY, root_q, root_p)
+            poss["センター"] = poss["センター"] + np.array([0.0, (target_local[1] - hips[1]) / rt.scale, 0.0])   # i18n: skip
         for name, q in rots.items():
             rows.append((name, job.first + k, poss.get(name, np.zeros(3)), q))
     return rows

@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from .i18n import _
+
 HEADER = b"Vocaloid Motion Data 0002"
 
 # 補間は全部直線（x1=y1=20, x2=y2=107）。64 バイトは 16 バイトの行を 1 つずつずらした 4 行（MMD の並び）
@@ -95,13 +97,13 @@ def vmd_name(name):
 def read(path):
     data = open(path, "rb").read()
     if not data.startswith(HEADER):
-        raise ValueError(f"VMD ではありません: {path}")
+        raise ValueError(_("VMD ではありません: {path}", path=path))
     name_raw = data[30:50].split(b"\0", 1)[0]
     m = Motion(model_name=_name(name_raw), name_raw=name_raw)
     off = 50
     count, = struct.unpack_from("<I", data, off)
     off += 4
-    for _ in range(count):
+    for _i in range(count):
         raw = data[off:off + 15].split(b"\0", 1)[0]
         frame, = struct.unpack_from("<I", data, off + 15)
         px, py, pz, rx, ry, rz, rw = struct.unpack_from("<7f", data, off + 19)

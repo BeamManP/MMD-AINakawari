@@ -12,6 +12,7 @@ pipeline.prepare が出すキーの姿勢（Kimodo の形・最初のキーを�
 import numpy as np
 
 from . import paths, pipeline, smooth_stop
+from .i18n import _
 from . import quat as Q
 
 WRISTS = ("LeftHand", "RightHand")
@@ -30,12 +31,12 @@ def _pose(key):
 
 def generate(job, work_dir, key_stop=False, wrist_lerp=False, log=print):
     if not smooth_stop.available():
-        raise RuntimeError("MotionBricks が入っていません。詳細の窓のセットアップで MotionBricks を入れてください")
+        raise RuntimeError(_("MotionBricks が入っていません。詳細の窓のセットアップで MotionBricks を入れてください"))
     keys = sorted(job.request["keys"], key=lambda k: k["frame"])
     if len(keys) < 2:
-        raise ValueError("中割りには体のキーが 2 つ以上要ります")
+        raise ValueError(_("中割りには体のキーが 2 つ以上要ります"))
     if job.root_frames or job.limb_frames:
-        log("  中割りに使うのは体のキーです（全ての親だけ・手足の IK だけのキーは対象外）")
+        log(_("  中割りに使うのは体のキーです（全ての親だけ・手足の IK だけのキーは対象外）"))
     poses = [_pose(k) for k in keys]
     frames = [k["frame"] for k in keys]
     gaps = [b - a for a, b in zip(frames, frames[1:])]
@@ -50,11 +51,11 @@ def generate(job, work_dir, key_stop=False, wrist_lerp=False, log=print):
             runs.append((i, j + 1))
             i = j + 1
         else:
-            log(f"  {frames[i] + job.first}〜{frames[i + 1] + job.first}F は {gaps[i]} フレーム"
-                f"（MotionBricks は {smooth_stop.MIN_LEN}〜{smooth_stop.MAX_LEN}）なので、MMD の補間のままにします")
+            log(_("  {a}〜{b}F は {gap} フレーム（MotionBricks は {lo}〜{hi}）なので、MMD の補間のままにします",
+                  a=frames[i] + job.first, b=frames[i + 1] + job.first, gap=gaps[i], lo=smooth_stop.MIN_LEN, hi=smooth_stop.MAX_LEN))
             i += 1
     if not runs:
-        raise ValueError(f"キーの間が {smooth_stop.MIN_LEN}〜{smooth_stop.MAX_LEN} フレームの所がありません")
+        raise ValueError(_("キーの間が {lo}〜{hi} フレームの所がありません", lo=smooth_stop.MIN_LEN, hi=smooth_stop.MAX_LEN))
     jobs = []
     for s, e in runs:
         targets = []
@@ -100,8 +101,10 @@ def generate(job, work_dir, key_stop=False, wrist_lerp=False, log=print):
     job.mmd_frames = {f + job.first for f in range(T) if not covered[f]}
     err = [float(np.linalg.norm(root[f] - np.asarray(p["root"]))) for f, p in zip(frames, poses) if covered[f]]
     done = sum(gaps[k] for s, e in runs for k in range(s, e))
-    log(f"  MotionBricks で {len(runs)} 回・{done} フレームを作りました（{res['seconds_generate']:.1f} 秒・"
-        f"{'キーごとに止まる' if key_stop else 'キーを通る'}・手首は{'補間' if wrist_lerp else ' MotionBricks のまま'}）"
-        + (f"・床に沈んだ足を最大 {sunk * 100:.1f}cm 持ち上げ" if sunk else ""))
+    log(_("  MotionBricks で {runs} 回・{done} フレームを作りました（{sec:.1f} 秒・{stop}・手首は{wrist}）",
+          runs=len(runs), done=done, sec=res['seconds_generate'],
+          stop=_('キーごとに止まる') if key_stop else _('キーを通る'),
+          wrist=_('補間') if wrist_lerp else _(' MotionBricks のまま'))
+        + (_("・床に沈んだ足を最大 {cm:.1f}cm 持ち上げ", cm=sunk * 100) if sunk else ""))
     return {"fps": 30.0, "num_frames": T, "names": names, "root": root.reshape(-1).tolist(),
             "local_rot": rot.reshape(-1).tolist(), "key_max_error_m": err, "seconds_generate": res["seconds_generate"]}

@@ -10,24 +10,35 @@
 """
 import os
 import queue
+import functools
 import threading
 import tkinter as tk
 import webbrowser
 from tkinter import filedialog, messagebox, ttk
 
-from .. import applog, paths
+from .. import applog, i18n, paths
+from ..i18n import N_
 from . import pins, steps
 
 _GGUF = f"https://huggingface.co/{pins.TEXT_GGUF_REPO}/blob/{pins.TEXT_GGUF_REVISION}"
 LICENSES = [   # 文の読み取りは、落とす GGUF のリポジトリに付いている文（版で固定）を見せる
-    ("Meta Llama 3 Community License（プロンプトの読み取りに使う Llama 3）", f"{_GGUF}/LICENSE-Llama-3.txt"),
-    ("Llama 3 の使い方の決まり（Acceptable Use Policy）", f"{_GGUF}/USE_POLICY-Llama-3.md"),
-    ("NVIDIA Open Model License（Kimodo のモデル）", "https://huggingface.co/nvidia/Kimodo-SOMA-RP-v1.2"),
-    ("NVIDIA Open Model Agreement（MotionBricks のモデル）", "https://github.com/NVlabs/motionbricks"),
-    ("MIT（プロンプトの読み取りを動かす llama.cpp）", "https://github.com/ggml-org/llama.cpp/blob/master/LICENSE"),
+    (N_("Meta Llama 3 Community License（プロンプトの読み取りに使う Llama 3）"), f"{_GGUF}/LICENSE-Llama-3.txt"),
+    (N_("Llama 3 の使い方の決まり（Acceptable Use Policy）"), f"{_GGUF}/USE_POLICY-Llama-3.md"),
+    (N_("NVIDIA Open Model License（Kimodo のモデル）"), "https://huggingface.co/nvidia/Kimodo-SOMA-RP-v1.2"),
+    (N_("NVIDIA Open Model Agreement（MotionBricks のモデル）"), "https://github.com/NVlabs/motionbricks"),
+    (N_("MIT（プロンプトの読み取りを動かす llama.cpp）"), "https://github.com/ggml-org/llama.cpp/blob/master/LICENSE"),
 ]
-MARKS = {"todo": "・", "skip": "✓", "done": "✓", "run": "▶", "fail": "✗"}
+MARKS = {"todo": "・", "skip": "✓", "done": "✓", "run": "▶", "fail": "✗"}   # i18n: skip
 COLORS = {"todo": "#888", "skip": "#2a7", "done": "#2a7", "run": "#15c", "fail": "#c33"}
+
+
+def _in_lang(fn):
+    """窓の言葉（SetupWindow.lang）で steps.py の文を引く。Tk のコールバックは i18n.use() の外で動くので、それを包む。"""
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kw):
+        with i18n.use(self.lang):
+            return fn(self, *args, **kw)
+    return wrapper
 
 
 def is_open():
@@ -36,7 +47,8 @@ def is_open():
 
 
 def open_window(root, diagnosis=None, on_done=None):
-    """セットアップの窓を出す（もう出ていれば手前に）。on_done(): セットアップが最後まで済んだ時（窓の印の作り直し）。"""
+    """セットアップの窓を出す（もう出ていれば手前に）。on_done(): セットアップが最後まで済んだ時（窓の印の作り直し）。
+    窓の言葉は、呼んだ時の i18n.lang()（もう出ていれば、その窓の言葉のまま）。"""
     if SetupWindow.current is None:
         SetupWindow.current = SetupWindow(root, diagnosis)
     window = SetupWindow.current
@@ -53,12 +65,15 @@ class SetupWindow:
 
     def __init__(self, root, diagnosis):
         self.root = root
+        self.lang = i18n.lang()              # 窓を開いた時の言葉。Tk のコールバック・仕事のスレッドはこれで引く
+        self.tr = i18n.translator(self.lang)
         self.on_done = []
         self.thread = None
         self.setup = None
         self.q = queue.Queue()
         win = self.win = tk.Toplevel(root)
-        win.title("AIナカワリ のセットアップ")
+        self.title = self.tr("AIナカワリ のセットアップ")
+        win.title(self.title)
         win.protocol("WM_DELETE_WINDOW", self.close)
         # 下に固定する欄: 始めるボタン・状態の一言・閉じる。中身（下の _scroll_area）より先に積んで、画面が低くても削られないようにする
         # （11-10 高さ 768 のノート PC で、ボタン・ログ欄・失敗の一言が画面の外に押し出されて、始められなかった）
@@ -66,14 +81,14 @@ class SetupWindow:
         foot.pack(side="bottom", fill="x")
         bottom = self.bottom = ttk.Frame(foot)
         bottom.pack(side="bottom", fill="x", pady=(8, 0))
-        ttk.Button(bottom, text="閉じる", command=self.close).pack(side="right", ipady=4)
+        ttk.Button(bottom, text=self.tr("閉じる"), command=self.close).pack(side="right", ipady=4)
         self.status = tk.StringVar()
         ttk.Label(bottom, textvariable=self.status, wraplength=560, justify="left").pack(side="left", anchor="w")
         bf = self.btn_row = ttk.Frame(foot)   # 入れる場所などを畳んでいる時は、この行も隠す（_show_form）
         bf.pack(fill="x", pady=(8, 0), before=bottom)
-        self.start_btn = ttk.Button(bf, text="セットアップを始める", command=self._start)
+        self.start_btn = ttk.Button(bf, text=self.tr("セットアップを始める"), command=self._start)
         self.start_btn.pack(side="left", ipady=4)
-        self.cancel_btn = ttk.Button(bf, text="中止", command=self._cancel, state="disabled")
+        self.cancel_btn = ttk.Button(bf, text=self.tr("中止"), command=self._cancel, state="disabled")
         self.cancel_btn.pack(side="left", padx=(6, 0), ipady=4)
 
         f = self._scroll_area(win)
@@ -87,10 +102,10 @@ class SetupWindow:
         ttk.Label(f, textvariable=self.subline, foreground="#444", wraplength=680, justify="left").pack(anchor="w", pady=(2, 0))
         # 済んでいる時に出す行: 「別の場所に入れる…」と「点検して直す」（more_btn はこの行。名前は前のまま）
         self.more_btn = ttk.Frame(f)
-        ttk.Button(self.more_btn, text="別の場所に入れる…", command=self._expand).pack(side="left")
+        ttk.Button(self.more_btn, text=self.tr("別の場所に入れる…"), command=self._expand).pack(side="left")
         # 入っている物が欠けていないかを確かめて、欠けていれば入れ直す（steps.Setup.intact。11-10 マスター
         # 「中途半端に環境が入ったフォルダに再更新かけても大丈夫？」。前は、済んだ後に壊れると直す入口が無かった）
-        self.repair_btn = ttk.Button(self.more_btn, text="点検して直す", command=self._repair)
+        self.repair_btn = ttk.Button(self.more_btn, text=self.tr("点検して直す"), command=self._repair)
         self.manual = self._manual_place()   # 手で入れた場所（セットアップの印が無い）を使っている時、その Kimodo の場所
         self.expanded = False                # 済んでいる時も、入れる場所などを出している（「別の場所に入れる…」・回した後）
 
@@ -102,26 +117,26 @@ class SetupWindow:
         # 入れる場所と空き
         row = ttk.Frame(f)
         row.pack(fill="x", pady=(10, 0))
-        ttk.Label(row, text="入れる場所").pack(side="left")
+        ttk.Label(row, text=self.tr("入れる場所")).pack(side="left")
         self.dest = tk.StringVar(value=self._initial_folder())
         entry = ttk.Entry(row, textvariable=self.dest, width=44)
         entry.pack(side="left", padx=(8, 4), fill="x", expand=True)
-        ttk.Button(row, text="選ぶ…", command=self._browse).pack(side="left")
+        ttk.Button(row, text=self.tr("選ぶ…"), command=self._browse).pack(side="left")
         self.space = tk.StringVar()
         ttk.Label(f, textvariable=self.space, foreground="#555").pack(anchor="w", pady=(2, 0))
         self.dest.trace_add("write", lambda *_a: self._refresh())
 
         # 規約
-        lf = ttk.LabelFrame(f, text="ライセンス（入れる前に読んでください）", padding=8)
+        lf = ttk.LabelFrame(f, text=self.tr("ライセンス（入れる前に読んでください）"), padding=8)
         lf.pack(fill="x", pady=(10, 0))
         for text, url in LICENSES:
-            link = tk.Label(lf, text=text, foreground="#15c", cursor="hand2", anchor="w")
+            link = tk.Label(lf, text=self.tr(text), foreground="#15c", cursor="hand2", anchor="w")
             link.pack(anchor="w")
             link.bind("<Button-1>", lambda _e, u=url: webbrowser.open(u))
         self.agree = tk.BooleanVar(value=False)
-        ttk.Checkbutton(lf, text="上のライセンスに同意して入れます",
+        ttk.Checkbutton(lf, text=self.tr("上のライセンスに同意して入れます"),
                         variable=self.agree, command=self._refresh).pack(anchor="w", pady=(6, 0))
-        ttk.Label(lf, text="Llama 3 で作った物を公開する時は、「Built with Meta Llama 3」の表示が要ります",
+        ttk.Label(lf, text=self.tr("Llama 3 で作った物を公開する時は、「Built with Meta Llama 3」の表示が要ります"),
                   foreground="#555").pack(anchor="w", padx=(22, 0))
 
         # プロンプトの読み取り（Llama 3）を入れるか（11-10 マスター）。外すとサンプルの文だけで作る（読み取り結果を同梱している）。
@@ -130,9 +145,9 @@ class SetupWindow:
         self._text_dest = None   # with_text をどの場所の印から読んだか（場所を変えたら、その場所で前に選んだ方に戻す）
         box = self.text_box = ttk.Frame(outer)
         box.pack(fill="x", before=self.form)
-        ttk.Checkbutton(box, text="プロンプトを自由に書けるようにする（Llama 3 を入れる・約 8GB・生成中にメインメモリを約 8GB 使う）",
+        ttk.Checkbutton(box, text=self.tr("プロンプトを自由に書けるようにする（Llama 3 を入れる・約 8GB・生成中にメインメモリを約 8GB 使う）"),
                         variable=self.with_text, command=self._refresh).pack(anchor="w", pady=(10, 0))
-        ttk.Label(box, text="外すと「サンプルから選ぶ」の文だけで作ります（メインメモリの少ない PC 向け）。後からここで入れたり外したりできます",
+        ttk.Label(box, text=self.tr("外すと「サンプルから選ぶ」の文だけで作ります（メインメモリの少ない PC 向け）。後からここで入れたり外したりできます"),
                   foreground="#555").pack(anchor="w", padx=(22, 0))
 
         # 段の一覧
@@ -202,8 +217,7 @@ class SetupWindow:
         step = max(1, abs(e.delta) // 120)
         self.canvas.yview_scroll(-step if e.delta > 0 else step, "units")
 
-    @staticmethod
-    def _show_environment(f, d):
+    def _show_environment(self, f, d):
         """一番上の「現在の環境: GPU・メインメモリ → MotionBricks ○ Kimodo ○」（11-06 マスター。11-07 に動作モードの 2 つを 1 つに）。
         使える物は緑の ○、使えない物は赤の ×。GPU を調べられなかった時は、どれも橙の ？（試せる。gpu.diagnose）。
         赤がある時は、理由（gpu.diagnose の一言）を下に小さく出す。"""
@@ -211,12 +225,13 @@ class SetupWindow:
         unknown = not d.gpu and d.ok and not no_gpu
         row = ttk.Frame(f)
         row.pack(anchor="w", fill="x")
-        missing = "GPU なし" if no_gpu else "GPU を調べられませんでした" if unknown else "NVIDIA の GPU が見つかりません"
-        hardware = d.summary() if d.gpu else f"{missing}・メインメモリ {d.ram_gb:.0f}GB"
-        ttk.Label(row, text=f"現在の環境：{hardware}　→").pack(side="left")
+        tr = self.tr
+        missing = tr("GPU なし") if no_gpu else tr("GPU を調べられませんでした") if unknown else tr("NVIDIA の GPU が見つかりません")
+        hardware = d.summary() if d.gpu else tr("{missing}・メインメモリ {ram:.0f}GB", missing=missing, ram=d.ram_gb)
+        ttk.Label(row, text=tr("現在の環境：{hardware}　→", hardware=hardware)).pack(side="left")
         marks = [("MotionBricks", bool(d.gpu) or no_gpu), ("Kimodo", d.ok and (bool(d.gpu) or no_gpu))]
         for name, ok in marks:
-            mark, color = ("？", "#c70") if unknown else ("○", "#2a7") if ok else ("×", "#c33")
+            mark, color = (tr("？"), "#c70") if unknown else ("○", "#2a7") if ok else ("×", "#c33")
             tk.Label(row, text=f"{name} {mark}", foreground=color, font=("", 9, "bold"),
                      background=ttk.Style().lookup("TFrame", "background")).pack(side="left", padx=(8, 0))
         # CUDA 以外（DirectML・GPU なし）は、どう動かすかの一言も出す
@@ -260,6 +275,7 @@ class SetupWindow:
         elif not self.text_box.winfo_manager():
             self.text_box.pack(fill="x", before=self.form if show else self.more_btn)
 
+    @_in_lang
     def _initial_folder(self):
         """前に入れた場所（paths.json の Kimodo の 1 つ上）があればそこ。無ければ空きのいちばん多いドライブ。"""
         try:
@@ -272,10 +288,11 @@ class SetupWindow:
         return steps.default_folder()
 
     def _browse(self):
-        folder = filedialog.askdirectory(parent=self.win, title="入れる場所（半角の英数字だけのフォルダ）")
+        folder = filedialog.askdirectory(parent=self.win, title=self.tr("入れる場所（半角の英数字だけのフォルダ）"))
         if folder:
             self.dest.set(os.path.normpath(folder))
 
+    @_in_lang
     def _make_setup(self):
         dest = self.dest.get().strip()
         if dest != self._text_dest:   # 場所が変わった（開いた時も）: その場所で前に選んだ方にする
@@ -288,6 +305,7 @@ class SetupWindow:
                            progress=lambda text: self.q.put(("progress", text)),
                            on_step=lambda key, state: self.q.put(("step", (key, state))), with_text=self.with_text.get())
 
+    @_in_lang
     def _refresh(self):
         """入れる場所・同意が変わった時: 空きと段の一覧を出し直し、始めるボタンの可否を決める。"""
         if self.thread is not None:
@@ -301,15 +319,17 @@ class SetupWindow:
             return
         state = setup.load_state()
         done = setup.finished_steps(state)
+        tr = self.tr
         listed = [(key, title, "skip" if key in done else "todo") for key, _g, title, _version, _gb, _fn in setup.steps()]
         self._show_steps(listed)
         need = setup.remaining_gb()
         try:
             free = f"{steps.free_gb(setup.dest):.0f}GB"
         except OSError:
-            free = "（読めません）"
+            free = tr("（読めません）")
         done = sum(1 for _k, _t, mark in listed if mark == "skip")
-        self.space.set(f"空き {free}／これから使う量 約 {need:.0f}GB" + (f"（済んだ {done} 手順の分を除く）" if done else ""))
+        self.space.set(tr("空き {free}／これから使う量 約 {need:.0f}GB", free=free, need=need)
+                       + (tr("（済んだ {done} 手順の分を除く）", done=done) if done else ""))
         kind, pending = setup.status()
         if self.manual:   # 手で入れた環境にはセットアップの印が無いので、点検できない
             self.repair_btn.pack_forget()
@@ -317,31 +337,33 @@ class SetupWindow:
             self.repair_btn.pack(side="left", padx=(6, 0))
         if self.manual and not self.expanded:
             mb = paths.motionbricks_dir()
-            self.headline.set("別の方法で入れた環境を使っています")
-            self.subline.set(f"Kimodo: {self.manual}" + (f"・MotionBricks: {mb}" if mb else "")
-                             + "\n入れ直したい時は、「別の場所に入れる…」で場所を選んでください")
+            self.headline.set(tr("別の方法で入れた環境を使っています"))
+            self.subline.set(f"Kimodo: {self.manual}" + (tr("・") + f"MotionBricks: {mb}" if mb else "")
+                             + tr("\n入れ直したい時は、「別の場所に入れる…」で場所を選んでください"))
             self._show_form(False, text_box=False)
             return
         if kind == "done":
             used = setup.in_use()
-            self.headline.set("入っています" if used else "この場所に入っています（まだ使っていません）")
-            self.subline.set(f"場所: {setup.dest}" + ("" if used else "\n「この場所を使う」を押すと、すぐ使えます"))
+            self.headline.set(tr("入っています") if used else tr("この場所に入っています（まだ使っていません）"))
+            self.subline.set(tr("場所: {dest}", dest=setup.dest) + ("" if used else tr("\n「この場所を使う」を押すと、すぐ使えます")))
             self._show_form(self.expanded or not used)
-            self.start_btn.configure(text="この場所を使う" if not used else "点検して直す", state="normal")
+            self.start_btn.configure(text=tr("この場所を使う") if not used else tr("点検して直す"), state="normal")
             return
-        names = "・".join(title.split("（")[0] for _k, title, _gb in pending[:4]) + ("…" if len(pending) > 4 else "")
+        cut = "（" if self.lang == "ja" else " ("   # 段の名前の「（補足）」を落とす  # i18n: skip
+        names = tr("・").join(title.split(cut)[0] for _k, title, _gb in pending[:4]) + (tr("…") if len(pending) > 4 else "")
         if kind == "update":
-            self.headline.set(f"更新があります（{len(pending)} 手順・約 {need:.0f}GB）")
-            self.subline.set(f"場所: {setup.dest}\n変わる手順: {names}")
-            text = "更新する"
+            self.headline.set(tr("更新があります（{n} 手順・約 {need:.0f}GB）", n=len(pending), need=need))
+            self.subline.set(tr("場所: {dest}\n変わる手順: {names}", dest=setup.dest, names=names))
+            text = tr("更新する")
         elif kind == "partial":
-            self.headline.set(f"途中で止まっています（あと {len(pending)} 手順・約 {need:.0f}GB）")
-            self.subline.set(f"場所: {setup.dest}\n押すと、止まった手順から進みます")
-            text = "続きから始める"
+            self.headline.set(tr("途中で止まっています（あと {n} 手順・約 {need:.0f}GB）", n=len(pending), need=need))
+            self.subline.set(tr("場所: {dest}\n押すと、止まった手順から進みます", dest=setup.dest))
+            text = tr("続きから始める")
         else:
-            self.headline.set("AI のモデルを入れます")
-            self.subline.set(f"Kimodo・MotionBricks と、それを動かす Python をまとめて入れます（落とす量は約 {'12' if setup.with_text else '4'}GB）")
-            text = "セットアップを始める"
+            self.headline.set(tr("AI のモデルを入れます"))
+            self.subline.set(tr("Kimodo・MotionBricks と、それを動かす Python をまとめて入れます（落とす量は約 {gb}GB）",
+                                gb="12" if setup.with_text else "4"))
+            text = tr("セットアップを始める")
         self._show_form(True)
         self.start_btn.configure(text=text, state="normal" if self.agree.get() else "disabled")
 
@@ -362,18 +384,19 @@ class SetupWindow:
         self.log.configure(state="disabled")
 
     # ---- 動かす ----
+    @_in_lang
     def _start(self):
         try:
             setup = self._make_setup()
         except steps.Failed as e:
-            messagebox.showerror("AIナカワリ のセットアップ", str(e), parent=self.win)
+            messagebox.showerror(self.title, str(e), parent=self.win)
             return
         kind, pending = setup.status()
         if kind != "done" and not self.agree.get():
             return
         if any(key == "text_remove" for key, _t, _gb in pending) and not messagebox.askyesno(
-                "AIナカワリ のセットアップ", "入れてあるプロンプトの読み取り（Llama 3・約 8GB）を消します。\n"
-                "消した後は「サンプルから選ぶ」の文だけで作ります（また入れる時は約 8GB 落とし直します）。よろしいですか？",
+                self.title, self.tr("入れてあるプロンプトの読み取り（Llama 3・約 8GB）を消します。\n"
+                                    "消した後は「サンプルから選ぶ」の文だけで作ります（また入れる時は約 8GB 落とし直します）。よろしいですか？"),
                 parent=self.win):
             return
         self.setup = setup
@@ -381,32 +404,40 @@ class SetupWindow:
         self.start_btn.configure(state="disabled")
         self.cancel_btn.configure(state="normal")
         if kind == "done":   # 全部済み: 点検して、欠けている物だけ入れ直す
-            self.headline.set("点検しています…")
-            self.status.set("入っている物を点検しています（10 秒ほど）。欠けている物があれば、入れ直します")
+            self.headline.set(self.tr("点検しています…"))
+            self.status.set(self.tr("入っている物を点検しています（10 秒ほど）。欠けている物があれば、入れ直します"))
         else:
-            self.headline.set("入れています…")
-            self.status.set(f"入れています（落とす量は約 {setup.remaining_gb():.0f}GB）。この窓は閉じても裏で進みます")
+            self.headline.set(self.tr("入れています…"))
+            self.status.set(self.tr("入れています（落とす量は約 {gb:.0f}GB）。この窓は閉じても裏で進みます", gb=setup.remaining_gb()))
+
+        lang, tr = self.lang, self.tr
 
         def work():
-            try:
-                setup.run()
-                self.q.put(("end", None))
-            except steps.Cancelled:
-                self.q.put(("end", "中止しました。もう一度押すと続きから進みます"))
-            except steps.Failed as e:
-                self.q.put(("end", f"止まりました: {e}\nもう一度押すと、止まった手順から進みます"))
-            except Exception as e:   # 思っていない失敗。記録に traceback を残して、画面には一言
-                applog.exception("セットアップの思っていない失敗:")
-                self.q.put(("end", f"思わぬエラーで止まりました（{e}）。詳細の窓の「ログ」→「記録のフォルダを開く」にある app.log を送ってください"))
-        self.thread = threading.Thread(target=work, name="セットアップ", daemon=True)
+            with i18n.use(lang):   # steps.py の _() が、この窓の言葉で引けるように
+                try:
+                    setup.run()
+                    self.q.put(("end", None))
+                except steps.Cancelled:
+                    self.q.put(("end", tr("中止しました。もう一度押すと続きから進みます")))
+                except steps.Failed as e:
+                    self.q.put(("end", tr("止まりました: {e}\nもう一度押すと、止まった手順から進みます", e=e)))
+                except Exception as e:   # 思っていない失敗。記録に traceback を残して、画面には一言
+                    applog.exception("セットアップの思っていない失敗:")
+                    self.q.put(("end", tr("思わぬエラーで止まりました（{e}）。詳細の窓の「ログ」→「記録のフォルダを開く」にある app.log を送ってください", e=e)))
+        self.thread = threading.Thread(target=work, name="セットアップ", daemon=True)   # i18n: skip
         self.thread.start()
 
     def _cancel(self):
-        if self.setup is not None and messagebox.askyesno("AIナカワリ のセットアップ", "中止しますか？（済んだ手順はそのまま残ります）",
+        if self.setup is not None and messagebox.askyesno(self.title, self.tr("中止しますか？（済んだ手順はそのまま残ります）"),
                                                           parent=self.win):
             self.cancel_btn.configure(state="disabled")
-            self.status.set("止めています…")
-            threading.Thread(target=self.setup.cancel, daemon=True).start()
+            self.status.set(self.tr("止めています…"))
+            lang, setup = self.lang, self.setup
+
+            def cancel():
+                with i18n.use(lang):
+                    setup.cancel()
+            threading.Thread(target=cancel, daemon=True).start()
 
     def _poll(self):
         try:
@@ -445,14 +476,14 @@ class SetupWindow:
             self._write_log(error)
             self.win.deiconify()
             return
-        self.status.set("できました。「生成」で使えます")
+        self.status.set(self.tr("できました。「生成」で使えます"))
         for callback in self.on_done:
             try:
                 callback()
             except Exception:   # 閉じた MMD の窓など。セットアップは済んでいる
                 applog.exception("セットアップ後の窓の更新の失敗:")
         self.win.deiconify()
-        messagebox.showinfo("AIナカワリ のセットアップ", "できました。「生成」で使えます", parent=self.win)
+        messagebox.showinfo(self.title, self.tr("できました。「生成」で使えます"), parent=self.win)
 
     def close(self):
         if self.thread is not None:

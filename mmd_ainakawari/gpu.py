@@ -15,6 +15,8 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 
+from .i18n import _
+
 # VRAM: Kimodo 1.5GB ＋ MotionBricks 1.0GB（常駐を片付けた時の差。11-04）。MMD の描画と Windows の分を見て 6GB
 VRAM_GB = 6.0
 # メインメモリ: 文の読み取り（llama-server・GGUF Q8_0）約 7.6GB（11-07）＋ Kimodo の常駐 ＋ MMD・Windows の分で 16GB。
@@ -42,8 +44,8 @@ class Diagnosis:
     def summary(self):
         if not self.gpu:
             return self.note
-        vram = f"（VRAM {self.vram_gb:.0f}GB）" if self.vram_gb else ""   # NVIDIA 以外では分からないことがある
-        return f"{self.gpu}{vram}・メインメモリ {self.ram_gb:.0f}GB"
+        vram = _("（VRAM {gb:.0f}GB）", gb=self.vram_gb) if self.vram_gb else ""   # NVIDIA 以外では分からないことがある
+        return _("{gpu}{vram}・メインメモリ {ram:.0f}GB", gpu=self.gpu, vram=vram, ram=self.ram_gb)
 
 
 class _MemoryStatus(ctypes.Structure):
@@ -79,16 +81,16 @@ def _gpu():
         out = subprocess.run([exe, "--query-gpu=index,uuid,name,memory.total,memory.used", "--format=csv,noheader,nounits"],
                              capture_output=True, text=True, timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except (OSError, subprocess.TimeoutExpired) as e:
-        raise _Unknown(f"nvidia-smi が答えません（{type(e).__name__}）")
+        raise _Unknown(f"nvidia-smi が答えません（{type(e).__name__}）")  # i18n: skip
     if out.returncode != 0:
-        raise _Unknown(f"nvidia-smi が失敗しました（{(out.stderr or out.stdout).strip()[:80]}）")
+        raise _Unknown(f"nvidia-smi が失敗しました（{(out.stderr or out.stdout).strip()[:80]}）")  # i18n: skip
     rows = []
     try:
         for line in out.stdout.strip().splitlines():
             index, uuid, name, total, used = [x.strip() for x in line.split(",")]
             rows.append((index, uuid, name, float(total) / 1024, (float(total) - float(used)) / 1024))
     except ValueError:
-        raise _Unknown(f"nvidia-smi の出力を読めません（{out.stdout.strip()[:80]}）")
+        raise _Unknown(f"nvidia-smi の出力を読めません（{out.stdout.strip()[:80]}）")  # i18n: skip
     visible = os.environ.get("CUDA_VISIBLE_DEVICES")
     want = visible.split(",")[0].strip() if visible is not None else "0"
     hits = [r for r in rows if r[0] == want] or [r for r in rows if want.startswith("GPU-") and r[1].startswith(want)]
@@ -96,8 +98,8 @@ def _gpu():
         _, _, name, total, free = hits[0]
         return name, total, free
     if len(hits) > 1:   # 短い UUID は 1 枚に決まる時だけ（CUDA の決まり）
-        raise _Unknown(f"CUDA_VISIBLE_DEVICES={visible!r} が GPU を 1 枚に決めていません")
-    raise _Unknown(f"使う GPU（CUDA_VISIBLE_DEVICES={visible!r}）が見つかりません" if visible is not None else "GPU の一覧が空です")
+        raise _Unknown(f"CUDA_VISIBLE_DEVICES={visible!r} が GPU を 1 枚に決めていません")  # i18n: skip
+    raise _Unknown(f"使う GPU（CUDA_VISIBLE_DEVICES={visible!r}）が見つかりません" if visible is not None else "GPU の一覧が空です")  # i18n: skip
 
 
 def _adapters():
@@ -147,21 +149,21 @@ def _backend():
 def _diagnose_other(backend, ram, ram_free):
     """NVIDIA の GPU を CUDA で使わない時の診断（DirectML・CPU。まだ方式が決まっていなくて NVIDIA の GPU が無い時も）。"""
     ram_ok = ram >= RAM_CHECK_GB
-    ram_note = "" if ram_ok else f"。メインメモリが足りないかもしれません（目安 {RAM_GB:.0f}GB 以上）"
+    ram_note = "" if ram_ok else _("。メインメモリが足りないかもしれません（目安 {gb:.0f}GB 以上）", gb=RAM_GB)
     if backend == "cpu":
         return Diagnosis("", 0.0, 0.0, ram, ram_free, True,
-                         "GPU を使わずに作ります（時間がかかります。2 秒の動きに 1 分ほど）" + ram_note, "cpu")
+                         _("GPU を使わずに作ります（時間がかかります。2 秒の動きに 1 分ほど）") + ram_note, "cpu")
     adapters = _adapters()
     if not adapters:
         if backend == "directml":   # セットアップでは通っている。名前を読めないだけ
-            return Diagnosis("", 0.0, 0.0, ram, ram_free, True, "DirectML で動かします（GPU の名前は読めませんでした）" + ram_note, "directml")
+            return Diagnosis("", 0.0, 0.0, ram, ram_free, True, _("DirectML で動かします（GPU の名前は読めませんでした）") + ram_note, "directml")
         return Diagnosis("", 0.0, 0.0, ram, ram_free, True,
-                         "GPU が見つかりません。セットアップで試して、動けば GPU なしで作ります（時間がかかります）" + ram_note, "cpu")
+                         _("GPU が見つかりません。セットアップで試して、動けば GPU なしで作ります（時間がかかります）") + ram_note, "cpu")
     name, vram = adapters[0]
     if backend == "directml":
-        note = "この PC で動きます（DirectML）"
+        note = _("この PC で動きます（DirectML）")
     else:   # まだセットアップしていない
-        note = "NVIDIA 以外の GPU です。DirectML で動かします（セットアップの試しの生成で確かめます）"
+        note = _("NVIDIA 以外の GPU です。DirectML で動かします（セットアップの試しの生成で確かめます）")
     return Diagnosis(name, vram, 0.0, ram, ram_free, ram_ok, note + ram_note, "directml")
 
 
@@ -173,26 +175,26 @@ def diagnose():
     visible = os.environ.get("CUDA_VISIBLE_DEVICES")
     if visible is not None and visible.split(",")[0].strip() in ("", "-1"):   # GPU を見せない設定。どちらのモードも動かない
         return Diagnosis("", 0.0, 0.0, ram, ram_free, False,
-                         f"CUDA_VISIBLE_DEVICES={visible!r} で GPU が無効になっています（この設定を外してください）")
+                         _("CUDA_VISIBLE_DEVICES={visible} で GPU が無効になっています（この設定を外してください）", visible=repr(visible)))
     try:
         g = _gpu()
     except _Unknown as e:   # 調べられない時も窓は開き、試せる。理由（nvidia-smi の名前など）は記録にだけ書く
         from . import applog
         applog.write(f"GPU を調べられませんでした: {e}")
-        return Diagnosis("", 0.0, 0.0, ram, ram_free, True, "GPU を調べられませんでした。「生成」を押して試してください")
+        return Diagnosis("", 0.0, 0.0, ram, ram_free, True, _("GPU を調べられませんでした。「生成」を押して試してください"))
     if g is None:
         if backend is None:   # まだセットアップしていない。NVIDIA 以外の GPU なら DirectML で動かせる（11-10）
             return _diagnose_other(None, ram, ram_free)
         return Diagnosis("", 0.0, 0.0, ram, ram_free, False,
-                         "NVIDIA の GPU が見つかりません（計算の方式が CUDA になっています。「セットアップ」を押して入れ直してください）")
+                         _("NVIDIA の GPU が見つかりません（計算の方式が CUDA になっています。「セットアップ」を押して入れ直してください）"))
     name, vram, vram_free = g
     ok = vram >= VRAM_GB and ram >= RAM_CHECK_GB
     if ok:
-        note = "この PC で動きます"
+        note = _("この PC で動きます")
     elif vram < VRAM_GB:
-        note = f"VRAM が足りないかもしれません（目安 {VRAM_GB:.0f}GB 以上）"
+        note = _("VRAM が足りないかもしれません（目安 {gb:.0f}GB 以上）", gb=VRAM_GB)
     else:
-        note = f"メインメモリが足りないかもしれません（目安 {RAM_GB:.0f}GB 以上）"
+        note = _("メインメモリが足りないかもしれません（目安 {gb:.0f}GB 以上）", gb=RAM_GB)
     return Diagnosis(name, vram, vram_free, ram, ram_free, ok, note)
 
 
@@ -200,5 +202,5 @@ if __name__ == "__main__":
     import sys
     sys.stdout.reconfigure(encoding="utf-8")
     d = diagnose()
-    print(d.summary(), "→", d.note, f"（計算の方式 {d.backend}・空き VRAM {d.vram_free_gb:.1f}GB・空きメモリ {d.ram_free_gb:.1f}GB）")
-    print("Windows が知っている GPU:", _adapters())
+    print(d.summary(), "→", d.note, f"（計算の方式 {d.backend}・空き VRAM {d.vram_free_gb:.1f}GB・空きメモリ {d.ram_free_gb:.1f}GB）")  # i18n: skip
+    print("Windows が知っている GPU:", _adapters())  # i18n: skip

@@ -14,6 +14,8 @@ from huggingface_hub import snapshot_download
 
 def main():
     cache, repo, revision = sys.argv[1:4]
+    # できた時に出す文。言葉は呼ぶ側（steps.py）が決めて 4 つ目の引数で渡す（この Python からは i18n を読めない）
+    done = sys.argv[4] if len(sys.argv) > 4 else "できました: {path}"   # i18n: skip
     path = snapshot_download(repo_id=repo, revision=revision, cache_dir=cache)
     refs = os.path.join(cache, "models--" + repo.replace("/", "--"), "refs")
     os.makedirs(refs, exist_ok=True)
@@ -21,7 +23,7 @@ def main():
     with open(tmp, "w", encoding="ascii") as f:
         f.write(revision)
     os.replace(tmp, os.path.join(refs, "main"))
-    print(f"できました: {path}", flush=True)
+    print(done.format(path=path), flush=True)
 
 
 if __name__ == "__main__":

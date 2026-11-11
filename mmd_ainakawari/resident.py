@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from multiprocessing import AuthenticationError
 from multiprocessing.connection import Client
 
+from .i18n import _
+
 AUTHKEY = b"AINakawari.resident.v1"   # tools/kimodo_gen.py・tools/mb_gen.py と同じ
 LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "work")
 CONNECT_TIMEOUT = 5.0     # つないで合言葉を確かめるまで
@@ -37,7 +39,7 @@ class Cancelled(Exception):
     """使う人が中断した（失敗ではない）。"""
 
     def __str__(self):
-        return "中断しました"
+        return _("中断しました")
 
 
 _cancel = threading.local()   # 生成のスレッドごとの「中断の印」（threading.Event）
@@ -130,8 +132,8 @@ def _connect(server, timeout=CONNECT_TIMEOUT):
 
 
 def _foreign(server):
-    return RuntimeError(f"{server.name} の口（127.0.0.1:{server.port}）を、ほかのプログラムが使っているようです。"
-                        f"そのプログラムを閉じてからもう一度押してください")
+    return RuntimeError(_("{name} の口（127.0.0.1:{port}）を、ほかのプログラムが使っているようです。"
+                          "そのプログラムを閉じてからもう一度押してください", name=server.name, port=server.port))
 
 
 def _connect_waiting(server, deadline):
@@ -146,12 +148,12 @@ def _log_tail(path, lines=15):
     try:
         return "\n".join(open(path, encoding="utf-8", errors="replace").read().splitlines()[-lines:])
     except OSError:
-        return "（記録がありません）"
+        return _("（記録がありません）")
 
 
 def _start(server, log):
     os.makedirs(LOG_DIR, exist_ok=True)
-    log(f"  {server.name} を常駐させています（初回だけモデルを読み込みます）…")
+    log(_("  {name} を常駐させています（初回だけモデルを読み込みます）…", name=server.name))
     out = open(_log_path(server), "w", encoding="utf-8")
     proc = subprocess.Popen([server.python, server.script, "--serve", str(server.port), *server.args], stdout=out, stderr=subprocess.STDOUT,
                             cwd=server.cwd, env=server.env,
@@ -167,10 +169,10 @@ def _start(server, log):
             conn = _connect_waiting(server, deadline)
             if conn is not None:
                 return conn
-            raise RuntimeError(f"{server.name} の常駐が起動できませんでした:\n{_log_tail(_log_path(server))}")
+            raise RuntimeError(_("{name} の常駐が起動できませんでした:\n{tail}", name=server.name, tail=_log_tail(_log_path(server))))
         check_cancel()   # 常駐は読み込みを続ける（次の生成ですぐ使える）
         time.sleep(0.5)
-    raise RuntimeError(f"{server.name} の常駐が {server.start_timeout:.0f} 秒たっても準備できません（{_log_path(server)}）")
+    raise RuntimeError(_("{name} の常駐が {sec:.0f} 秒たっても準備できません（{path}）", name=server.name, sec=server.start_timeout, path=_log_path(server)))
 
 
 def _ready(server, log):
@@ -190,13 +192,13 @@ def call(server, request, log=print):
     check_cancel()
     reply = _send(_ready(server, log), server, request)
     if reply.get("stale"):
-        log(f"  {server.name} の橋渡しが新しくなっていたので、常駐を立ち上げ直します…")
+        log(_("  {name} の橋渡しが新しくなっていたので、常駐を立ち上げ直します…", name=server.name))
         _wait_closed(server)
         reply = _send(_ready(server, log), server, request)
     if reply.get("cancelled") or cancel_requested():   # 常駐が途中でやめた・作り終わるのと中断が行き違った（結果は捨てる）
         raise Cancelled()
     if not reply["ok"]:
-        raise RuntimeError(f"{server.name} が失敗しました:\n" + reply.get("error", "")[-1500:])
+        raise RuntimeError(_("{name} が失敗しました:\n", name=server.name) + reply.get("error", "")[-1500:])
     return reply["result"], reply.get("line", "")
 
 
@@ -249,7 +251,7 @@ def _wait_closed(server, seconds=10):
             return
         conn.close()
         time.sleep(0.2)
-    raise RuntimeError(f"{server.name} の常駐が終わりません（{_log_path(server)}）")
+    raise RuntimeError(_("{name} の常駐が終わりません（{path}）", name=server.name, path=_log_path(server)))
 
 
 def _send(conn, server, request):
@@ -262,11 +264,11 @@ def _send(conn, server, request):
                 conn.send({"cancel": True})
                 told = True
             if time.monotonic() > deadline:
-                raise RuntimeError(f"{server.name} が {REPLY_TIMEOUT // 60} 分たっても答えません（{_log_path(server)}）")
+                raise RuntimeError(_("{name} が {min} 分たっても答えません（{path}）", name=server.name, min=REPLY_TIMEOUT // 60, path=_log_path(server)))
         return conn.recv()
     except (EOFError, ConnectionError):
         if told:   # 中断を知らない橋渡しが、知らせを読まないまま接続を閉じた（結果は届かない）。頼んだのは中断なので、中断として扱う
             raise Cancelled()
-        raise RuntimeError(f"{server.name} の常駐が途中で終わりました（{_log_path(server)}）")
+        raise RuntimeError(_("{name} の常駐が途中で終わりました（{path}）", name=server.name, path=_log_path(server)))
     finally:
         conn.close()

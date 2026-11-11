@@ -13,6 +13,7 @@ import socket
 import numpy as np
 
 from . import vmd
+from .i18n import _
 from .mmd_memory import interp_bytes
 from .mmd_skel import MMDSkeleton, curve_points
 
@@ -33,13 +34,13 @@ def ask(cmd, timeout=120.0, **args):
             f.flush()
             line = f.readline()
     except OSError as e:
-        raise MMMError("MMM につながりません。MMM が起動しているか、Plugins に MmmBridge.dll があるかを確かめてください"
-                       f"（{HOST}:{PORT}・{e}）") from e
+        raise MMMError(_("MMM につながりません。MMM が起動しているか、Plugins に MmmBridge.dll があるかを確かめてください"
+                         "（{host}:{port}・{error}）", host=HOST, port=PORT, error=e)) from e
     if not line:
-        raise MMMError("MMM から返事がありません（MMM が閉じた可能性があります）")
+        raise MMMError(_("MMM から返事がありません（MMM が閉じた可能性があります）"))
     res = json.loads(line)
     if not res.get("ok"):
-        raise MMMError(f"MMM でできませんでした: {res.get('error')}")
+        raise MMMError(_("MMM でできませんでした: {error}", error=res.get("error")))
     return res
 
 
@@ -87,11 +88,15 @@ class MMMLink:
         active = next((m for m in models if m["active"]), None)
         return active
 
+    def language(self):
+        """窓に出す言葉（i18n.py）。MMM の英語の画面はまだ見分けないので日本語（11-11。MMD の英語モードだけ対応）。"""
+        return "ja"
+
     @property
     def key(self):
         """相手の見分け（MMD 版と同じく、プロセス番号と起動時刻。MMM を開き直すと変わる）。前回の生成の記録をこれで分ける。"""
         if self.host is None:
-            raise MMMError("MMM が起動していません")
+            raise MMMError(_("MMM が起動していません"))
         return f"mmm{self.host.pid}-{self.host.process_started:.0f}"
 
     def state(self):
@@ -108,16 +113,17 @@ class MMMLink:
             return None
         r = ask("model_file", model=m["index"])
         if r.get("file_in_archive"):
-            raise MMMError(f"zip の中から読み込んだモデル（{r['file']} の {r['file_in_archive']}）には、まだ対応していません。"
-                           "zip を展開して、PMX を MMM に読み込み直してください")
+            raise MMMError(_("zip の中から読み込んだモデル（{file} の {inner}）には、まだ対応していません。"
+                             "zip を展開して、PMX を MMM に読み込み直してください", file=r["file"], inner=r["file_in_archive"]))
         return {"name": m["name"], "path": r["file"], "index": m["index"]}
 
     def check_model(self, model):
         selected = self.selected_model()
         if selected is None or os.path.normcase(os.path.abspath(selected["path"])) != os.path.normcase(os.path.abspath(model)):
-            now = selected["name"] if selected else "モデル無し"
-            raise MMMError(f"始めた時と違うモデル（{now}）が選ばれています。キーは書き換えていません。"
-                           f"「{os.path.splitext(os.path.basename(model))[0]}」を選んでから、もう一度押してください")
+            now = selected["name"] if selected else _("モデル無し")
+            raise MMMError(_("始めた時と違うモデル（{now}）が選ばれています。キーは書き換えていません。"
+                             "「{name}」を選んでから、もう一度押してください",
+                             now=now, name=os.path.splitext(os.path.basename(model))[0]))
 
     def selected_key_frames(self):
         """MMM で選択中のボーンのキーのフレーム（全ボーン・昇順・重なりは 1 つ）。「選んだキーの間」に使う。"""
@@ -136,7 +142,7 @@ class MMMLink:
         """選択中のモデルのボーンのキー（基本のレイヤ）を VMD にして path に書き、vmd.Motion を返す。表情・表示/IK は入れない。"""
         model = self.selected_model()
         if model is None:
-            raise MMMError("MMM でモデルを選んでください")
+            raise MMMError(_("MMM でモデルを選んでください"))
         r = ask("keys", model=model["index"])
         skel = self._skeleton(model["path"])
         bones = []
@@ -163,12 +169,12 @@ class MMMLink:
         """
         selected = self.selected_model()
         if selected is None:
-            raise MMMError("MMM でモデルを選んでください")
+            raise MMMError(_("MMM でモデルを選んでください"))
         if model is not None:
             self.check_model(model)
         path = os.path.abspath(path)
         if not os.path.isfile(path):
-            raise MMMError(f"書き戻すファイルがありません。キーは書き換えていません: {path}")
+            raise MMMError(_("書き戻すファイルがありません。キーは書き換えていません: {path}", path=path))
         try:
             self._replace_all(selected, vmd.read(path), undo=True)
         except Exception as e:
@@ -177,8 +183,8 @@ class MMMLink:
             try:
                 self._replace_all(selected, vmd.read(restore), undo=False)
             except Exception as e2:
-                raise MMMError(f"MMM に書き戻せず（{e}）、控えも戻せませんでした（{e2}）。控え: {restore}") from e
-            raise MMMError(f"MMM に書き戻せませんでした（{e}）。控えから戻しました") from e
+                raise MMMError(_("MMM に書き戻せず（{error}）、控えも戻せませんでした（{error2}）。控え: {restore}", error=e, error2=e2, restore=restore)) from e
+            raise MMMError(_("MMM に書き戻せませんでした（{error}）。控えから戻しました", error=e)) from e
 
     def _replace_all(self, selected, motion, undo):
         skel = self._skeleton(selected["path"])

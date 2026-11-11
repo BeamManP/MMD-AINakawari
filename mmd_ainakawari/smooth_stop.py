@@ -19,6 +19,7 @@ import os
 import numpy as np
 
 from . import paths, pipeline, resident
+from .i18n import _
 from . import quat as Q
 from .retarget import TOE_GROUND
 
@@ -106,7 +107,7 @@ def apply(job, result, work_dir, log=print):
     if not job.stop_frames:
         return result
     if not available():
-        raise RuntimeError("MotionBricks がまだ入っていません。「なめらかに止まる」を外すか、詳細の窓の「セットアップ」で入れてください")
+        raise RuntimeError(_("MotionBricks がまだ入っていません。「なめらかに止まる」を外すか、詳細の窓の「セットアップ」で入れてください"))
     stop = job.stop_frames[0] - 1
     kf = stop - job.first
     key = next(k for k in job.request["keys"] if k["frame"] == kf)
@@ -118,13 +119,13 @@ def apply(job, result, work_dir, log=print):
     v = _speeds(roots, fps)
     approach = float(v[max(0, kf - 30):max(1, kf - 10)].mean())
     if approach < MIN_SPEED:
-        log(f"  キーの手前の腰の速さ {approach:.2f} m/s（{MIN_SPEED} 未満）なので、止まり方は Kimodo のままにします")
+        log(_("  キーの手前の腰の速さ {approach:.2f} m/s（{min_speed} 未満）なので、止まり方は Kimodo のままにします", approach=approach, min_speed=MIN_SPEED))
         return result
     # 手前の目印（キー・全ての親・手足）より前には伸ばさない。文脈に 4 フレーム要る
     earlier = [f - job.first for f in job.frames + job.root_frames + job.limb_frames if f < stop]
     limit = min(kf - max(earlier, default=0), kf - 3, MAX_LEN)
     if limit < MIN_LEN:
-        log(f"  キーの手前の目印まで {limit} フレームしかない（MotionBricks は {MIN_LEN} フレームから）ので、止まり方は Kimodo のままにします")
+        log(_("  キーの手前の目印まで {limit} フレームしかない（MotionBricks は {min_len} フレームから）ので、止まり方は Kimodo のままにします", limit=limit, min_len=MIN_LEN))
         return result
     lengths = sorted(set(range(18, limit + 1, LEN_STEP)) | {limit})
     key_pose = {"root": key["root"], "local_rot": key["local_rot"]}
@@ -144,13 +145,15 @@ def apply(job, result, work_dir, log=print):
         score = max(acc, dec) + LEN_COST * L
         if best is None or score < best[0]:
             best = (score, L, acc, dec, sr, np.concatenate([rots[:a], mb_rots, rots[kf + 1:]]))
-    _, L, acc, dec, sr, so = best
+    _score, L, acc, dec, sr, so = best
     a = kf - L
     sunk = keep_above_ground(sr, so, a, kf)
     base_acc, base_dec = _peak_change(v, a - 3, kf, fps)
-    log(f"  止まり方を MotionBricks で作り直しました: {a + job.first}〜{stop}F（{L} フレーム・候補 {len(lengths)} 通りから）・"
-        f"一番強い減速 {base_dec:.1f} → {dec:.1f} m/s²・加速 {base_acc:.1f} → {acc:.1f} m/s²（{res['seconds_generate']:.1f} 秒）"
-        + (f"・床に沈んだ足を最大 {sunk * 100:.1f}cm 持ち上げ" if sunk else ""))
+    log(_("  止まり方を MotionBricks で作り直しました: {a}〜{stop}F（{L} フレーム・候補 {n} 通りから）・"
+          "一番強い減速 {base_dec:.1f} → {dec:.1f} m/s²・加速 {base_acc:.1f} → {acc:.1f} m/s²（{sec:.1f} 秒）",
+          a=a + job.first, stop=stop, L=L, n=len(lengths), base_dec=base_dec, dec=dec, base_acc=base_acc, acc=acc,
+          sec=res['seconds_generate'])
+        + (_("・床に沈んだ足を最大 {cm:.1f}cm 持ち上げ", cm=sunk * 100) if sunk else ""))
     out = dict(result)
     out["root"] = sr.reshape(-1).tolist()
     out["local_rot"] = so.reshape(-1).tolist()

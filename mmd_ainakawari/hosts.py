@@ -38,7 +38,7 @@ class Host:
         title = win32gui.GetWindowText(self.hwnd) if win32gui.IsWindow(self.hwnd) else ""
         if self.kind == "mmm":
             name = title.partition(" - ")[2].rstrip(" *")
-            return "" if name in ("", "新規プロジェクト") else name
+            return "" if name in ("", "新規プロジェクト") else name   # i18n: skip
         return os.path.basename(title.partition("[")[2].rstrip("]"))
 
 

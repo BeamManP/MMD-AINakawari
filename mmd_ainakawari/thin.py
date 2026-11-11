@@ -20,26 +20,28 @@ import time
 import numpy as np
 
 from . import quat as Q
-from . import vmd
+from . import i18n, vmd
+from .i18n import N_
 from .mmd_skel import curve_points
 
 MOVE_TOLERANCE = 0.05    # 骨ごとの移動のずれ（MMD の単位）。範囲の外を保つ時（pipeline.SPLIT_MOVE_TOLERANCE）と同じ
 ANGLE_TOLERANCE = 0.5    # 骨ごとの回転のずれ（度）。同じく SPLIT_ANGLE_TOLERANCE と同じ
 WORLD_TOLERANCE = 0.06   # 全身の姿勢での、手足・頭などの位置のずれ（MMD の単位。約 0.5cm）
 # 窓のスライダの段（名前, 許容差の倍率）。0 は間引かない
-LEVELS = [("しない", 0.0), ("細かく", 0.5), ("ふつう", 1.0), ("粗く", 2.0), ("とても粗く", 4.0)]
+LEVELS = [(N_("しない"), 0.0), (N_("細かく"), 0.5), (N_("ふつう"), 1.0), (N_("粗く"), 2.0), (N_("とても粗く"), 4.0)]
 DEFAULT_LEVEL = 2
 LOOKAHEAD = 4            # 曲線に乗らなかった後も、何フレーム先まで試すか（当てはめは格子なので、1 つ先で乗ることがある）
 MAX_ROUNDS = 6           # 全身の確かめで足し戻す回数。超えたら、ずれた所の骨は間引く前のキーに戻す
-WATCH_EXTRA = ("左つま先", "右つま先")   # 全身の確かめで見る骨（対応する骨に足して）
+WATCH_EXTRA = ("左つま先", "右つま先")   # i18n: skip  # 全身の確かめで見る骨（対応する骨に足して）
 
 _GRID = np.arange(0, 128, 8) / 127.0
 _LINEAR = (20, 20, 107, 107)
 _T_CACHE = {}
 
 
-def level_name(level):
-    return LEVELS[max(0, min(len(LEVELS) - 1, int(level)))][0]
+def level_name(level, lang=None):
+    """段の名前。lang を省くと今の言葉（i18n.lang）。窓は窓の言葉を渡す。"""
+    return i18n.translate(LEVELS[max(0, min(len(LEVELS) - 1, int(level)))][0], lang or i18n.lang())
 
 
 def _t_table(n):

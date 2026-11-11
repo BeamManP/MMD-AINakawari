@@ -15,15 +15,17 @@ NotSetUp で止め、セットアップへ案内する。MotionBricks は入れ�
 import json
 import os
 
+from .i18n import N_, _
+
 HOME = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORK_DIR = os.path.join(HOME, "work")
 PATHS_FILE = os.path.join(WORK_DIR, "paths.json")
 # 入れ方の案内（セットアップの画面は mmd_ainakawari/installer。11-06 にできた）
-SETUP_HINT = "詳細の窓の下の「セットアップ」で入れてください"
+SETUP_HINT = N_("詳細の窓の下の「セットアップ」で入れてください")
 KEYS = ("kimodo", "motionbricks")
 CACHE_KEY = "cache_dir"   # 生成ごとの VMD の置き場（cache_dir()）
 BACKENDS = ("cuda", "directml", "cpu")
-BACKEND_LABEL = {"cuda": "CUDA（NVIDIA）", "directml": "DirectML", "cpu": "CPU"}
+BACKEND_LABEL = {"cuda": N_("CUDA（NVIDIA）"), "directml": "DirectML", "cpu": "CPU"}
 BACKEND_ENV = "AINAKAWARI_BACKEND"   # 試す時に、設定より先に見る（窓のプロセスの環境変数。常駐にも同じ名前で渡す）
 
 
@@ -39,9 +41,9 @@ def load():
     except FileNotFoundError:
         return {}
     except ValueError as e:   # 壊れた JSON（手で書き換えた時など）
-        raise NotSetUp(f"{PATHS_FILE} が読めません（{e}）。{SETUP_HINT}") from None
+        raise NotSetUp(_("{file} が読めません（{error}）。{hint}", file=PATHS_FILE, error=e, hint=_(SETUP_HINT))) from None
     if not isinstance(data, dict) or any(not isinstance(data[k], str) or not data[k] for k in KEYS + (CACHE_KEY,) if k in data):
-        raise NotSetUp(f"{PATHS_FILE} の形が違います。{SETUP_HINT}")
+        raise NotSetUp(_("{file} の形が違います。{hint}", file=PATHS_FILE, hint=_(SETUP_HINT)))
     return data
 
 
@@ -54,7 +56,7 @@ def save(**changes):
         data = {}
     for key, value in changes.items():
         if key not in KEYS:
-            raise ValueError(f"paths.save に渡せるのは {KEYS}（{key!r}）")
+            raise ValueError(f"paths.save に渡せるのは {KEYS}（{key!r}）")   # i18n: skip
         if value is None:
             data.pop(key, None)
         else:
@@ -77,7 +79,8 @@ def backend(name):
         raise ValueError(name)
     value = os.environ.get(BACKEND_ENV) or load().get(name + "_backend", "cuda")
     if value not in BACKENDS:
-        raise NotSetUp(f"計算の方式が正しくありません（{value!r}。{' / '.join(BACKENDS)} のどれか）。{SETUP_HINT}")
+        raise NotSetUp(_("計算の方式が正しくありません（{value}。{choices} のどれか）。{hint}",
+                         value=repr(value), choices=" / ".join(BACKENDS), hint=_(SETUP_HINT)))
     return value
 
 
@@ -101,7 +104,7 @@ def cache_dir():
     try:
         os.makedirs(folder, exist_ok=True)
     except OSError as e:
-        raise NotSetUp(f"一時ファイルの置き場 {folder} を作れません（{e}）。詳しい設定で置き場を選び直してください") from None
+        raise NotSetUp(_("一時ファイルの置き場 {folder} を作れません（{error}）。詳しい設定で置き場を選び直してください", folder=folder, error=e)) from None
     return folder
 
 
@@ -127,15 +130,15 @@ def save_cache_dir(folder):
 def check(folder, name):
     """folder に name（Kimodo・MotionBricks）の環境があるか。無ければ NotSetUp。"""
     if not os.path.isfile(_venv_python(folder)):
-        raise NotSetUp(f"{name} が {folder} にありません（{_venv_python(folder)} が無い）")
+        raise NotSetUp(_("{name} が {folder} にありません（{python} が無い）", name=name, folder=folder, python=_venv_python(folder)))
 
 
 def kimodo_dir():
     folder = load().get("kimodo")
     if not folder:
-        raise NotSetUp(f"Kimodo の場所が決まっていません。{SETUP_HINT}")
+        raise NotSetUp(_("Kimodo の場所が決まっていません。{hint}", hint=_(SETUP_HINT)))
     if not os.path.isfile(_venv_python(folder)):
-        raise NotSetUp(f"Kimodo が {folder} にありません。{SETUP_HINT}")
+        raise NotSetUp(_("Kimodo が {folder} にありません。{hint}", folder=folder, hint=_(SETUP_HINT)))
     return folder
 
 
@@ -202,12 +205,12 @@ def main():
         elif args.no_motionbricks:
             changes["motionbricks"] = None
     except NotSetUp as e:
-        raise SystemExit(f"書きませんでした: {e}")
+        raise SystemExit(f"書きませんでした: {e}")   # i18n: skip
     save(**changes)
-    print(f"書きました: {PATHS_FILE}")
+    print(f"書きました: {PATHS_FILE}")   # i18n: skip
     print(f"  Kimodo: {kimodo_dir()}")
-    print(f"  MotionBricks: {motionbricks_dir() or '（入っていません）'}")
-    print(f"  計算の方式: Kimodo {backend('kimodo')}・MotionBricks {backend('motionbricks')}")
+    print(f"  MotionBricks: {motionbricks_dir() or '（入っていません）'}")   # i18n: skip
+    print(f"  計算の方式: Kimodo {backend('kimodo')}・MotionBricks {backend('motionbricks')}")   # i18n: skip
 
 
 if __name__ == "__main__":

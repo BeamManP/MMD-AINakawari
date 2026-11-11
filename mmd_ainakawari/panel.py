@@ -11,9 +11,13 @@ from ctypes import wintypes
 
 import win32gui
 
+from .i18n import N_
+
 CLASS = "AINakawari.Panel"
 # 部品の番号（nakawari_panel.cpp と同じ）
 ENGINE, RANGE, PROMPT, GENERATE, UNDO, DETAILS, STATUS, SAMPLES = 101, 102, 103, 104, 105, 106, 107, 108
+# プラグインが日本語で作るボタンの字。窓が自分の言葉に書き換える（app._sync_panel。「生成」は生成中に「中断」になるので別に写す）
+LABELS = {SAMPLES: N_("サンプルから選ぶ ▼"), UNDO: N_("元に戻す"), DETAILS: N_("詳　細")}
 
 WM_GETTEXT, WM_SETTEXT, WM_GETTEXTLENGTH = 0x000D, 0x000C, 0x000E
 CB_GETCURSEL, CB_SETCURSEL = 0x0147, 0x014E
