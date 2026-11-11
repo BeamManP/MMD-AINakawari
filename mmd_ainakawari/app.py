@@ -22,7 +22,7 @@ import win32event
 import win32gui
 import winerror
 
-from . import applog, gpu, hosts, panel, paths, pipeline, resident, runner, samples, smooth_stop, thin
+from . import __version__, applog, gpu, hosts, panel, paths, pipeline, resident, runner, samples, smooth_stop, thin
 from .installer import window as setup_window
 from .message_window import MessageWindow, register_message
 from . import vmd
@@ -43,6 +43,7 @@ _set_window_long = ctypes.windll.user32.SetWindowLongPtrW
 _set_window_long.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
 _set_window_long.restype = ctypes.c_void_p
 SETTINGS_PATH = os.path.join(runner.WORK_DIR, "settings.json")
+APP_TITLE = f"AIナカワリ {__version__}"   # 窓のタイトル（更新されたかが分かるように版を付ける。11-11 マスター）
 CFG_DEFAULT = 2.0             # プロンプトの効き・キーの効きの推奨（Kimodo の既定）。「推奨に戻す」もこの値
 CFG_RANGE = (0.5, 10.0, 0.5)  # スライダの下限・上限・刻み
 DEFAULTS = {
@@ -161,7 +162,7 @@ class App:
         self.mmd = mmd
         self.link = mmd.link()   # MMD なら MMDLink、MMM なら MMMLink（同じ口）
         root.withdraw()  # 出すのは Hub が決める
-        root.title("AIナカワリ")
+        root.title(APP_TITLE)
         root.minsize(560, 0)   # 高さの下限は _build で決める（上と下の段が必ず見える高さ）
         root.attributes("-topmost", False)
         self.cfg = dict(DEFAULTS)
@@ -475,7 +476,8 @@ class App:
                 var.set(s)
             shown.set(f"{s:.1f}" + ("（推奨）" if s == CFG_DEFAULT else ""))
 
-        ttk.Label(d, text=title, width=12).grid(row=row, column=0, sticky="w", padx=4, pady=(4, 0))
+        # 幅は決めない（12 文字にしていて「プロンプトの効き」の「き」が切れていた。11-11 マスター）。列は長い方の名前に合う
+        ttk.Label(d, text=title).grid(row=row, column=0, sticky="w", padx=4, pady=(4, 0))
         ttk.Scale(d, from_=low, to=high, orient="horizontal", variable=var).grid(row=row, column=1, sticky="ew", padx=4, pady=(4, 0))
         ttk.Label(d, textvariable=shown, width=12).grid(row=row, column=2, sticky="w", padx=4, pady=(4, 0))
         tk.Label(d, text=note, foreground="#556", background=ttk.Style().lookup("TFrame", "background"),
@@ -762,7 +764,7 @@ class App:
         # 次の予約は先に入れる（途中で例外が出ると、パネルとの同期も表示の更新も止まっていた。11-05 Codex のレビュー）
         self.root.after(500, self._tick)
         scene = self.mmd.scene_name()
-        title = (f"AIナカワリ - {scene}" if scene else "AIナカワリ") + (" （MMM）" if self.mmd.kind == "mmm" else "")
+        title = (f"{APP_TITLE} - {scene}" if scene else APP_TITLE) + (" （MMM）" if self.mmd.kind == "mmm" else "")
         if self.root.title() != title:
             self.root.title(title)
         self._read_mmd()

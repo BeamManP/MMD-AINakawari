@@ -15,6 +15,18 @@ MMD でいつもどおりポーズを付けてキーを打つ → MMD のメニ�
 
 マスターの MMD（`E:\oldC_0427\…\MikuMikuDance_v932x64`）は 11-03 にこの形にした。MMAccel は外して `Desktop\MMAccel_退避_20261103\`、MMDPlugin を入れる前の MME 一式は `Desktop\MMDPlugin導入前_20261103\` に控えがある。
 
+**いま（11-11）は、どの MMD もこのリポジトリを起動しない。** マスターの MMD は配布の zip を上から入れた形（`plugin\MMD-AINakawari\MMD-AINakawari.ini` が横の `MMD-AINakawari\app` と同梱の Python を指す。11-11 の時点で 0.3.0・11-10 17:55 の組み立て）、
+検証用の MMD（`F:\MikuMikuDance_v932x64_AINAKAWARI_Test`）も配布版（0.2.0）。なので **MMD のメニュー・右下のパネルから窓を開くと配布版が動き、手元の変更は入っていない**
+（11-11 に、範囲選択の欄を戻す直しを MMD で試そうとして、配布版の窓で生成していた。記録も配布版の `app\work\app.log` に出る）。
+
+**MMD の実機テストは、窓をリポジトリから手で起動する**（配布版の窓と並べて動かす。下の「開発版と配布版を並べる」の `AINAKAWARI_INSTANCE`）:
+
+    cd /d E:\Projects\MMDKimodo && set AINAKAWARI_INSTANCE=dev && start "" E:\Projects\mmd-mcp\.venv\Scripts\pythonw.exe -m mmd_ainakawari.app --open <MMD の窓>
+
+- `AINAKAWARI_INSTANCE` を付けないと、配布版の窓が動いている時は、そちらに「開いて」と知らせて終わる（`MMD-AINakawari.cmd` もこれ）
+- MMD のメニューと右下のパネルは配布版の窓につながったまま（MMD のプラグインには `instance` が無い）。試すのはリポジトリ版の窓のボタン。パネルを試す時は、配布版の窓（`MMD-AINakawari\python\pythonw.exe`）を止めてから付けずに起動する
+- どちらが動いているかは、窓のタイトルの版（11-11 から `AIナカワリ 0.3.1`）と、`app.log` の起動の行の `app:` で見分ける
+
 ## 使い方
 1. （11-07 まで、ここで低負荷／高速の動作モードを選んでいた。いまは選ばない。下の「文の読み取り」）
 2. MMD のメニュー「MMDKimodo」（ヘルプの右）→「Kimodo の窓を開く」。初回は Python の起動で数秒かかる
