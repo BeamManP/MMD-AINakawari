@@ -25,7 +25,13 @@ class MMMError(RuntimeError):
     pass
 
 
-def ask(cmd, timeout=120.0, **args):
+QUICK = 10.0   # 見回りの小さな頼み（モデル・フレーム・選んだキー）。窓は 0.5〜1 秒ごとに読むので、ここで長く待つと窓が止まる
+HEAVY = 120.0  # モーション全体を読む・書き戻す頼み
+
+
+def ask(cmd, timeout=QUICK, **args):
+    """橋渡しに頼みを 1 つ投げる。timeout は接続と返事の待ちの上限（11-12: 全部 120 秒だった。MMM が閉じても返事を待ち続けて、
+    窓が「MMM の窓が無い」に気づくまで約 2 分かかっていた。重い頼みだけ HEAVY を渡す）。"""
     req = {"cmd": cmd, **{k: v for k, v in args.items() if v is not None}}
     try:
         with socket.create_connection((HOST, PORT), timeout=timeout) as s:
@@ -135,7 +141,7 @@ class MMMLink:
         frames = sorted({k["frame"] for b in r["bones"] for k in b["keys"]})
         if not with_names:
             return frames, None
-        allk = ask("keys")
+        allk = ask("keys", timeout=HEAVY)
         return frames, {vmd.vmd_name(b["bone"]): [k["frame"] for k in b["keys"]] for b in allk["bones"]}
 
     def read_motion(self, path):
@@ -143,7 +149,7 @@ class MMMLink:
         model = self.selected_model()
         if model is None:
             raise MMMError(_("MMM でモデルを選んでください"))
-        r = ask("keys", model=model["index"])
+        r = ask("keys", timeout=HEAVY, model=model["index"])
         skel = self._skeleton(model["path"])
         bones = []
         for b in r["bones"]:
@@ -188,7 +194,7 @@ class MMMLink:
 
     def _replace_all(self, selected, motion, undo):
         skel = self._skeleton(selected["path"])
-        names = [b["name"] for b in ask("bones", model=selected["index"])["bones"]]
+        names = [b["name"] for b in ask("bones", timeout=HEAVY, model=selected["index"])["bones"]]
         tracks = {}
         for k in motion.bones:
             full = skel.vmd_alias.get(k.name)
@@ -198,7 +204,7 @@ class MMMLink:
                 "frame": int(k.frame), "position": [float(v) for v in k.pos], "quaternion": [float(v) for v in k.rot],
                 "interp": _interp_from_vmd(k.interp)}
         # 今の MMM のキーと比べて、変わったボーンだけ送る（送ったボーンは全部の範囲を差し替えるので、変わらない所まで触らない）
-        now = {b["bone"]: b["keys"] for b in ask("keys", model=selected["index"])["bones"]}
+        now = {b["bone"]: b["keys"] for b in ask("keys", timeout=HEAVY, model=selected["index"])["bones"]}
         bones = {}
         for n in dict.fromkeys(names):   # 同じ名前のボーンは前の方だけ（MMM の Bones[名前] も前の方を返す）
             keys = sorted(tracks.get(n, {}).values(), key=lambda x: x["frame"])
@@ -209,7 +215,7 @@ class MMMLink:
                 bones[n] = keys
         if not bones:
             return {"removed": 0, "added": 0, "undo": False, "bones": 0}
-        r = ask("replace_keys", model=selected["index"], range=[0, LAST_FRAME], bones=bones, undo=undo)
+        r = ask("replace_keys", timeout=HEAVY, model=selected["index"], range=[0, LAST_FRAME], bones=bones, undo=undo)
         r["bones"] = len(bones)
         return r
 
