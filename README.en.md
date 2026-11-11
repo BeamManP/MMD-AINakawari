@@ -43,7 +43,7 @@ Two NVIDIA models do the work:
 | | Needed | Tested on |
 |---|---|---|
 | OS | Windows 10/11 (64-bit) | Windows 11 |
-| MMD | MikuMikuDance 9.32 x64 (Japanese version; English Mode is fine) | 9.32 x64 |
+| MMD | MikuMikuDance 9.32 x64 (Japanese version; English Mode is fine). MikuMikuMoving 1.2.9.2 (64-bit) also works (a bonus, experimental; see "Using it in MikuMikuMoving (MMM)" below) | 9.32 x64, MMM 1.2.9.2 |
 | GPU | An NVIDIA GPU: GTX 16 series / RTX 20 series or newer, 6GB+ VRAM (about 2.6GB is used). Keep the driver up to date. For other GPUs see "Non-NVIDIA GPUs" below | RTX 3090 (24GB). Users have also reported it working on a GTX 1650 (4GB) |
 | RAM | 16GB or more (prompt reading uses about 8GB; not used if you only use the sample prompts. Freed when all MMD windows are closed, or after 5 minutes of no use) | 64GB. Users have also reported it working on a 16GB PC |
 | Runtime | [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe). If it is missing, Setup points you here | |
@@ -112,6 +112,20 @@ When the quick panel ("AI Nakawari quick panel") appears at the right of MMD's b
 
 ![The quick panel in MMD's bottom row](docs/images/bottom_strip.png)
 
+### Using it in MikuMikuMoving (MMM) (a bonus, experimental)
+The same zip can also be installed into MikuMikuMoving 1.2.9.2 (64-bit).
+
+1. **Close MMM first**, then extract the contents of the zip into the folder that holds `MikuMikuMoving64.exe`
+2. Double-click `AIナカワリ導入.cmd`. When it finds `MikuMikuMoving64.exe`, it installs the MMM version (it only places DLLs into MMM's `Plugins\`; MMDPlugin is not placed)
+3. Start MMM, open the window with the "**AI Nakawari**" button on the toolbar, and press "**Setup**" (the same as the MMD version)
+
+- It is used the same way as the MMD version: select the first and last keys on the timeline and press "Generate". The same panel as MMD's bottom-right one also appears in the "Plugin" tab of the left pane
+- One **Ctrl+Z** in MMM takes the generated motion back to how it was before
+- Only the bones in the lowest motion layer of the selected model are rewritten. Facial keys and other layers are not touched
+- Models loaded from inside a zip are not supported yet (it shows a message and stops)
+- It has only been tested with one model and one motion. **Please tell me whether it worked for you**
+- If the same folder has both MMD and MMM, the black window asks which one to install into
+
 ## How to use
 
 ### The quick panel (bottom right of MMD)
@@ -165,6 +179,8 @@ The prompt and the generation method (Kimodo / MotionBricks) are shared between 
 **Uninstall**: close MMD, then delete the following.
 - `AIナカワリ導入.cmd`, `MMD-AINakawari\` and `plugin\MMD-AINakawari\` in the MMD folder
 - The location you chose in Setup (for example `D:\AINakawari\`)
+
+For the MMM version, close MMM, then delete `AIナカワリ導入.cmd` and `MMD-AINakawari\`, and `MMM-AINakawari.dll`, `MMM-AINakawari.ini`, `MmmBridge.dll` and `MmmBridgeCore\` in `Plugins\`.
 
 MMDPlugin (`MMDPlugin.dll`, `d3d9.dll`, `d3dx9_43.dll`, `plugin\MMDPlugin\`) and the MME files moved to `plugin\mme\` stay. If you use no other MMDPlugin plugins, delete MMDPlugin's 3 files and `plugin\MMDPlugin\`, and move the contents of `plugin\mme\` back next to `MikuMikuDance.exe` to restore the original layout.
 

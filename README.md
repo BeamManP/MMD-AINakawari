@@ -40,7 +40,7 @@ MMD（MikuMikuDance）で打ったキーとキーの間を、AI が中割りし�
 | | 必要なもの | 確かめた環境 |
 |---|---|---|
 | OS | Windows 10／11（64bit） | Windows 11 |
-| MMD | MikuMikuDance 9.32 x64（日本語版） | 9.32 x64 |
+| MMD | MikuMikuDance 9.32 x64（日本語版）。MikuMikuMoving 1.2.9.2（64bit）でも使えます（おまけ・試験版。下の「MikuMikuMoving（MMM）で使う」） | 9.32 x64・MMM 1.2.9.2 |
 | GPU | NVIDIA の GPU。GTX 16 シリーズ／RTX 20 シリーズ以降、VRAM 6GB 以上（使うのは約 2.6GB）。ドライバは新しい物に。それ以外の GPU は下の「NVIDIA 以外の GPU」 | RTX 3090（24GB）。GTX 1650（4GB）でも動いたと報告をいただきました |
 | メモリ | 16GB 以上（プロンプトの読み取りに約 8GB 使う。サンプルの文だけなら使わない。MMD を全部閉じるか、5 分使わなければ空けます） | 64GB。メモリ 16GB の PC でも動いたと報告をいただきました |
 | ランタイム | [Microsoft Visual C++ 再頒布可能パッケージ（x64）](https://aka.ms/vs/17/release/vc_redist.x64.exe)。入っていなければ、セットアップがここへ案内します | |
@@ -109,6 +109,20 @@ MMD の下の段の右に「AIナカワリ簡易操作」が出ていれば、�
 
 ![MMD の下の段に並んだ簡易操作パネル](docs/images/bottom_strip.png)
 
+### MikuMikuMoving（MMM）で使う（おまけ・試験版）
+同じ zip で、MikuMikuMoving 1.2.9.2（64bit）にも入れられます。
+
+1. **MMM を閉じてから**、zip の中身を `MikuMikuMoving64.exe` のあるフォルダに展開します
+2. `AIナカワリ導入.cmd` をダブルクリックします。`MikuMikuMoving64.exe` を見つけると MMM 版として入れます（MMM の `Plugins\` に DLL を置くだけで、MMDPlugin は置きません）
+3. MMM を起動して、ツールバーの「**AIナカワリ**」のボタンで窓を開き、「**セットアップ**」を押します（中身は MMD 版と同じです）
+
+- 使い方は MMD 版と同じです。タイムラインで最初と最後のキーを選んで「生成」を押します。左の欄の「プラグイン」のタブにも、MMD の右下と同じパネルが出ます
+- 生成した動きは、MMM の **Ctrl+Z 1 回**で生成の前に戻ります
+- 書き換えるのは、選んでいるモデルの一番下のモーションレイヤのボーンだけです。表情・ほかのレイヤには触りません
+- zip の中から読み込んだモデルには、まだ対応していません（知らせを出して止まります）
+- 確かめたのは 1 つのモデル・1 つのモーションだけです。**うまく動いた・動かなかったを教えてもらえると助かります**
+- 同じフォルダに MMD と MMM の両方がある時は、黒い窓でどちらに入れるかを聞きます
+
 ## 使い方
 
 ### 簡易操作パネル（MMD の右下）
@@ -162,6 +176,8 @@ MMD の下の段の右に「AIナカワリ簡易操作」が出ていれば、�
 **アンインストール**: MMD を閉じてから、次の物を消します。
 - MMD のフォルダの `AIナカワリ導入.cmd`・`MMD-AINakawari\`・`plugin\MMD-AINakawari\`
 - セットアップで選んだ場所（例: `D:\AINakawari\`）
+
+MMM 版の時は、MMM を閉じてから `AIナカワリ導入.cmd`・`MMD-AINakawari\` と、`Plugins\` の `MMM-AINakawari.dll`・`MMM-AINakawari.ini`・`MmmBridge.dll`・`MmmBridgeCore\` を消します。
 
 MMDPlugin（`MMDPlugin.dll`・`d3d9.dll`・`d3dx9_43.dll`・`plugin\MMDPlugin\`）と、`plugin\mme\` に移した MME は残ります。ほかの MMDPlugin のプラグインを使っていなければ、MMDPlugin の 3 ファイルと `plugin\MMDPlugin\` を消し、`plugin\mme\` の中身を `MikuMikuDance.exe` の横に戻すと、元の形になります。
 

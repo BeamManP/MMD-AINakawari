@@ -276,7 +276,12 @@ MMM のツールバー「AIナカワリ」（mmm_plugin/・C#）── pythonw -
   窓から Kimodo で生成 35 秒（常駐の立ち上げ込み・生成 4.7 秒）→ MMM の Ctrl+Z で生成の前と全キー一致・やり直すで後と一致／窓の「元に戻す」で生成の前に戻る／
   MMD を相手にした時の見分け・`MMDLink`・既存のテスト（中断 13・レビュー 13・計算の方式 38）は今までどおり。
   `mmm_run` からも中割り 8 秒・Kimodo 50 秒・中断・キーを選ばずに押す、を通した
-- 配布にはまだ入れていない。入れる時に要る物: 橋渡し（MmmBridge.dll・MmmBridge.Core.dll）とボタン・パネルの DLL の同梱、ini の相対の場所、MMM の Plugins へ置く導入
+- **配布**（11-12 マスター「MMD 版とセットにして、導入.cmd が同じフォルダに MMD があれば MMD 版、MMM があれば MMM 版として振る舞う」）:
+  zip の `MMD-AINakawari\mmm\` に、ボタン・パネルの DLL・`tools/release/MMM-AINakawari.ini`（Plugins からの相対の場所）・橋渡しの 2 つを入れる（計 約 62KB）。
+  `tools/install_plugin.py` が `MikuMikuMoving64.exe`（1.2.9.2 の sha256）を見つけたら、`MMD-AINakawari\` を置いて `Plugins\` に写し、MMD 用の `plugin\MMD-AINakawari` を片付ける。
+  両方ある時は黒い窓で聞く。確かめ: `tests/check_install_mmm_1112.py`（一時フォルダで MMM の道・MMD の道）。
+  橋渡しは、AIナカワリ が使う頼み（models・bones・keys・marker・set_marker・model_file・replace_keys ほか）だけをふだん受ける。試し用の頼み（inspect・undo_call・ui_* など）は MMM の `Plugins\MmmBridge.ini` に `debug=1` がある時だけ（mmm-mcp 0.3.0／中身 0.4.0。11-12 に ini なしで中割り → undo・redo・undo が前後と全キー一致）。開発の MMM には debug=1 の ini を置いている
+  DLL は `-p:DebugType=none` で組み立てる（既定だと .pdb の場所 `E:\Projects\…` が埋まる）。`build_release.py` が DLL に手元の場所が無いかも見る
 
 ## 速さ（11-04 昼に高速化）
 生成 1 回の内訳を測って順に直した（`runner.generate` の段ごとに時間を記録。Tda ミク）:

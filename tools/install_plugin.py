@@ -10,6 +10,12 @@ MMD のフォルダ（MikuMikuDance.exe のある所）に:
       MMDPlugin の説明書の「MME も使う場合」の形
 自前の d3d9.dll は作らない。MME でも MMDPlugin でもない d3d9.dll が exe の横にあれば、触らずに止める。
 途中で止まっても、もう一度ダブルクリックすれば続きから直る（d3d9.dll を最後に置く）。
+
+MikuMikuMoving（MikuMikuMoving64.exe のある所）に展開した時は、MMM 版として入れる（11-12 マスター「同フォルダに MMD があれば MMD 版、MMM があれば MMM 版」）:
+    - MMD-AINakawari\\（Python・app など。MMD 版と同じ物）を置く
+    - Plugins\\ に MMM-AINakawari.dll・.ini（ボタンとパネル）と MmmBridge.dll・MmmBridgeCore\\MmmBridge.Core.dll（MMM の中の橋渡し）を置く
+    - MMD 用の物（MMDPlugin・plugin\\MMD-AINakawari）は置かない。zip をそのまま展開してできた plugin\\MMD-AINakawari は片付ける
+同じフォルダに MMD と MMM が両方あれば、どちらに入れるかを聞く。
 """
 import hashlib
 import os
@@ -30,6 +36,13 @@ MMDPLUGIN_FILES = {
 MMDPLUGIN_README = "MMDPlugin_readme.txt"
 MME_FILES = ("d3d9.dll", "MMEffect.dll", "MMHack.dll", "MMEffect.ini", "MMEffect.txt")
 
+MMM_EXE = "MikuMikuMoving64.exe"
+# MikuMikuMoving 1.2.9.2 64bit（2018-06-03 の最終版）。MMM 版を確かめたのはこの exe だけ（11-11）
+MMM_SHA256 = "1dde973d548714539e31561a0ab6a2a7074131479a248950e931cac34dd95ddc"
+MMM_SRC = os.path.join(HERE, "mmm")   # （zip の中の）MMD-AINakawari\mmm。中身を MMM の Plugins\ に同じ並びで写す
+MMM_FILES = ("MMM-AINakawari.dll", "MMM-AINakawari.ini", "MmmBridge.dll", os.path.join("MmmBridgeCore", "MmmBridge.Core.dll"))
+HOSTS = {"mmd": (EXE, "MMD（MikuMikuDance）"), "mmm": (MMM_EXE, "MMM（MikuMikuMoving）")}
+
 
 class Stop(Exception):
     """使う人に伝えて止める（何が起きたか・どうすればよいか）。"""
@@ -49,28 +62,46 @@ def copy_atomic(src, dst):
     os.replace(tmp, dst)
 
 
-def is_mmd(folder):
-    return os.path.isfile(os.path.join(folder, EXE))
+def hosts_in(folder):
+    """folder にある相手（"mmd"・"mmm"）の一覧。"""
+    return [kind for kind, (exe, _label) in HOSTS.items() if os.path.isfile(os.path.join(folder, exe))]
 
 
-def choose_mmd(start):
-    if is_mmd(start):
-        return start
-    print("この zip は MMD のフォルダの外に展開されています。")
-    print("MikuMikuDance.exe のあるフォルダを選んでください（選んだフォルダに AIナカワリ を写します）。")
+def ask_host(folder, ask=input):
+    """MMD と MMM が同じフォルダにある時に、どちらに入れるかを聞く。"""
+    print(f"{folder} には MikuMikuDance.exe と {MMM_EXE} の両方があります。どちらに AIナカワリ を入れますか？")
+    while True:
+        answer = ask("  1: MMD（MikuMikuDance）   2: MMM（MikuMikuMoving）   番号を入れて Enter > ").strip()
+        if answer in ("1", "１"):
+            return "mmd"
+        if answer in ("2", "２"):
+            return "mmm"
+        if not answer:
+            raise Stop("選ばれなかったので、何もせずに終わります。")
+        print("1 か 2 を入れてください。")
+
+
+def choose_target(start):
+    """(入れる先のフォルダ, "mmd" か "mmm")。展開した所に無ければ、フォルダを選んでもらう。"""
+    kinds = hosts_in(start)
+    if kinds:
+        return start, kinds[0] if len(kinds) == 1 else ask_host(start)
+    print("この zip は MMD・MMM のフォルダの外に展開されています。")
+    print(f"MikuMikuDance.exe か {MMM_EXE} のあるフォルダを選んでください（選んだフォルダに AIナカワリ を写します）。")
     import tkinter as tk
     from tkinter import filedialog
     root = tk.Tk()
     root.withdraw()
     try:
         while True:
-            folder = filedialog.askdirectory(title="MikuMikuDance.exe のあるフォルダを選んでください", mustexist=True)
+            folder = filedialog.askdirectory(title=f"MikuMikuDance.exe か {MMM_EXE} のあるフォルダを選んでください", mustexist=True)
             if not folder:
                 raise Stop("フォルダが選ばれなかったので、何もせずに終わります。")
             folder = os.path.normpath(folder)
-            if is_mmd(folder):
-                return folder
-            print(f"{folder} に MikuMikuDance.exe がありません。選び直してください。")
+            kinds = hosts_in(folder)
+            if kinds:
+                return folder, kinds[0] if len(kinds) == 1 else ask_host(folder)
+            print(f"{folder} に MikuMikuDance.exe も {MMM_EXE} もありません。選び直してください。")
     finally:
         root.destroy()
 
@@ -82,28 +113,70 @@ def check_version(mmd):
                    "この MikuMikuDance.exe は別の版なので、ファイルは何も変えずに終わります。")
 
 
-def check_not_running(mmd):
+def check_mmm_version(mmm):
+    if sha256(os.path.join(mmm, MMM_EXE)) != MMM_SHA256:
+        raise Stop("AIナカワリ の MMM 版が使えるのは MikuMikuMoving 1.2.9.2（64bit）だけです。\n"
+                   f"この {MMM_EXE} は別の版なので、ファイルは何も変えずに終わります。")
+
+
+def check_not_running(folder, exe_name=EXE, label="MMD"):
     import psutil
-    exe = os.path.normcase(os.path.join(mmd, EXE))
+    exe = os.path.normcase(os.path.join(folder, exe_name))
     for p in psutil.process_iter(["name", "exe"]):
-        if (p.info["name"] or "").lower() != EXE.lower():
+        if (p.info["name"] or "").lower() != exe_name.lower():
             continue
-        # exe の場所が読めない時は、この MMD かもしれないので止める
+        # exe の場所が読めない時は、この MMD（MMM）かもしれないので止める
         if not p.info["exe"] or os.path.normcase(p.info["exe"]) == exe:
-            raise Stop("MMD が開いています。MMD を閉じてから、もう一度ダブルクリックしてください。")
+            raise Stop(f"{label} が開いています。{label} を閉じてから、もう一度ダブルクリックしてください。")
+
+
+def copy_app(target):
+    """zip を MMD（MMM）の外に展開した時だけ、MMD-AINakawari を写す。前に入れた物の設定（app\\work）は残す。"""
+    dest = os.path.join(target, NAME)
+    if os.path.isdir(dest) and os.path.samefile(dest, HERE):
+        return
+    print(f"写しています: {dest}（1〜2 分かかります）", flush=True)
+    shutil.copytree(HERE, dest, dirs_exist_ok=True,
+                    ignore=lambda folder, names: [n for n in names if n in ("work", "__pycache__")])
 
 
 def copy_plugin(mmd):
-    """zip を MMD の外に展開した時だけ、MMD-AINakawari と plugin\\MMD-AINakawari を MMD へ写す。前に入れた物の設定（app\\work）は残す。"""
+    """zip を MMD の外に展開した時だけ、MMD-AINakawari と plugin\\MMD-AINakawari を MMD へ写す。"""
     dest = os.path.join(mmd, NAME)
     if os.path.isdir(dest) and os.path.samefile(dest, HERE):
         return
     if not os.path.isfile(os.path.join(PLUGIN_SRC, f"{NAME}.dll")):
         raise Stop(f"{PLUGIN_SRC} に {NAME}.dll がありません。zip の中身を全部展開し直してください。")
-    print(f"写しています: {dest}（1〜2 分かかります）", flush=True)
-    shutil.copytree(HERE, dest, dirs_exist_ok=True,
-                    ignore=lambda folder, names: [n for n in names if n in ("work", "__pycache__")])
+    copy_app(mmd)
     shutil.copytree(PLUGIN_SRC, os.path.join(mmd, "plugin", NAME), dirs_exist_ok=True)
+
+
+def place_mmm(mmm):
+    """MMM の Plugins\\ に、ボタン・パネルと橋渡しの DLL を置く。足りない物があれば何も置かずに止める。"""
+    missing = [name for name in MMM_FILES if not os.path.isfile(os.path.join(MMM_SRC, name))]
+    if missing:
+        raise Stop(f"{MMM_SRC} に {', '.join(missing)} がありません。zip の中身を全部展開し直してください。")
+    plugins = os.path.join(mmm, "Plugins")
+    for name in MMM_FILES:
+        dst = os.path.join(plugins, name)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        copy_atomic(os.path.join(MMM_SRC, name), dst)
+    print("MMM の Plugins に AIナカワリ のボタン・パネルと、MMM とやり取りする橋渡し（MmmBridge）を置きました。", flush=True)
+
+
+def tidy_mmd_files(mmm):
+    """zip を MMM のフォルダにそのまま展開した時にできる plugin\\MMD-AINakawari（MMD 用）を片付ける。
+    展開した物そのもの（PLUGIN_SRC）の時だけ消す。ほかの物は触らない。"""
+    leftover = os.path.join(mmm, "plugin", NAME)
+    if not (os.path.isdir(leftover) and os.path.isdir(PLUGIN_SRC) and os.path.samefile(leftover, PLUGIN_SRC)):
+        return
+    if any(n.lower() not in (f"{NAME}.dll".lower(), f"{NAME}.ini".lower()) for n in os.listdir(leftover)):
+        return
+    shutil.rmtree(leftover)
+    parent = os.path.dirname(leftover)
+    if not os.listdir(parent):
+        os.rmdir(parent)
+    print("MMD 用のファイル（plugin\\MMD-AINakawari）は MMM では使わないので片付けました。", flush=True)
 
 
 FOREIGN_D3DX9 = ("MikuMikuDance.exe の横に、MMDPlugin の物ではない d3dx9_43.dll があります。\n"
@@ -181,19 +254,32 @@ def place_mmdplugin(mmd):
 def main():
     start = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.dirname(HERE)
     try:
-        mmd = choose_mmd(start)
-        print(f"MMD のフォルダ: {mmd}", flush=True)
-        check_version(mmd)
-        check_not_running(mmd)
-        copy_plugin(mmd)
-        place_mmdplugin(mmd)
+        folder, kind = choose_target(start)
+        if kind == "mmm":
+            print(f"MMM のフォルダ: {folder}", flush=True)
+            check_mmm_version(folder)
+            check_not_running(folder, MMM_EXE, "MMM")
+            copy_app(folder)
+            place_mmm(folder)
+            tidy_mmd_files(folder)
+        else:
+            print(f"MMD のフォルダ: {folder}", flush=True)
+            check_version(folder)
+            check_not_running(folder)
+            copy_plugin(folder)
+            place_mmdplugin(folder)
     except Stop as e:
         print()
         print(e)
         return 1
     print()
-    print("できました。MMD を起動すると、メニューの「ヘルプ」の右に「AIナカワリ」が出ます。")
-    print("最初に「AIナカワリの窓を開く」→「セットアップ」で、AI のモデルを入れてください。")
+    if kind == "mmm":
+        print("できました。MMM を起動すると、ツールバーに「AIナカワリ」のボタンが出ます"
+              "（左の欄の「プラグイン」のタブにも AIナカワリ のパネルが出ます）。")
+        print("最初にボタンで窓を開いて、「セットアップ」で AI のモデルを入れてください。")
+    else:
+        print("できました。MMD を起動すると、メニューの「ヘルプ」の右に「AIナカワリ」が出ます。")
+        print("最初に「AIナカワリの窓を開く」→「セットアップ」で、AI のモデルを入れてください。")
     return 0
 
 

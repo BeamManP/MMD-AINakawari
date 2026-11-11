@@ -14,6 +14,11 @@ zip の形（使う人は、中身を MMD のフォルダに展開して「AIナ
         app\                      mmd_ainakawari・tools の一部・LICENSE・README.md（設定は app\work に書かれる）
         uv\uv.exe                 セットアップで Kimodo・MotionBricks の Python を作る
         mmdplugin\                MMDPlugin 0.41 x64（AIナカワリ導入.cmd が exe の横に置く）
+        mmm\                      MMM 版の DLL（AIナカワリ導入.cmd が MMM の Plugins\ に同じ並びで写す）:
+            MMM-AINakawari.dll/.ini   ツールバーのボタンとパネル（mmm_plugin\）・場所の設定（ini のフォルダ＝Plugins からの相対）
+            MmmBridge.dll             MMM の中の橋渡しの入口（mmm-mcp の bridge\）
+            MmmBridgeCore\MmmBridge.Core.dll   橋渡しの中身（mmm-mcp の core\）
+        MMM の DLL を組み立てる時は、手元の MMM の Plugins\ にも写る（mmm-mcp の作り）。MMM を閉じてから回すこと
         prebuilt\                 組み立て済みの MotionCorrection（kimodo の C++ の部品。セットアップが Kimodo の環境に入れる）とライセンスの文
         BUILD.json                作った時の版（コミット・Python・uv）
         THIRD_PARTY.txt           同梱した物とライセンス
@@ -78,7 +83,7 @@ SMOKE = (
     "import mmd_mcp.bone_selection, mmd_mcp.bone_state;"
     "import mmd_ainakawari.app, mmd_ainakawari.panel, mmd_ainakawari.runner, mmd_ainakawari.nakawari,"
     " mmd_ainakawari.pipeline, mmd_ainakawari.smooth_stop, mmd_ainakawari.mmd_link, mmd_ainakawari.mmd_memory,"
-    " mmd_ainakawari.mmd_skel, mmd_ainakawari.paths, mmd_ainakawari.applog;"
+    " mmd_ainakawari.mmd_skel, mmd_ainakawari.paths, mmd_ainakawari.applog, mmd_ainakawari.hosts, mmd_ainakawari.mmm_link;"
     "import mmd_ainakawari.installer.window, mmd_ainakawari.installer.steps as s;"
     "import mmd_ainakawari.app as a, os; assert os.path.isfile(a.ICON), a.ICON;"
     "import os, mmd_mcp.bone_selection as b; assert os.path.isfile(b.DLL_PATH), b.DLL_PATH;"
@@ -109,6 +114,9 @@ THIRD_PARTY = """AIナカワリ の zip に同梱している物
 - uv {uv}（https://github.com/astral-sh/uv）: MIT OR Apache-2.0
 - MMDPlugin 0.41 x64（おいがみ）: 転載は非商用に限り連絡不要。mmdplugin\\MMDPlugin_readme.txt
   d3dx9_43.dll も MMDPlugin の物（中で Windows の d3dx9_43.dll を呼ぶ中継。Microsoft の DirectX の物ではない）
+- mmm\\（MMM 版）: MMM-AINakawari.dll は AIナカワリ の一部（LICENSE）。MmmBridge.dll・MmmBridge.Core.dll は mmm-mcp（https://github.com/BeamManP/mmm-mcp）: MIT-0。
+  MikuMikuMoving（Mogg さん）の MikuMikuPlugin.dll・DxMath.dll を参照して組み立てた物で、それらは同梱していない（MMM に入っている物を使う）。
+  元に戻すの作りは mfakane さんの MikuMikuMoving-Plugins（WTFPL）の SceneExtensions.BeginUndoBlock の考え方による
 - MotionCorrection（Kimodo の一部・NVIDIA）: Apache-2.0。prebuilt\\LICENSE_kimodo.txt
   prebuilt\\_motion_correction.cp310-win_amd64.pyd は、kimodo のコミット（prebuilt\\motion_correction.json）から組み立てた物。
   中に pybind11 v2.11.1（BSD-3-Clause。prebuilt\\LICENSE_pybind11.txt）と Eigen 3.4.0（MPL-2.0。prebuilt\\LICENSE_eigen_MPL2.txt。
@@ -286,6 +294,38 @@ def put_mmdplugin(plugin_dir, zip_path):
                 f.write(data)
 
 
+MMM_BUILD = ("-c", "Release", "-p:DebugType=none", "-p:DebugSymbols=false")   # 作った人の場所（.pdb の場所）を DLL に埋めない
+
+
+def put_mmm(plugin_dir, mmm_mcp, mmm_dir):
+    """MMM 版のボタン・パネル（mmm_plugin）と橋渡し（mmm-mcp の bridge・core）を組み立てて mmm\\ に置く。"""
+    run(["dotnet", "build", os.path.join(ROOT, "mmm_plugin", "MMM-AINakawari.csproj"), *MMM_BUILD, f"-p:MmmDir={mmm_dir}"])
+    for project in ("bridge/MmmBridge.csproj", "core/MmmBridge.Core.csproj"):
+        run(["dotnet", "build", os.path.join(mmm_mcp, *project.split("/")), *MMM_BUILD])
+    out = os.path.join(plugin_dir, "mmm")
+    os.makedirs(os.path.join(out, "MmmBridgeCore"))
+    for src, dst in ((os.path.join(ROOT, "mmm_plugin", "bin", "Release", "MMM-AINakawari.dll"), "MMM-AINakawari.dll"),
+                     (os.path.join(ROOT, "tools", "release", "MMM-AINakawari.ini"), "MMM-AINakawari.ini"),
+                     (os.path.join(mmm_mcp, "bridge", "bin", "Release", "MmmBridge.dll"), "MmmBridge.dll"),
+                     (os.path.join(mmm_mcp, "core", "bin", "Release", "MmmBridge.Core.dll"), os.path.join("MmmBridgeCore", "MmmBridge.Core.dll"))):
+        shutil.copyfile(src, os.path.join(out, dst))
+
+
+def check_no_local_paths_in_dlls(paths):
+    """DLL に作る人の手元の場所（.pdb の場所など）が埋まっていないか。"""
+    needles = [p.lower().encode(enc) for p in (ROOT, os.path.dirname(ROOT), os.path.expanduser("~")) for enc in ("utf-8", "utf-16-le")]
+    found = []
+    for root, _dirs, files in os.walk(STAGE):
+        for name in files:
+            if name.lower().endswith(".dll") and any(os.path.commonpath([os.path.join(root, name), p]) == p for p in paths):
+                with open(os.path.join(root, name), "rb") as f:
+                    data = f.read().lower()
+                if any(n in data for n in needles):
+                    found.append(os.path.relpath(os.path.join(root, name), STAGE))
+    if found:
+        raise SystemExit(f"DLL に手元の場所が入っています: {found}")
+
+
 def write_zip(path):
     tmp = path + ".partial"
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
@@ -303,12 +343,17 @@ def main():
     parser.add_argument("--mmd-mcp", default=os.path.join(os.path.dirname(ROOT), "mmd-mcp"), help="mmd-mcp のリポジトリ")
     parser.add_argument("--motion-correction", default=os.path.join(ROOT, "work", "prebuilt"),
                         help="組み立て済みの MotionCorrection（pyd と motion_correction.json）のフォルダ")
+    parser.add_argument("--mmm-mcp", default=os.path.join(os.path.dirname(ROOT), "MMM", "mmm-mcp"),
+                        help="mmm-mcp のリポジトリ（MMM の中の橋渡し）。組み立てには隣の MikuMikuMoving64\\ の MikuMikuPlugin.dll を使う")
     parser.add_argument("--allow-dirty", action="store_true", help="コミットしていない変更があっても作る（試し用。zip の名前に dirty が付く）")
     args = parser.parse_args()
     if sys.version_info < (3, 10, 12):
         raise SystemExit("Python 3.10.12 以上で回してください（tar の展開の安全な読み方を使う）")
     mmd_mcp = os.path.abspath(args.mmd_mcp)
-    state = {"ainakawari": repo_state(ROOT, args.allow_dirty), "mmd_mcp": repo_state(mmd_mcp, args.allow_dirty)}
+    mmm_mcp = os.path.abspath(args.mmm_mcp)
+    mmm_dir = os.path.join(os.path.dirname(mmm_mcp), "MikuMikuMoving64") + os.sep   # mmm-mcp の csproj と同じ場所
+    state = {"ainakawari": repo_state(ROOT, args.allow_dirty), "mmd_mcp": repo_state(mmd_mcp, args.allow_dirty),
+             "mmm_mcp": repo_state(mmm_mcp, args.allow_dirty)}
 
     run(["cmd", "/c", os.path.join(ROOT, "mmd_plugin", "build.cmd")])
     run(["cmd", "/c", os.path.join(mmd_mcp, "scripts", "build_native.cmd")])
@@ -328,6 +373,8 @@ def main():
     put_uv(plugin_dir)
     put_mmdplugin(plugin_dir, args.mmdplugin)
     motion_correction = put_prebuilt(plugin_dir, os.path.abspath(args.motion_correction))
+    put_mmm(plugin_dir, mmm_mcp, mmm_dir)
+    check_no_local_paths_in_dlls([os.path.join(plugin_dir, "mmm")])
 
     stray = [os.path.join(r, f) for r, _, fs in os.walk(os.path.join(STAGE, "plugin")) for f in fs if f.lower() != f"{NAME}.ini".lower()
              and f.lower() != f"{NAME}.dll".lower()]
@@ -338,7 +385,7 @@ def main():
 
     sys.path.insert(0, ROOT)
     from mmd_ainakawari import __version__
-    dirty = state["ainakawari"]["dirty"] or state["mmd_mcp"]["dirty"]
+    dirty = any(s["dirty"] for s in state.values())
     build = {
         "version": __version__,
         "built": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
