@@ -80,6 +80,7 @@ gh release view v0.x.y --repo BeamManP/MMD-AINakawari --json assets --jq '.asset
 | `url` | `https://github.com/BeamManP/MMD-AINakawari/releases/download/v0.x.y/MMD-AINakawari-0.x.y.zip` |
 | `extras` の「リリースノート」 | `https://github.com/BeamManP/MMD-AINakawari/releases/tag/v0.x.y` |
 | `size` | zip の大きさが大きく変わった時だけ（MB、1 桁） |
+| `title_en`・`notes_en` | 英語の時に出す題と説明（11-11 から置き場に日本語・英語の切り替えがある）。`title_en` は「AI Nakawari 0.x.y」、`notes_en` は `notes` に足した版の行の英語 |
 
 JSON として読めるかを確かめてからコミット（「AIナカワリ を 0.x.y にする（〜）」）して push。
 push の後、公開された `data.json` のリンクと、`url` が 302 を返すか（`curl -sSI`）を確かめる。
