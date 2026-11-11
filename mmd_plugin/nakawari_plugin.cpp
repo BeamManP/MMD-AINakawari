@@ -26,6 +26,13 @@ extern "C" IMAGE_DOS_HEADER __ImageBase;
 namespace {
 constexpr wchar_t kTitle[] = L"AIナカワリ";
 constexpr wchar_t kOpenLabel[] = L"AIナカワリの窓を開く";
+// MMD の英語モード（ヘルプ → English Mode）の時の字（11-11 マスター）。英語モードかは mmd_english_mode（nakawari_panel.cpp）
+constexpr wchar_t kTitleEn[] = L"AI Nakawari";
+constexpr wchar_t kOpenLabelEn[] = L"Open AI Nakawari window";
+// メニューの字とパネルの見出しを、MMD のモードに合わせ続ける見張り（1 秒ごと）。起動の時に 1 回見るだけでは、MMD がまだ
+// ボタンの字を英語にしておらず、英語モードでも日本語の字になった（11-11）。English Mode を押した時も、これで付け直す
+constexpr UINT_PTR kRelabelTimer = 0xA1A1;
+constexpr UINT kRelabelMs = 1000;
 constexpr wchar_t kHubClass[] = L"AINakawari.Hub";       // 動いている Python の窓の目印（app.py と同じ）
 constexpr wchar_t kOpenMessage[] = L"AINakawari.Open.v1";
 constexpr wchar_t kAttachMessage[] = L"AINakawari.Attach.v1";   // この MMD の窓を隠したまま作って（パネル用）
@@ -54,8 +61,10 @@ std::wstring ini_path(const wchar_t* key) {
     return (n > 0 && n < MAX_PATH) ? std::wstring(full) : joined;
 }
 
-void show_error(HWND owner, const std::wstring& text) {
-    MessageBoxW(owner, text.c_str(), kTitle, MB_OK | MB_ICONERROR);
+// ja と en は、MMD の今のモードでどちらかを出す
+void show_error(HWND owner, const std::wstring& ja, const std::wstring& en) {
+    const bool english = mmd_english_mode(owner);
+    MessageBoxW(owner, (english ? en : ja).c_str(), english ? kTitleEn : kTitle, MB_OK | MB_ICONERROR);
 }
 
 // MMD-AINakawari.ini に debug=1 がある時だけ、DLL の横の MMD-AINakawari.log に書く。
@@ -74,13 +83,14 @@ void log_line(const char* format, ...) {
     std::fflush(g_log);
 }
 
-// MMD 自身の「ヘルプ」の位置。英語表示では「Help」。
+// MMD 自身の「ヘルプ」の位置。英語モードでは「help(&H)」（小文字。11-11 に読んだ。前は「Help」と大文字で比べていて、
+// 英語モードで起動するとメニューを出せなかった）
 int help_position(HMENU bar) {
     const int n = GetMenuItemCount(bar);
     for (int i = 0; i < n; ++i) {
         wchar_t text[64]{};
         GetMenuStringW(bar, i, text, 64, MF_BYPOSITION);
-        if (std::wcsncmp(text, L"ヘルプ", 3) == 0 || std::wcsncmp(text, L"Help", 4) == 0) return i;
+        if (std::wcsncmp(text, L"ヘルプ", 3) == 0 || _wcsnicmp(text, L"help", 4) == 0) return i;
     }
     return -1;
 }
@@ -163,6 +173,7 @@ class NakawariPlugin;
 NakawariPlugin* g_plugin = nullptr;
 HHOOK g_hook = nullptr;
 LRESULT CALLBACK get_message_hook(int code, WPARAM wparam, LPARAM lparam);
+void CALLBACK relabel_timer(HWND hwnd, UINT, UINT_PTR id, DWORD);
 
 class NakawariPlugin : public MMDPluginDLL3 {
 public:
@@ -178,21 +189,23 @@ public:
         const HMENU bar = GetMenu(hwnd_);
         const int help = bar ? help_position(bar) : -1;
         if (help < 0) {
-            show_error(hwnd_, L"メニューバーに「ヘルプ」が見つからないので、AIナカワリ のメニューを出せませんでした。");
+            show_error(hwnd_, L"メニューバーに「ヘルプ」が見つからないので、AIナカワリ のメニューを出せませんでした。",
+                       L"Could not find Help in the menu bar, so the AI Nakawari menu could not be added.");
             return;
         }
         open_id_ = createWM_APP_ID();  // プラグイン同士でぶつからない番号を MMDPlugin からもらう
         if (open_id_ < 0) {
-            show_error(hwnd_, L"MMDPlugin からメニューの番号をもらえませんでした。");
+            show_error(hwnd_, L"MMDPlugin からメニューの番号をもらえませんでした。", L"Could not get a menu ID from MMDPlugin.");
             return;
         }
-        const HMENU popup = CreatePopupMenu();
-        AppendMenuW(popup, MF_STRING, static_cast<UINT_PTR>(open_id_), kOpenLabel);
+        const bool en = mmd_english_mode(hwnd_);
+        popup_ = CreatePopupMenu();
+        AppendMenuW(popup_, MF_STRING, static_cast<UINT_PTR>(open_id_), en ? kOpenLabelEn : kOpenLabel);
         MENUITEMINFOW info{};
         info.cbSize = sizeof(info);
         info.fMask = MIIM_STRING | MIIM_SUBMENU;
-        info.hSubMenu = popup;
-        info.dwTypeData = const_cast<wchar_t*>(kTitle);
+        info.hSubMenu = popup_;
+        info.dwTypeData = const_cast<wchar_t*>(en ? kTitleEn : kTitle);
         InsertMenuItemW(bar, help + 1, TRUE, &info);
         DrawMenuBar(hwnd_);
         // メニューの WM_COMMAND は Post で届く。MMDPlugin 0.41 は Send の受け口（WH_CALLWNDPROC）しか回してくれず、
@@ -200,8 +213,13 @@ public:
         g_plugin = this;
         g_hook = SetWindowsHookExW(WH_GETMESSAGE, get_message_hook, reinterpret_cast<HINSTANCE>(&__ImageBase),
                                    GetWindowThreadProcessId(hwnd_, nullptr));
-        if (!g_hook) show_error(hwnd_, L"メニューの受け口を作れませんでした（エラー " + std::to_wstring(GetLastError()) + L"）。");
+        if (!g_hook) {
+            const std::wstring code = std::to_wstring(GetLastError());
+            show_error(hwnd_, L"メニューの受け口を作れませんでした（エラー " + code + L"）。", L"Could not hook the menu (error " + code + L").");
+        }
         log_line("menu added id=0x%x at %d hook=%p", open_id_, help + 1, static_cast<void*>(g_hook));
+        english_ = en ? 1 : 0;
+        SetTimer(hwnd_, kRelabelTimer, kRelabelMs, relabel_timer);
         if (panel_.create(hwnd_, [this](int button) { on_panel(button); }, samples_path())) {
             quiet_keys_in(panel_.prompt());
             attach();
@@ -217,6 +235,7 @@ public:
 
     void stop() override {
         log_line("stop");
+        if (hwnd_) KillTimer(hwnd_, kRelabelTimer);
         restore_keys();
         panel_.destroy();
         if (g_hook) UnhookWindowsHookEx(g_hook);
@@ -236,6 +255,29 @@ public:
             || open_id_ < 0 || LOWORD(message->wParam) != static_cast<WORD>(open_id_)) return;
         message->message = WM_NULL;
         open_window();
+    }
+
+    // メニューの字とパネルの見出しを、今の MMD のモードに合わせる（見張りから。変わった時だけ付け直す）
+    void relabel() {
+        const bool en = mmd_english_mode(hwnd_);
+        if (english_ == (en ? 1 : 0)) return;
+        english_ = en ? 1 : 0;
+        log_line("relabel en=%d", english_);
+        const HMENU bar = GetMenu(hwnd_);
+        if (bar && popup_) {
+            for (int i = 0, n = GetMenuItemCount(bar); i < n; ++i) {
+                if (GetSubMenu(bar, i) != popup_) continue;
+                MENUITEMINFOW info{};
+                info.cbSize = sizeof(info);
+                info.fMask = MIIM_STRING;
+                info.dwTypeData = const_cast<wchar_t*>(en ? kTitleEn : kTitle);
+                SetMenuItemInfoW(bar, i, TRUE, &info);
+            }
+            ModifyMenuW(popup_, static_cast<UINT>(open_id_), MF_BYCOMMAND | MF_STRING, static_cast<UINT_PTR>(open_id_),
+                        en ? kOpenLabelEn : kOpenLabel);
+            DrawMenuBar(hwnd_);
+        }
+        panel_.refresh();
     }
 
 private:
@@ -280,7 +322,8 @@ private:
         // Python が終わっていた。立ち上げ直して、もう一度押してもらう
         attach();
         if (const HWND panel = FindWindowExW(hwnd_, nullptr, kPanelClass, nullptr)) {
-            SetDlgItemTextW(panel, kStatusLabel, L"AIナカワリ を起動しています。少ししてからもう一度押してください");
+            SetDlgItemTextW(panel, kStatusLabel, mmd_english_mode(hwnd_) ? L"Starting AI Nakawari. Press it again in a moment"
+                                                                          : L"AIナカワリ を起動しています。少ししてからもう一度押してください");
         }
     }
 
@@ -290,7 +333,8 @@ private:
         const std::wstring python = ini_path(L"python"), home = ini_path(L"home");
         if (python.empty() || home.empty()) {
             log_line("launch: python/home missing");
-            if (show_errors) show_error(hwnd_, L"MMD-AINakawari.ini に python と home を書いてください:\n" + ini);
+            if (show_errors) show_error(hwnd_, L"MMD-AINakawari.ini に python と home を書いてください:\n" + ini,
+                                        L"Write python and home in MMD-AINakawari.ini:\n" + ini);
             return;
         }
         wchar_t args[96]{};
@@ -301,8 +345,9 @@ private:
         PROCESS_INFORMATION process{};
         if (!CreateProcessW(python.c_str(), &command[0], nullptr, nullptr, FALSE, 0, nullptr, home.c_str(), &startup, &process)) {
             log_line("launch failed %lu", GetLastError());
-            if (show_errors) show_error(hwnd_, L"AIナカワリ を起動できませんでした（エラー " + std::to_wstring(GetLastError()) + L"）:\n"
-                              + python + L"\n作業フォルダ: " + home);
+            const std::wstring code = std::to_wstring(GetLastError());
+            if (show_errors) show_error(hwnd_, L"AIナカワリ を起動できませんでした（エラー " + code + L"）:\n" + python + L"\n作業フォルダ: " + home,
+                                        L"Could not start AI Nakawari (error " + code + L"):\n" + python + L"\nWorking folder: " + home);
             return;
         }
         CloseHandle(process.hThread);
@@ -310,9 +355,15 @@ private:
     }
 
     HWND hwnd_ = nullptr;
+    HMENU popup_ = nullptr;   // メニューバーに足した「AIナカワリ」の中身（字を付け直す時に探す）
+    int english_ = -1;        // 今の字が英語なら 1・日本語なら 0（relabel）
     int open_id_ = -1;
     NakawariPanel panel_;
 };
+
+void CALLBACK relabel_timer(HWND, UINT, UINT_PTR, DWORD) {
+    if (g_plugin) g_plugin->relabel();
+}
 
 LRESULT CALLBACK get_message_hook(int code, WPARAM wparam, LPARAM lparam) {
     if (code == HC_ACTION && wparam == PM_REMOVE && lparam && g_plugin) {
