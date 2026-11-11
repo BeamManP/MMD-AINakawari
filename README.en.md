@@ -19,7 +19,7 @@ Two NVIDIA models do the work:
 > [!NOTE]
 > This is a personal project and is not affiliated with NVIDIA.
 
-**Using it in English**: set MMD to English (Help → English Mode) and the AI Nakawari window and panel come up in English too. The language is decided by MMD's mode when the window is opened, so if you switch modes, open the window again. MMM (MikuMikuMoving) stays in Japanese.
+**Using it in English**: set MMD to English (Help → English Mode) and the AI Nakawari window and panel come up in English too. If you switch modes while MMD is running, the window follows within a few seconds (what you typed is kept). MMM (MikuMikuMoving) stays in Japanese.
 (The screenshots below are from the Japanese version. The buttons are named like this: 生成 = Generate, 元に戻す = Undo, 中断 = Cancel, 詳細 = Details, セットアップ = Setup, 詳しい設定 = Advanced settings.)
 
 ## Features

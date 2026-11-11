@@ -127,6 +127,25 @@ class Hub:
         if not self.apps and not self.waiting:
             self._finish()
 
+    def rebuild(self, app):
+        """その MMD の窓を作り直す（MMD の英語モードが変わった時。App._check_language）。
+        入力（設定として保存してから新しい窓が読む）・ログ・窓とログの窓が出ていたかを引き継ぐ。hub.forget は通さない（窓が 0 になって終わらないように）。"""
+        app._save_inputs()
+        shown, log_shown = bool(app.root.winfo_viewable()), bool(app.log_win.winfo_viewable())
+        log = app.log.get("1.0", "end-1c")
+        app.closed = True
+        app.root.destroy()
+        new = self.apps[app.mmd.hwnd] = App(tk.Toplevel(self.root), self, app.mmd)
+        if log:
+            new.log.configure(state="normal")
+            new.log.insert("end", log + "\n")
+            new.log.see("end")
+            new.log.configure(state="disabled")
+        if shown:
+            new.show()
+        if log_shown:
+            new._toggle_log()
+
     def forget(self, app):
         self.apps.pop(app.mmd.hwnd, None)
         if not self.apps and not self.waiting:   # 起動の途中の MMD を待っている間は終わらない（11-05 Codex のレビュー）
@@ -175,6 +194,9 @@ class App:
         # 言葉は窓を作る時の MMD のモードで決める（窓を開き直すまで変えない。11-11 マスター）。窓の部品は self.tr、
         # 生成などの仕事のスレッドと、ほかの部品を呼ぶ所は i18n.use(self.lang) の中で _() を引く
         self.lang = language(mmd)
+        # 窓のボタンから呼ぶ部品（widgets.py など）の _() も、この言葉で引くように（MMD が 1 つの時。11-11 0.4.1）
+        i18n.set_default(self.lang)
+        self._lang_ticks = 0
         self.tr = i18n.translator(self.lang)
         self.name = i18n.name(self.lang)   # 知らせの窓のタイトル
         self.app_title = f"{self.name} {__version__}"   # 窓のタイトル（更新されたかが分かるように版を付ける。11-11 マスター）
@@ -793,6 +815,60 @@ class App:
             return
         # 次の予約は先に入れる（途中で例外が出ると、パネルとの同期も表示の更新も止まっていた。11-05 Codex のレビュー）
         self.root.after(500, self._tick)
+        if self._check_language():   # 作り直した（この窓はもう無い）
+            return
+        with i18n.use(self.lang):
+            self._tick_body()
+
+    def _check_language(self):
+        """MMD の英語モードが窓の言葉と違ったら、窓を作り直す（2 秒ごと。作り直したら True）。
+        0.4.0 は窓を作る時に 1 回読むだけで、MMD の起動直後はボタンの字がまだ日本語なので、英語モードでも日本語の窓になった。
+        起動したまま English Mode を切り替えた時も、これでついていく（11-11 マスター）。生成中は作り直さない。読めない時は変えない。"""
+        self._lang_ticks += 1
+        if self._lang_ticks % 4 or self.busy:
+            return False
+        try:
+            now = self.link.language()
+        except Exception:
+            return False
+        if now == self.lang:
+            return False
+        applog.write(f"MMD の言葉が {self.lang} から {now} に変わったので、窓を作り直します")
+        self.hub.rebuild(self)
+        return True
+
+    def _save_inputs(self):
+        """窓の入力を self.cfg に写して設定として保存する（作り直す時に、新しい窓へ引き継ぐ）。
+        数字の欄が打ちかけ・区間がおかしいなど、読めない物は前の値のまま（作り直しを止めない）。"""
+        def put(key, read):
+            try:
+                self.cfg[key] = read()
+            except (tk.TclError, ValueError, IndexError):
+                pass
+        put("tab", lambda: TABS[self.tabs.index("current")][0])
+        put("mode", self.mode.get)
+        put("range_mode", self.range_mode.get)
+        put("length", self.length.get)
+        put("prompt", self.prompt_rows.text)
+        put("steps", lambda: int(self.steps.get()))
+        put("seed", lambda: int(self.seed.get()))
+        put("post_processing", lambda: bool(self.post.get()))
+        put("cfg_text", lambda: float(self.cfg_text.get()))
+        put("cfg_key", lambda: float(self.cfg_key.get()))
+        put("stop_at_last_key", lambda: bool(self.stop.get()))
+        put("smooth_stop", lambda: bool(self.smooth.get()))
+        put("key_stop", lambda: bool(self.key_stop.get()))
+        put("wrist_lerp", lambda: bool(self.wrist_lerp.get()))
+        put("thin", lambda: round(self.thin_kimodo.get()))
+        put("thin_nakawari", lambda: round(self.thin_nakawari.get()))
+        put("use_llama", lambda: bool(self.use_llama.get()))
+        try:
+            os.makedirs(runner.WORK_DIR, exist_ok=True)
+            json.dump(self.cfg, open(SETTINGS_PATH, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        except OSError:
+            applog.exception("設定を保存できませんでした:")
+
+    def _tick_body(self):
         scene = self.mmd.scene_name()
         title = (f"{self.app_title} - {scene}" if scene else self.app_title) + (self.tr(" （MMM）") if self.mmd.kind == "mmm" else "")
         if self.root.title() != title:
