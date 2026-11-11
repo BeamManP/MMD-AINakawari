@@ -72,7 +72,8 @@ The test generation at the end of Setup tries the backends in the order below an
 - The quality of the motion is the same with every backend (the same calculation on a different tool)
 - With DirectML the models are converted once, the first time (about 1 minute). It uses about 2GB more disk, and Kimodo's RAM use becomes about 3GB
 - The current backend is shown in the GPU check under the "Kimodo" tab of the details window (when it is DirectML or no GPU)
-- **I have only verified DirectML on an RTX 3090. I have not tried real AMD or Intel GPUs or the GTX 10 series. If you try it, please tell me whether it worked** (the log files in "Troubleshooting" help me find the cause)
+- A user reported that it works with DirectML on an Intel integrated GPU (Iris Xe, a laptop with 16GB of RAM), though it took a while
+- **I have not tried real AMD GPUs, Intel Arc or the GTX 10 series yet. If you try it, please tell me whether it worked** (the log files in "Troubleshooting" help me find the cause)
 
 ## Installation
 
