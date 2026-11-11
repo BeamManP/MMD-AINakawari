@@ -14,7 +14,7 @@ import queue
 import threading
 import time
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 
 import win32api
 import win32con
@@ -405,6 +405,19 @@ class App:
         ttk.Entry(top, textvariable=self.seed, width=8).pack(side="left", padx=(4, 0))
         self.post = tk.BooleanVar(value=self.cfg["post_processing"])
         ttk.Checkbutton(d, text="仕上補正（足すべり・姿勢）", variable=self.post).grid(row=1, column=0, columnspan=3, sticky="w", **g)
+        # 生成ごとの VMD（元の控え・結果）の置き場（11-11 マスター）。中割りのタブの生成も同じ所に書く
+        ttk.Label(d, text="一時ファイルの置き場").grid(row=2, column=0, sticky="w", **g)
+        self.cache_dir = tk.StringVar()
+        ttk.Entry(d, textvariable=self.cache_dir, state="readonly").grid(row=2, column=1, sticky="ew", **g)
+        cache_bar = ttk.Frame(d)
+        cache_bar.grid(row=2, column=2, sticky="w", **g)
+        ttk.Button(cache_bar, text="変更…", command=self._choose_cache_dir).pack(side="left")
+        ttk.Button(cache_bar, text="既定に戻す", command=lambda: self._set_cache_dir(None)).pack(side="left", padx=(4, 0))
+        ttk.Button(cache_bar, text="開く", command=self._open_cache_dir).pack(side="left", padx=(4, 0))
+        tk.Label(d, text="生成のたびに、元の動きの控え（original_）と結果（kimodo_）の VMD をここに書きます",
+                 foreground="#556", background=ttk.Style().lookup("TFrame", "background"), anchor="w").grid(
+            row=3, column=0, columnspan=3, sticky="w", padx=4)
+        self._show_cache_dir()
         # GPU 診断（この PC で足りるか）
         d = self.diagnosis
         bg = ttk.Style().lookup("TFrame", "background")
@@ -413,6 +426,37 @@ class App:
         # 足りない・GPU が無い時は赤で目立たせる（普段の説明と同じ灰色だと読み飛ばす）
         tk.Label(t, text=("→ " if d.gpu else "") + d.note, foreground="#556" if d.ok else "#c22", background=bg,
                  wraplength=500, anchor="w", justify="left").pack(fill="x", pady=(0 if d.gpu else 8, 0))
+
+    def _show_cache_dir(self):
+        try:
+            self.cache_dir.set(paths.load().get(paths.CACHE_KEY) or f"{paths.WORK_DIR}（既定）")
+        except paths.NotSetUp as e:   # paths.json が壊れている。セットアップで直す
+            self.cache_dir.set(str(e))
+
+    def _choose_cache_dir(self):
+        try:
+            now = paths.cache_dir()
+        except paths.NotSetUp:   # 今の置き場が使えない（外したドライブなど）。選び直しはできるようにする
+            now = paths.WORK_DIR
+        folder = filedialog.askdirectory(parent=self.root, initialdir=now, title="一時ファイルの置き場を選ぶ")
+        if folder:
+            self._set_cache_dir(folder)
+
+    def _set_cache_dir(self, folder):
+        """置き場を書く（None で既定に戻す）。MMD ごとの窓はどれも paths.json を読み直すので、ほかの窓にもすぐ効く。"""
+        try:
+            paths.save_cache_dir(folder)
+        except OSError as e:
+            messagebox.showerror("AIナカワリ", f"そのフォルダには書けません: {folder}\n（{e}）", parent=self.root)
+            return
+        for app in list(self.hub.apps.values()):
+            app._show_cache_dir()
+
+    def _open_cache_dir(self):
+        try:
+            os.startfile(paths.cache_dir())
+        except (paths.NotSetUp, OSError) as e:
+            messagebox.showerror("AIナカワリ", str(e), parent=self.root)
 
     def _cfg_slider(self, d, row, title, var, note):
         """効きのスライダ 1 本（名前・スライダ・今の値）と、その下の説明。値は CFG_RANGE の刻みにそろえる。"""
@@ -1034,6 +1078,7 @@ def main():
             root.destroy()
         return
     applog.setup()   # mutex を取ってから（記録を書くのは 1 つのプロセスだけ）
+    threading.Thread(target=_sweep_cache, name="一時ファイルの掃除", daemon=True).start()
     root = _new_root()
     applog.hook_tk(root)
     root.withdraw()  # 親の窓は見せない。MMD ごとの窓（Toplevel）だけ出す
@@ -1046,6 +1091,16 @@ def main():
         hub.close()
         _stop_residents()
         del mutex
+
+
+def _sweep_cache():
+    """起動時に、古い一時ファイル（生成ごとの VMD）を裏で消す（runner.sweep_cache。窓が出るのを待たせない。11-11 マスター）。"""
+    try:
+        gone = runner.sweep_cache()
+        if gone:
+            applog.write(f"古い一時ファイルを {gone} 個消しました")
+    except Exception:   # 掃除に失敗しても生成には関わらない。記録にだけ残す
+        applog.exception("一時ファイルの掃除:")
 
 
 def _stop_residents():

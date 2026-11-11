@@ -21,6 +21,7 @@ PATHS_FILE = os.path.join(WORK_DIR, "paths.json")
 # 入れ方の案内（セットアップの画面は mmd_ainakawari/installer。11-06 にできた）
 SETUP_HINT = "詳細の窓の下の「セットアップ」で入れてください"
 KEYS = ("kimodo", "motionbricks")
+CACHE_KEY = "cache_dir"   # 生成ごとの VMD の置き場（cache_dir()）
 BACKENDS = ("cuda", "directml", "cpu")
 BACKEND_LABEL = {"cuda": "CUDA（NVIDIA）", "directml": "DirectML", "cpu": "CPU"}
 BACKEND_ENV = "AINAKAWARI_BACKEND"   # 試す時に、設定より先に見る（窓のプロセスの環境変数。常駐にも同じ名前で渡す）
@@ -39,7 +40,7 @@ def load():
         return {}
     except ValueError as e:   # 壊れた JSON（手で書き換えた時など）
         raise NotSetUp(f"{PATHS_FILE} が読めません（{e}）。{SETUP_HINT}") from None
-    if not isinstance(data, dict) or any(not isinstance(data[k], str) or not data[k] for k in KEYS if k in data):
+    if not isinstance(data, dict) or any(not isinstance(data[k], str) or not data[k] for k in KEYS + (CACHE_KEY,) if k in data):
         raise NotSetUp(f"{PATHS_FILE} の形が違います。{SETUP_HINT}")
     return data
 
@@ -89,6 +90,37 @@ def save_backend(name, value):
     except NotSetUp:
         data = {}
     data[name + "_backend"] = value
+    _write(data)
+
+
+def cache_dir():
+    """生成ごとの VMD（元の控え original_*・結果 kimodo_*・「元に戻す」の前の控え before_undo_*）を書く所。
+    詳しい設定で決める（paths.json の cache_dir。11-11 マスター）。決めていなければ work。無ければ作る。
+    last_run.json・settings.json・app.log は work のまま（last_run.json は控えを絶対パスで指すので、途中で変えても前回の分は戻せる）。"""
+    folder = load().get(CACHE_KEY) or WORK_DIR
+    try:
+        os.makedirs(folder, exist_ok=True)
+    except OSError as e:
+        raise NotSetUp(f"一時ファイルの置き場 {folder} を作れません（{e}）。詳しい設定で置き場を選び直してください") from None
+    return folder
+
+
+def save_cache_dir(folder):
+    """一時ファイルの置き場を書く。None なら既定（work）に戻す。書ける所かは先に確かめる（書けなければ OSError）。"""
+    try:
+        data = load()
+    except NotSetUp:
+        data = {}
+    if folder is None:
+        data.pop(CACHE_KEY, None)
+    else:
+        folder = os.path.abspath(folder)
+        os.makedirs(folder, exist_ok=True)
+        probe = os.path.join(folder, f".ainakawari_write_test_{os.getpid()}")
+        with open(probe, "w") as f:
+            f.write("ok")
+        os.remove(probe)
+        data[CACHE_KEY] = folder
     _write(data)
 
 

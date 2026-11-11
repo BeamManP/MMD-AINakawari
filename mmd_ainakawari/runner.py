@@ -6,6 +6,7 @@
 """
 import json
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -104,16 +105,88 @@ def _span_key(settings):
     return {"range": None, "use_keys": settings.use_keys, "length": settings.length}
 
 
+def _write_runs(runs):
+    # 書き終わってから置き換える（途中で止まっても前のものが残る）。一時ファイルは保存ごとに別の名前
+    # （窓と確認用のスクリプトのように別のプロセスが同時に保存すると、同じ名前では片方の置き換えが失敗した。11-04 Codex のレビュー）
+    tmp = f"{LAST_RUN}.{os.getpid()}.{threading.get_ident()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(runs, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, LAST_RUN)
+
+
+def _same_path(p):
+    return os.path.normcase(os.path.abspath(p))
+
+
+def _referenced(runs):
+    return {_same_path(r[x]) for r in runs.values() if isinstance(r, dict) for x in ("backup", "output") if r.get(x)}
+
+
 def _save_last_run(link, backup, out, span, model=None):
+    """この MMD の記録を新しい生成の物にする。戻り値: 前の記録が指していて、もうどの記録も指していないファイル（消してよい）。"""
     with _LAST_RUN_LOCK:   # 窓（MMD ごと）は同じプロセスのスレッドで生成するので、読んで書き戻す間をまとめて守る
         runs = _last_runs()
+        old = runs.get(link.key) or {}
         runs[link.key] = {"backup": backup, "output": out, "span": span, "model": model}
-        # 書き終わってから置き換える（途中で止まっても前のものが残る）。一時ファイルは保存ごとに別の名前
-        # （窓と確認用のスクリプトのように別のプロセスが同時に保存すると、同じ名前では片方の置き換えが失敗した。11-04 Codex のレビュー）
-        tmp = f"{LAST_RUN}.{os.getpid()}.{threading.get_ident()}.tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(runs, f, ensure_ascii=False, indent=1)
-        os.replace(tmp, LAST_RUN)
+        _write_runs(runs)
+        used = _referenced(runs)
+        return [old[x] for x in ("backup", "output") if isinstance(old.get(x), str) and _same_path(old[x]) not in used]
+
+
+# ---- 一時ファイル（生成ごとの VMD）の片付け（11-11 マスター） ----
+# 消すのはこの名前の形の物だけ（手で置いた VMD・確かめ用の VMD は触らない）。stamp は _generate・undo と同じ形
+# 末尾の MMD の番号は 11-04 から（それより前の kimodo_20261103_123456.vmd も同じ物なので消す）
+CACHE_NAME = re.compile(r"^(original|kimodo|before_undo)_\d{8}_\d{6}(_[A-Za-z0-9]+)?\.vmd$")
+RUN_KEEP_DAYS = 7      # 記録（last_run.json）をこの日数より前の物は外す（閉じた MMD の記録が残り続けるので）
+ORPHAN_KEEP_HOURS = 24   # どの記録も指していない一時ファイルを、この時間より前の物は消す（中断・失敗した回・元に戻す前の控え）
+
+
+def _remove_cache_files(files):
+    """一時ファイルを消す。消せない物（MMD が読んでいる最中など）は残す（起動時の sweep_cache が後で消す）。"""
+    gone = 0
+    for p in files:
+        if CACHE_NAME.match(os.path.basename(p)):
+            try:
+                os.remove(p)
+                gone += 1
+            except OSError:
+                pass
+    return gone
+
+
+def sweep_cache(now=None):
+    """起動時の掃除。古い記録を外してから、どの記録も指していない古い一時ファイルを消す。消した数を返す。
+    見るのは今の置き場と work（置き場を変える前の物も拾う）。"""
+    now = time.time() if now is None else now
+
+    def older(p, seconds):
+        try:
+            return now - os.path.getmtime(p) > seconds
+        except OSError:
+            return True   # 無い
+    with _LAST_RUN_LOCK:
+        runs = _last_runs()
+        stale = [k for k, r in runs.items() if not isinstance(r, dict)
+                 or any(older(r.get(x) or "", RUN_KEEP_DAYS * 86400) for x in ("backup", "output"))]
+        for k in stale:
+            del runs[k]
+        if stale:
+            _write_runs(runs)
+        used = _referenced(runs)
+    folders = {WORK_DIR}
+    try:
+        folders.add(paths.cache_dir())
+    except paths.NotSetUp:   # 置き場が使えない（外したドライブなど）。work だけ見る
+        pass
+    files = []
+    for folder in folders:
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            continue
+        files += [p for p in (os.path.join(folder, n) for n in names if CACHE_NAME.match(n))
+                  if _same_path(p) not in used and older(p, ORPHAN_KEEP_HOURS * 3600)]
+    return _remove_cache_files(files)
 
 
 def generate(settings, log=print, link=None, previous=None, cancel=None, on_commit=None):
@@ -141,10 +214,11 @@ def _generate(settings, log, link, previous, on_commit):
     if not os.path.exists(pmx):
         raise FileNotFoundError(f"PMX が見つかりません: {pmx}")
     os.makedirs(WORK_DIR, exist_ok=True)
+    cache = paths.cache_dir()   # 控えと結果の VMD の置き場（詳しい設定。11-11 マスター）
     # MMD のプロセス番号も付ける（MMD が 2 つあって同じ秒に生成すると、控えと結果のファイルがぶつかって、
     # 「元に戻す」がほかの MMD の動きを読むことがあった。11-04 Codex のレビュー）
     stamp = time.strftime("%Y%m%d_%H%M%S") + "_" + link.key.split("-")[0]
-    backup = os.path.join(WORK_DIR, f"original_{stamp}.vmd")
+    backup = os.path.join(cache, f"original_{stamp}.vmd")
 
     log(f"MMD から「{st['model']}」のモーションを読み込み中…")
     original = link.read_motion(backup)
@@ -166,7 +240,7 @@ def _generate(settings, log, link, previous, on_commit):
     # （全部どうしで長さだけ違っても戻して、今回作らない所の前回の結果まで消えていた。11-05 Codex のレビュー 2 回目）
     span = _span_key(settings)
     same_range = previous is not None and previous.get("span") == span
-    if same_range and os.path.exists(previous.get("output", "")) and _same_motion(original, vmd.read(previous["output"]),
+    if same_range and os.path.exists(previous.get("output", "")) and os.path.exists(previous.get("backup", "")) and _same_motion(original, vmd.read(previous["output"]),
                                                                                  fixed_pos=fixed_pos, names=written):
         # 前回の元のキーから取るのは、書き戻す骨だけ。指・表情・全ての親・表示/IK などは今の MMD の物を使う
         # （前はモーションを丸ごと前回の元に差し替えていて、生成の後に直した指や表情が戻っていた。11-07 Codex のレビュー）
@@ -279,7 +353,7 @@ def _generate(settings, log, link, previous, on_commit):
     resident.check_cancel()
     generated = pipeline.build_motion(job, result)
     merged = pipeline.merge(original, generated, job)
-    out = os.path.join(WORK_DIR, f"kimodo_{stamp}.vmd")
+    out = os.path.join(cache, f"kimodo_{stamp}.vmd")
     log(f"間のフレームのキー {len(generated.bones)} 個を差し込みました" + ("" if settings.thin else f" → {out}"))
     if settings.thin:   # 後から手で直しやすいように、曲線で表せる所のキーを落とす（thin.py。11-09 マスター）
         log(f"キーを間引き中（{thin.level_name(settings.thin)}）…")
@@ -294,7 +368,9 @@ def _generate(settings, log, link, previous, on_commit):
     if on_commit:
         on_commit()
     # 前回の記録は読み込みの前に残す（読み込みで止まっても「元に戻す」でバックアップに戻せるように。11-07 Codex のレビュー）
-    _save_last_run(link, backup, out, span, pmx)
+    # 前の記録が指していた控えと結果は、ここで消す（もう「元に戻す」にも作り直しにも使わない。11-11 マスター）。
+    # 始めた時ではなくここ: 作り直しは前回の控えを読み、中断・失敗した時の「元に戻す」は前回の控えに戻すので
+    _remove_cache_files(_save_last_run(link, backup, out, span, pmx))
     log("MMD に読み込み中…")
     # 始めた時のモデルかを確かめてからキーを消す。読み込みに失敗したら、バックアップを読み込み直して消したキーを戻す
     link.load_motion(out, 0, model=pmx, restore=backup)
@@ -316,7 +392,7 @@ def undo(backup, log=print, link=None, model=None):
         raise RuntimeError("元に戻すためのバックアップがありません")
     cursor = link.current_frame()   # 押した時のフレームへ戻す（読めなければ 0F のまま）
     # 読み込みに失敗した時に戻せるよう、押した時の動きも控えておく
-    now = os.path.join(WORK_DIR, f"before_undo_{time.strftime('%Y%m%d_%H%M%S')}_{link.key.split('-')[0]}.vmd")
+    now = os.path.join(paths.cache_dir(), f"before_undo_{time.strftime('%Y%m%d_%H%M%S')}_{link.key.split('-')[0]}.vmd")
     if model is not None:   # 読む前に確かめる（違うモデルの動きを控えにしないように）
         link.check_model(model)
     link.read_motion(now)
