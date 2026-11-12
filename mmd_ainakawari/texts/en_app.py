@@ -140,4 +140,10 @@ TEXT = {
     "ふつう": "Normal",
     "粗く": "Coarse",
     "とても粗く": "Very coarse",
+    "全ての親": "Master bone",
+    "移動を載せる": "Carry movement",
+    "向きを載せる": "Carry turning",
+    "歩いた分を全ての親が受け持ち、センターには揺れだけ残ります": "The master bone takes the travel; only the sway stays in the center",
+    "移動": "Move",
+    "向き": "Turn",
 }

@@ -77,4 +77,6 @@ TEXT = {
         "Done ({sec:.0f} s, generation {gen:.1f} s, max drift from the keys {cm:.1f}cm{extra})",
     "元に戻すためのバックアップがありません": "There is no backup to undo with",
     "元に戻しました（{backup}）": "Undone ({backup})",
+    "注意: {what}は「{bone}」に載せません: {why}": "Note: not carried on \"{bone}\" ({what}): {why}",
+    "{what}を「{bone}」に載せます（{a}F から・キー {n} 個）": "Carrying on \"{bone}\" ({what}) from {a}F, {n} keys",
 }

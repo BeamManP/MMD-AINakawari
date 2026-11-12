@@ -28,4 +28,9 @@ TEXT = {
     "詳細の窓でチェックを入れてください": "turn it on in the details window",
     "プロンプトの読み取り（Llama 3）を入れていない": "prompt reading (Llama 3) is not installed",
     "セットアップで入れてください": "install it with Setup",
+    "モデルに「{bone}」がありません": "the model has no \"{bone}\"",
+    "「{bone}」に {frames}F のキーがあります（今までどおり、腰の通り道の目印にします）": "\"{bone}\" has keys at {frames}F (they are used as the hip path, as before)",
+    "{frames}F の体の姿勢が決まっています（キーは元の「{bone}」の上で打たれているので、「{bone}」は動かしません）": "the body pose is set at {frames}F (those keys were made on the original \"{bone}\", so \"{bone}\" is not moved)",
+    "作る所より後ろ（{frames}F）に体のキーがあります（「{bone}」を動かすと、そのキーの場所がずれます）": "there are body keys after the generated part ({frames}F) (moving \"{bone}\" would shift where they are)",
+    "モデルの「{bone}」が、回転・移動のできないボーンです": "\"{bone}\" in the model cannot be rotated or moved",
 }

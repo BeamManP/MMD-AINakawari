@@ -1,7 +1,8 @@
 """MMD のキー（VMD）→ Kimodo → 間のフレームの VMD、の流れ。
 
 キーのフレームそのものは書かない（マスターが打ったキーをそのまま残す）。
-「全ての親」は読むだけでキーは打たない。読む時は全ての親も込みの世界の座標で姿勢を出し、
+「全ての親」はふだんは読むだけでキーは打たない（窓の「全ての親へ」で移動・向きを載せる時だけ打つ。carry_root）。
+読む時は全ての親も込みの世界の座標で姿勢を出し、
 書き戻す時は MMD がそのフレームで全ての親を補間する位置・向きを差し引いて、残りをセンターなどに書く。
 全ての親だけにキーがあるフレームは、体の姿勢は決めずに「腰の XZ がここを通る」制約（Kimodo の root2d）にする。
 """
@@ -60,6 +61,8 @@ class Job:
     anchors: list = field(default_factory=list)       # 範囲を作り直す時に、MMD の姿勢をキーにした範囲の端のフレーム
     context_before: list = field(default_factory=list) # 範囲の始まりの手前の姿勢（Kimodo の形。中割りの文脈）
     context_after: list = field(default_factory=list)  # 範囲の終わりの後ろの姿勢（Kimodo の形。中割りで通り抜ける先）
+    root_start: int = None        # 全ての親に移動・向きを載せる時（carry_root）、元の全ての親のままにする最後のフレーム（始まりの姿勢）
+    root_blocker: str = None      # 全ての親に載せられない理由（None なら載せられる）
     request: dict = field(default_factory=dict)
 
 
@@ -160,6 +163,119 @@ def to_root_local(rt, hips, root_rot, root_q, root_p):
     x = conv_p(hips) / rt.scale
     local = rest + Q.rotate(Q.inv(root_q), x - root_p)
     return conv_p(local) * rt.scale, Q.normalize(Q.mul(Q.inv(conv_q(root_q)), root_rot))
+
+
+# ---- 歩いた分の移動・向きを全ての親に載せる（11-12 マスター「全親が置いてけぼりになる。移動や回転を全親で制御したい」） ----
+# 生成した腰の通り道（XZ）と向き（Y 回転）をならして全ての親のキーにし、残り（歩きの左右の揺れ・上下・ならしで消えた分）を
+# センターなどに書く。全ての親のキーは先に曲線で間引いておき、書き戻しでは MMD がその曲線で補間する値を差し引くので、
+# 体の見た目は載せない時と同じになる（_build_frames は job.root_track を差し引く）
+ROOT_SMOOTH = 10.0         # 通り道・向きをならす幅（フレーム。ガウスの σ）。歩きの左右の揺れ（約 30 フレームの周期）を 1 割ほどまで消す
+ROOT_MOVE_TOLERANCE = 0.2  # 全ての親のキーを曲線で間引く時の移動のずれ（MMD の単位）。ずれはセンターが持つので、体の見た目は変わらない
+ROOT_ANGLE_TOLERANCE = 2.0  # 同じく回転（度）
+
+
+def _root_blocker(skel, tracks, body, start, last, pinned):
+    """全ての親に移動・向きを載せられない理由（載せられるなら None）。
+
+    載せるのは、決まっているのが始まりの姿勢だけの時。マスターが打った体のキー・範囲の終わりの姿勢は、元の全ての親の上で
+    打たれている（書き戻さない）ので、全ての親を動かすとそのキーの姿勢がずれる。全ての親のキーがある時は今までどおり、
+    腰の通り道の目印にする（11-12 マスター「全親キーがある場合は今まで通りで」）。
+    pinned: 書き戻さずに、そのまま残すキーのフレーム（範囲の外側の文脈を除く）。
+    """
+    if ROOT_BONE not in skel:
+        return _("モデルに「{bone}」がありません", bone=ROOT_BONE)
+    flags = skel.bones[skel.i(ROOT_BONE)]["flags"]
+    if not flags & 0x0002 or not flags & 0x0004:   # 回転できる・移動できる（できない骨のキーは、MMD が読み込みで 0 にする）
+        return _("モデルの「{bone}」が、回転・移動のできないボーンです", bone=ROOT_BONE)
+    later =[f for f in key_frames_of(tracks, {ROOT_BONE}) if f > start]
+    if later:
+        return _("「{bone}」に {frames}F のキーがあります（今までどおり、腰の通り道の目印にします）",
+                 bone=ROOT_BONE, frames=_("・").join(map(str, later)))
+    kept = [f for f in pinned if f > start]
+    if kept:
+        return _("{frames}F の体の姿勢が決まっています（キーは元の「{bone}」の上で打たれているので、「{bone}」は動かしません）",
+                 frames=_("・").join(map(str, kept)), bone=ROOT_BONE)
+    after = [f for f in key_frames_of(tracks, body) if f > last]
+    if after:
+        return _("作る所より後ろ（{frames}F）に体のキーがあります（「{bone}」を動かすと、そのキーの場所がずれます）",
+                 frames=_("・").join(map(str, after)), bone=ROOT_BONE)
+    return None
+
+
+def _smooth_pinned(x, sigma):
+    """x（フレーム × 列）をガウスでならす。両端の値は変えない（端の外を点対称に折り返すと、端ではならした値が元の値になる）。"""
+    x = np.asarray(x, float)
+    n = len(x)
+    r = min(int(3 * sigma), n - 1)
+    if r < 1:
+        return x.copy()
+    t = np.arange(-r, r + 1)
+    w = np.exp(-0.5 * (t / sigma) ** 2)
+    w /= w.sum()
+    padded = np.concatenate([2 * x[0] - x[1:r + 1][::-1], x, 2 * x[-1] - x[-r - 1:-1][::-1]])
+    return np.stack([np.convolve(padded[:, c], w, mode="valid") for c in range(x.shape[1])], axis=1)
+
+
+def carry_root(job, result, move=True, turn=True):
+    """生成した腰の通り道（move）と向き（turn）を全ての親のキーにする。job.root_track を新しい全ての親に置き換え
+    （build_motion はこれを差し引いて体を書く）、足すキー（splice_root で入れる）を返す。job.root_blocker が None の時だけ呼ぶ。
+
+    全ての親は job.root_start まで元のまま。その後ろは、始まりの全ての親から見た腰の位置（XZ）を保ったまま、
+    ならした通り道に沿って進み、ならした腰の向きの分だけ Y で回る。高さは変えない（上下の弾みはセンターに残す）。
+    """
+    from . import thin   # thin は pipeline を読まないが、窓の起動時に読む物を増やさない
+    skel = MMDSkeleton(job.pmx)
+    rt = Retargeter(skel, paths.soma_json())
+    T = min(result["num_frames"], job.num_frames)
+    root = np.array(result["root"]).reshape(result["num_frames"], 3)
+    rot = np.array(result["local_rot"]).reshape(result["num_frames"], len(result["names"]), 4)
+    from_canon = Q.from_axis_angle([0, 1, 0], job.ref_yaw)
+    s = job.root_start - job.first
+    hips, yaws = [], []
+    for k in range(s, T):
+        h = Q.rotate(from_canon, root[k] - np.array([0.0, job.ground_lift, 0.0])) + job.ref_pos
+        hips.append(conv_p(h) / rt.scale)   # 世界（全ての親込み）の腰。MMD 座標・MMD 単位
+        f = Q.rotate(conv_q(Q.mul(from_canon, rot[k, 0])), np.array([0.0, 0.0, 1.0]))
+        yaws.append(np.arctan2(f[0], f[2]))
+    hips = np.array(hips)
+    yaws = np.unwrap(np.array(yaws))
+    path = _smooth_pinned(hips[:, [0, 2]], ROOT_SMOOTH)
+    turns = _smooth_pinned((yaws - yaws[0])[:, None], ROOT_SMOOTH)[:, 0]
+    q0, p0 = root_transform(skel, job.root_track, job.root_start)
+    rest = skel.rest[skel.i(ROOT_BONE)]
+    d = np.array([hips[0][0] - p0[0], 0.0, hips[0][2] - p0[2]])   # 始まりの、全ての親から腰までの横の差
+    dense = []
+    for i in range(len(hips)):
+        r = Q.from_axis_angle([0, 1, 0], float(turns[i])) if turn else Q.IDENTITY.copy()
+        p = p0.copy()
+        if move:   # 腰が全ての親から見て同じ所に居続けるように（向きも載せる時は、その差も一緒に回す）
+            p = np.array([path[i][0], 0.0, path[i][1]]) - Q.rotate(r, d)
+            p[1] = p0[1]
+        dense.append(vmd.BoneKey(ROOT_BONE, job.root_start + i, p - rest, Q.normalize(Q.mul(r, q0))))
+    # 曲線で表せる所のキーを落とす（間引きの段とは別。ずれは体の書き戻しでセンターに入るので、見た目は変わらない）
+    keys, i = [dense[0]], 0
+    while i < len(dense) - 1:
+        best, interp, misses, j = i + 1, vmd.LINEAR_INTERP, 0, i + 2
+        while j < len(dense) and misses <= thin.LOOKAHEAD:
+            got = thin.fit_segment(dense[i:j + 1], ROOT_MOVE_TOLERANCE, ROOT_ANGLE_TOLERANCE)
+            if got is None:
+                misses += 1
+            else:
+                best, interp, misses = j, got, 0
+            j += 1
+        keys.append(replace(dense[best], interp=interp))
+        i = best
+    before = [k for k in job.root_track if k.frame <= job.root_start]
+    added = ([] if any(k.frame == job.root_start for k in before) else [keys[0]]) + keys[1:]
+    job.root_track = sorted(before + added, key=lambda k: k.frame)
+    return added
+
+
+def splice_root(merged, added):
+    """carry_root の全ての親のキーを、差し込んだモーションに入れる（全ての親は生成した骨ではないので、merge は触らない）。"""
+    have = {k.frame for k in merged.bones if k.name == vmd.vmd_name(ROOT_BONE)}
+    merged.bones += [k for k in added if k.frame not in have]
+    return merged
 
 
 MIN_SEGMENT = 8   # Kimodo は区間のつなぎ目に前の区間の最後の 5 フレームを使うので、それより十分長く
@@ -339,6 +455,9 @@ def prepare(pmx, motion, prompt, steps=100, seed=-1, post_processing=True, frame
     job = Job(pmx=pmx, frames=frames, first=first, num_frames=num, root_frames=root_frames,
               root_track=list(tracks.get(ROOT_BONE, [])),
               parent_tracks={n: tracks[n] for n in unwritten_parents(skel, body) if n in tracks})
+    job.root_start = anchors[0] if anchors else first
+    job.root_blocker = _root_blocker(skel, tracks, body, job.root_start, last,
+                                     [f for f in frames if f not in set(context)])
     hips0, loc0 = poses[first]
     job.ref_pos = np.array([hips0[0], 0.0, hips0[2]])
     job.ref_yaw = _yaw_of(loc0[0])

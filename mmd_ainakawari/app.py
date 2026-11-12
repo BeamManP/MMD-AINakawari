@@ -53,6 +53,7 @@ DEFAULTS = {
     "stop_at_last_key": True, "smooth_stop": True, "key_stop": False, "wrist_lerp": False,
     "thin": thin.DEFAULT_LEVEL, "thin_nakawari": thin.DEFAULT_LEVEL,   # キーの間引き（Kimodo・MotionBricks のタブごと）
     "use_llama": True,   # プロンプトの読み取り（Llama 3）を使う。メインメモリが足りない時は外す（11-10 マスター）
+    "root_move": False, "root_turn": False,   # 歩いた分の移動・向きを全ての親に載せる（11-12 マスター）
 }
 # Tk は空白でしか折り返さないので、行は自分で分ける（「MMD の」の空白で折れて 1 行目が短くなっていた）
 THIN_NOTE = N_("生成したキーを、MMD の補間曲線で表せる所だけ減らします。\n"
@@ -389,6 +390,16 @@ class App:
         self.smooth = tk.BooleanVar(value=self.cfg["smooth_stop"] and smooth_stop.available())
         self.smooth_check = ttk.Checkbutton(stop_row, text=self.tr("なめらかに止まる"), variable=self.smooth)
         self.smooth_check.pack(side="left", padx=(12, 0))
+        # 歩いた分の移動・向きを全ての親に載せる（センターには歩きの揺れだけ残る。11-12 マスター「全親が置いてけぼりになる」）。
+        # 載せるのは始まりの姿勢だけが決まっている時（途中に体のキー・全ての親のキーがあれば今までどおり。理由はログに出る）
+        self.root_move = tk.BooleanVar(value=self.cfg["root_move"])
+        self.root_turn = tk.BooleanVar(value=self.cfg["root_turn"])
+        # 見出しはボーンの名前だけにして、何をするかはチェックの字で言い切る（11-12 マスター「全ての親へ」は雑な訳に見える）
+        root_row = line(N_("全ての親"), pady=(4, 0))
+        ttk.Checkbutton(root_row, text=self.tr("移動を載せる"), variable=self.root_move).pack(side="left")
+        ttk.Checkbutton(root_row, text=self.tr("向きを載せる"), variable=self.root_turn).pack(side="left", padx=(12, 0))
+        ttk.Label(line(""), text=self.tr("歩いた分を全ての親が受け持ち、センターには揺れだけ残ります"),
+                  foreground="#556").pack(side="left")
         ttk.Separator(t).pack(fill="x", pady=(8, 6))
 
         # プロンプト（区間ごとの行）
@@ -862,6 +873,8 @@ class App:
         put("thin", lambda: round(self.thin_kimodo.get()))
         put("thin_nakawari", lambda: round(self.thin_nakawari.get()))
         put("use_llama", lambda: bool(self.use_llama.get()))
+        put("root_move", lambda: bool(self.root_move.get()))
+        put("root_turn", lambda: bool(self.root_turn.get()))
         try:
             os.makedirs(runner.WORK_DIR, exist_ok=True)
             json.dump(self.cfg, open(SETTINGS_PATH, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
@@ -1072,11 +1085,12 @@ class App:
                                 use_center=mode == "center",
                                 stop_at_last_key=mode == "fill" and bool(self.stop.get()),
                                 smooth_stop=bool(self.smooth.get()) and smooth_stop.available(), engine="kimodo",
-                                use_llama=bool(self.use_llama.get()), **common)
+                                use_llama=bool(self.use_llama.get()),
+                                root_move=bool(self.root_move.get()), root_turn=bool(self.root_turn.get()), **common)
             self.cfg.update(mode=self.mode.get(), length=self.length.get(), prompt=s.prompt, steps=s.steps, seed=s.seed,
                             post_processing=s.post_processing, cfg_text=s.cfg_text, cfg_key=s.cfg_key,
                             stop_at_last_key=bool(self.stop.get()),
-                            smooth_stop=bool(self.smooth.get()))
+                            smooth_stop=bool(self.smooth.get()), root_move=s.root_move, root_turn=s.root_turn)
         os.makedirs(runner.WORK_DIR, exist_ok=True)
         json.dump(self.cfg, open(SETTINGS_PATH, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
         return s

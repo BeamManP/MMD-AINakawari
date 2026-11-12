@@ -43,6 +43,8 @@ class Settings:
     wrist_lerp: bool = False        # 中割りで、手首だけキーの間を補間でつなぐ（MotionBricks は手首を回しすぎることがある）
     thin: int = 0                   # 生成したキーの間引き（thin.LEVELS の番号。0 は間引かない。窓の既定は thin.DEFAULT_LEVEL）
     use_llama: bool = True          # False なら Llama を使わず、読み取り結果のある文（サンプル）だけで作る（メモリが足りない人向け。11-10）
+    root_move: bool = False         # 歩いた分の移動を全ての親に載せる（pipeline.carry_root。11-12 マスター）
+    root_turn: bool = False         # 向きの変わった分を全ての親に載せる
 
 
 def _same_motion(a, b, tol=1e-3, fixed_pos=(), names=None):
@@ -123,12 +125,13 @@ def _referenced(runs):
     return {_same_path(r[x]) for r in runs.values() if isinstance(r, dict) for x in ("backup", "output") if r.get(x)}
 
 
-def _save_last_run(link, backup, out, span, model=None):
-    """この MMD の記録を新しい生成の物にする。戻り値: 前の記録が指していて、もうどの記録も指していないファイル（消してよい）。"""
+def _save_last_run(link, backup, out, span, model=None, root_written=False):
+    """この MMD の記録を新しい生成の物にする。戻り値: 前の記録が指していて、もうどの記録も指していないファイル（消してよい）。
+    root_written: 全ての親にもキーを書いた（作り直す時は、全ての親も前回の元のキーに戻す）。"""
     with _LAST_RUN_LOCK:   # 窓（MMD ごと）は同じプロセスのスレッドで生成するので、読んで書き戻す間をまとめて守る
         runs = _last_runs()
         old = runs.get(link.key) or {}
-        runs[link.key] = {"backup": backup, "output": out, "span": span, "model": model}
+        runs[link.key] = {"backup": backup, "output": out, "span": span, "model": model, "root_written": bool(root_written)}
         _write_runs(runs)
         used = _referenced(runs)
         return [old[x] for x in ("backup", "output") if isinstance(old.get(x), str) and _same_path(old[x]) not in used]
@@ -242,11 +245,13 @@ def _generate(settings, log, link, previous, on_commit):
     # （全部どうしで長さだけ違っても戻して、今回作らない所の前回の結果まで消えていた。11-05 Codex のレビュー 2 回目）
     span = _span_key(settings)
     same_range = previous is not None and previous.get("span") == span
+    # 前回、全ての親にも書いた時は、全ての親も比べて前回の元に戻す（戻さないと、前回書いた全ての親のキーを腰の通り道の目印にしてしまう）
+    restored = written | ({vmd.vmd_name(pipeline.ROOT_BONE)} if same_range and previous.get("root_written") else set())
     if same_range and os.path.exists(previous.get("output", "")) and os.path.exists(previous.get("backup", "")) and _same_motion(original, vmd.read(previous["output"]),
-                                                                                 fixed_pos=fixed_pos, names=written):
-        # 前回の元のキーから取るのは、書き戻す骨だけ。指・表情・全ての親・表示/IK などは今の MMD の物を使う
+                                                                                 fixed_pos=fixed_pos, names=restored):
+        # 前回の元のキーから取るのは、書き戻す骨だけ（前回、全ての親に載せた時は全ての親も）。指・表情・表示/IK などは今の MMD の物を使う
         # （前はモーションを丸ごと前回の元に差し替えていて、生成の後に直した指や表情が戻っていた。11-07 Codex のレビュー）
-        original = _rebase(original, vmd.read(previous["backup"]), written)
+        original = _rebase(original, vmd.read(previous["backup"]), restored)
         vmd.write(backup, original)
         log(_("  書き戻す骨は前回の結果のままなので、前回の元のキーから作り直します（ほかの骨・表情は今のまま。バックアップ: {backup}）", backup=backup))
     else:
@@ -353,8 +358,19 @@ def _generate(settings, log, link, previous, on_commit):
         log(_("MotionBricks で止まり方を作り直し中…"))
         result = smooth_stop.apply(job, result, os.path.join(WORK_DIR, "motionbricks"), log=log)
     resident.check_cancel()
+    root_keys = None
+    if (settings.root_move or settings.root_turn) and not mb:
+        what = _("・").join(w for w, on in ((_("移動"), settings.root_move), (_("向き"), settings.root_turn)) if on)
+        if job.root_blocker:
+            log(_("注意: {what}は「{bone}」に載せません: {why}", what=what, bone=pipeline.ROOT_BONE, why=job.root_blocker))
+        else:
+            root_keys = pipeline.carry_root(job, result, move=settings.root_move, turn=settings.root_turn)
+            log(_("{what}を「{bone}」に載せます（{a}F から・キー {n} 個）",
+                  what=what, bone=pipeline.ROOT_BONE, a=job.root_start, n=len(root_keys)))
     generated = pipeline.build_motion(job, result)
     merged = pipeline.merge(original, generated, job)
+    if root_keys is not None:   # 間引きの前に入れる（全身の確かめは全ての親込みの姿勢で測る。全ての親そのものは間引かない）
+        pipeline.splice_root(merged, root_keys)
     out = os.path.join(cache, f"kimodo_{stamp}.vmd")
     log(_("間のフレームのキー {n} 個を差し込みました", n=len(generated.bones)) + ("" if settings.thin else f" → {out}"))
     if settings.thin:   # 後から手で直しやすいように、曲線で表せる所のキーを落とす（thin.py。11-09 マスター）
@@ -373,7 +389,7 @@ def _generate(settings, log, link, previous, on_commit):
     # 前回の記録は読み込みの前に残す（読み込みで止まっても「元に戻す」でバックアップに戻せるように。11-07 Codex のレビュー）
     # 前の記録が指していた控えと結果は、ここで消す（もう「元に戻す」にも作り直しにも使わない。11-11 マスター）。
     # 始めた時ではなくここ: 作り直しは前回の控えを読み、中断・失敗した時の「元に戻す」は前回の控えに戻すので
-    _remove_cache_files(_save_last_run(link, backup, out, span, pmx))
+    _remove_cache_files(_save_last_run(link, backup, out, span, pmx, root_written=root_keys is not None))
     log(_("MMD に読み込み中…"))
     # 始めた時のモデルかを確かめてからキーを消す。読み込みに失敗したら、バックアップを読み込み直して消したキーを戻す
     link.load_motion(out, 0, model=pmx, restore=backup)
@@ -385,7 +401,7 @@ def _generate(settings, log, link, previous, on_commit):
     root_err = result.get("root_key_error_m") or []
     extra = _("・全ての親のキーとの腰のずれ最大 {cm:.0f}cm", cm=max(root_err) * 100) if root_err else ""
     log(_("できました（{sec:.0f} 秒・生成 {gen:.1f} 秒・キーとのずれ最大 {cm:.1f}cm{extra}）", sec=time.time() - t0, gen=result.get('seconds_generate', 0), cm=max(err) * 100, extra=extra))
-    return {"backup": backup, "output": out, "job": job, "span": span, "model": pmx}
+    return {"backup": backup, "output": out, "job": job, "span": span, "model": pmx, "root_written": root_keys is not None}
 
 
 def undo(backup, log=print, link=None, model=None):
