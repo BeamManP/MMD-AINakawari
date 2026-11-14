@@ -251,7 +251,7 @@ MotionBricks の directml・cpu と TensorRT は回転で 0.03〜0.11 度（Tens
 - **窓のボタンとの違い**: 設定は窓の部品を読まずに依頼から作る（`control.settings_from`。決まりは `App._settings` と同じ・設定のファイルも書き換えない）。省いた細かい項目は窓の保存してある設定（`App.cfg`）。知らせの窓は出さない（始める前の断りは返事の `code`、生成の失敗は記録の `error`）
 - **終わりの時**: 記録を「終わった」にするのは、窓が `busy` を下ろすのと同じ時（`_tick_body` の `done`）。先に終わりと答えると、続けて頼まれた時に `busy` で断ってしまう
 - **踏んだ所**: 相手がつないですぐ切ると `ConnectNamedPipe` が例外になり、次の口を作る前に 1 秒待っていた（その間、相手には「動いていない」に見えた）→ 次の口を作ってから前の口を閉じる。生成の `Job.num_frames` には前後のつなぎ用のフレームも入るので、返事に「作ったフレーム」としては出さない（0〜60F を頼んで 63 と出た）
-- **確かめ**: `tests\check_control_1114.py`（MMD なし・62 件。相手は mmd-mcp の本物の部品）。本物の MMD では mmd-mcp の `scripts\smoke_ainakawari.py`（stdio と HTTP の両方で、生成・生成中の編集の断り・失敗の報告・中断・元に戻すが通った。11-14）
+- **確かめ**: `tests\check_control_1114.py`（MMD なし・62 件。相手は mmd-mcp の本物の部品）。本物の MMD では mmd-mcp の `scripts\smoke_ainakawari.py`（stdio と HTTP の両方で、生成・生成中の編集の断り・失敗の報告・中断・元に戻すが通った。11-14）。窓の「終わった時の処理」を書き換えたので、窓から動かした時は今までどおりかも見る: `tests\live_control_window_1114.py`（本物の窓の部品・17 件。窓から動かした失敗は知らせの窓が出る・外からの依頼では出ない）と、開発版の Hub に右下のパネルの「生成」の合図（`AINakawari.Panel.v1`）を送って最後まで通るか
 
 ## MMM 版（11-11。ブランチ work/mmm）
 MikuMikuMoving（MMM 1.2.9.2）でも、MMD 版と**同じ窓（app.py）**で、選んだキーの間を Kimodo・MotionBricks で作れる。AI の部分（`runner`・`pipeline`・`nakawari`）も同じ。
