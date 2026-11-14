@@ -241,6 +241,18 @@ MotionBricks の directml・cpu と TensorRT は回転で 0.03〜0.11 度（Tens
   やめたら `{"ok": False, "cancelled": True}` を返して次の依頼を待つ（常駐は落とさない）。頼んだ側がいなくなった時もやめる
 - Kimodo（e1c219c）の `_multiprompt` は `progress_bar` を内側の `_generate` に渡していない。生成の間だけ `model._generate` に差し込む（`kimodo_gen.generate`）
 
+## 外からの操作の口（11-14・0.7.0。`control.py`）
+別の PC のエージェント（Muse など）が mmd-mcp の HTTP モード越しに AIナカワリ を使うための口。mmd-mcp の `mmd_ainakawari_status`・`_generate`・`_cancel`・`_undo` が使う（mmd-mcp の `docs/ainakawari.md`）。
+- **なぜパネルを外から押す形にしなかったか**: 失敗が画面の文字と知らせの窓（`messagebox`）でしか分からない。知らせの窓は外から見えないまま MMD の前に残る。パネルからは「キーの間を埋める」しかできない（11-14 マスターと相談）
+- **向き**: AIナカワリ は mmd-mcp を部品として import している。逆向きに import すると輪になるので、mmd-mcp は口に JSON を送るだけ（`mmd_ainakawari` を import しない）
+- **口**: 名前付きパイプ `\.\pipe\AINakawari.Control.v1`（開発版は後ろに `.<AINAKAWARI_INSTANCE>`）。1 回つなぐごとに JSON の依頼 1 つ・返事 1 つ。この PC の中だけ（`PIPE_REJECT_REMOTE_CLIENTS`）・同じ名前の口がもうあれば作らない（`FILE_FLAG_FIRST_PIPE_INSTANCE`）・1 通 64KB まで・pickle は通さない。開けなくても窓は今までどおり動く（記録に 1 行）
+- **スレッド**: 口は専用のスレッド。tk は触らず、依頼を `Hub.requests` に入れて `Hub._poll`（0.1 秒ごと）が `control.handle` を呼ぶ。tk が 5 秒取りに来なければ `ui_busy`、取ってから 15 秒答えなければ `ui_timeout`。諦めた依頼を後から実行しないよう、どちらが先かを `Slot` の錠で決める
+- **2 段**: `generate`・`undo` は番号（`Jobs` の記録の id）をすぐ返す。様子は `status`。Muse のクライアントはツール 1 回を 45 秒しか待たず、呼ぶたびにつなぎ直すので、番号は窓の側（`Hub.jobs`）に持つ。窓を作り直しても残り、プロセスを起動し直すと消える（`unknown_job`）
+- **窓のボタンとの違い**: 設定は窓の部品を読まずに依頼から作る（`control.settings_from`。決まりは `App._settings` と同じ・設定のファイルも書き換えない）。省いた細かい項目は窓の保存してある設定（`App.cfg`）。知らせの窓は出さない（始める前の断りは返事の `code`、生成の失敗は記録の `error`）
+- **終わりの時**: 記録を「終わった」にするのは、窓が `busy` を下ろすのと同じ時（`_tick_body` の `done`）。先に終わりと答えると、続けて頼まれた時に `busy` で断ってしまう
+- **踏んだ所**: 相手がつないですぐ切ると `ConnectNamedPipe` が例外になり、次の口を作る前に 1 秒待っていた（その間、相手には「動いていない」に見えた）→ 次の口を作ってから前の口を閉じる。生成の `Job.num_frames` には前後のつなぎ用のフレームも入るので、返事に「作ったフレーム」としては出さない（0〜60F を頼んで 63 と出た）
+- **確かめ**: `tests\check_control_1114.py`（MMD なし・62 件。相手は mmd-mcp の本物の部品）。本物の MMD では mmd-mcp の `scripts\smoke_ainakawari.py`（stdio と HTTP の両方で、生成・生成中の編集の断り・失敗の報告・中断・元に戻すが通った。11-14）
+
 ## MMM 版（11-11。ブランチ work/mmm）
 MikuMikuMoving（MMM 1.2.9.2）でも、MMD 版と**同じ窓（app.py）**で、選んだキーの間を Kimodo・MotionBricks で作れる。AI の部分（`runner`・`pipeline`・`nakawari`）も同じ。
 

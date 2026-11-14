@@ -16,13 +16,14 @@ import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+import pywintypes
 import win32api
 import win32con
 import win32event
 import win32gui
 import winerror
 
-from . import __version__, applog, gpu, hosts, i18n, panel, paths, pipeline, resident, runner, samples, smooth_stop, thin
+from . import __version__, applog, control, gpu, hosts, i18n, panel, paths, pipeline, resident, runner, samples, smooth_stop, thin
 from .i18n import N_, _
 from .installer import window as setup_window
 from .message_window import MessageWindow, register_message
@@ -105,7 +106,32 @@ class Hub:
             PANEL_MESSAGE: lambda w, l: self.requests.put(("panel", int(w), int(l))),
         })
         self.listener.start()
+        # 外からの操作の口（control.py。mmd-mcp の mmd_ainakawari_* のツール用。0.7.0）。開けなくても窓は今までどおり使える
+        self.jobs = control.Jobs()
+        self.control = control.Server(control.pipe_name(_INSTANCE), lambda slot: self.requests.put(("control", slot, 0)))
+        try:
+            self.control.start()
+        except pywintypes.error as e:
+            applog.write(f"外からの操作の口（{self.control.name}）を開けません: {e}")
+            self.control = None
         self._poll()
+
+    def control_app(self, hwnd):
+        """外からの依頼の相手の窓（無ければ隠したまま作る）。相手が MMD・MMM でなければ断る。hwnd を省けるのは 1 つだけ開いている時。"""
+        if hwnd is None:
+            found = hosts.all_hosts()
+            if len(found) > 1:
+                raise control.Refused("hwnd_required", _("MMD・MMM が {n} 個開いています。hwnd で相手を指定してください", n=len(found)),
+                                      hosts=[{"hwnd": h.hwnd, "kind": h.kind} for h in found])
+            mmd = found[0] if found else None
+        else:
+            mmd = hosts.find(hwnd)
+        if mmd is None:
+            raise control.Refused("host_not_found", _("開こうとした MMD・MMM が見つかりません。開いているか確かめてください"))
+        self.waiting.pop(mmd.hwnd, None)
+        if mmd.hwnd not in self.apps:
+            self.apps[mmd.hwnd] = App(tk.Toplevel(self.root), self, mmd)
+        return self.apps[mmd.hwnd]
 
     def open(self, hwnd, show=True):
         """その MMD の窓を出す（まだ無ければ作る）。show=False なら隠したまま作る（MMD の右下のパネルから使う）。
@@ -161,12 +187,17 @@ class Hub:
         self.root.destroy()
 
     def close(self):
+        if self.control:
+            self.control.stop()
         self.listener.stop()
 
     def _poll(self):
         while not self.requests.empty():
             kind, hwnd, button = self.requests.get()
-            if kind == "panel":
+            if kind == "control":   # 外からの依頼（hwnd の所に control.Slot）。口が待つのを諦めていたら実行しない
+                if hwnd.take():
+                    hwnd.answer(control.handle(self, hwnd.request))
+            elif kind == "panel":
                 if hwnd not in self.apps:
                     self.open(hwnd, show=False)
                 if hwnd in self.apps:
@@ -225,7 +256,8 @@ class App:
         # 生成の中断（11-10 マスター）。生成中は「生成」が「中断」になる。押せるのは MMD に書き戻す前まで（cancellable）
         self.cancel = threading.Event()
         self.cancellable = False
-        self.selected_keys = None   # MMD のタイムラインで選んでいるキーのフレーム（_read_mmd が 1 秒ごとに読む。読めなければ None）
+        self.remote = None   # 外から頼まれて動いている生成・元に戻すの記録（control.Jobs の 1 つ）。窓から動かした時は None
+        self.selected_keys = None  # MMD のタイムラインで選んでいるキーのフレーム（_read_mmd が 1 秒ごとに読む。読めなければ None）
         # 「続きを足す」の時だけ読む: 骨（VMD の名前）→ キーのフレーム と、選択中のモデルの書き戻す骨（PMX ごとに覚える）
         self._key_frames = self._body_names = None
         self._body_cache = {}
@@ -253,6 +285,9 @@ class App:
     def close(self):
         """この MMD の窓を片付ける。"""
         self.closed = True   # 予約済みの _tick が、壊した後の窓を触らないように（11-11 動作報告の app.log に TclError）
+        if self.remote:   # 外からの依頼の途中で MMD が閉じた。「作っている」のまま残さない
+            control.finish(self.remote, "failed", self.tr("MMD が閉じられました"))
+            self.remote = None
         self.root.destroy()
         self.hub.forget(self)
 
@@ -893,14 +928,23 @@ class App:
             kind, payload = self.q.get()
             if kind == "log":
                 self._write_log(payload)
+                if self.remote:
+                    self.remote["log"].append(self._for_host(payload))
             elif kind == "commit":   # MMD への書き戻しが始まる。ここからは中断できない
                 self.cancellable = False
+                if self.remote:
+                    control.commit(self.remote)
             elif kind == "done":
                 self.busy = self.cancellable = False
-                ok, msg = payload
+                outcome, msg, result = payload
                 msg = self._for_host(msg)
                 self.status.set(msg)
-                if not ok:
+                # 外からの依頼は、busy を下ろすのと同じ時に「終わった」にする（先に終わりと答えると、続けて頼まれた時に busy で断ってしまう）。
+                # 失敗の知らせの窓は出さない（頼んだ側には見えず、MMD の前に残る）。理由は依頼の記録で返す
+                job, self.remote = self.remote, None
+                if job:
+                    control.finish(job, outcome, msg, result)
+                elif outcome == "failed":
                     messagebox.showerror(self.name, msg, parent=self.root)
         # 生成できない時は、押してからエラーにせず、押せなくして下の 1 行で知らせる。
         # GPU が無い時はどちらのタブも（MotionBricks も GPU が要る）
@@ -1112,10 +1156,10 @@ class App:
             if isinstance(r, dict) and r.get("backup"):
                 self.last_backup = r["backup"]
                 self.last_run = r
-            self.q.put(("done", (True, ok_message)))
+            self.q.put(("done", ("done", ok_message, r)))
         except resident.Cancelled:   # 中断は失敗ではない。MMD のキーは触っていない（書き戻しの前でしか止まらない）
             self.q.put(("log", _("中断しました（MMD のキーはそのままです）")))
-            self.q.put(("done", (True, _("中断しました"))))
+            self.q.put(("done", ("cancelled", _("中断しました"), None)))
         except Exception as e:  # 窓に出して止める（握りつぶさない）。どこで落ちたかは記録にだけ書く
             applog.exception("失敗した時の traceback:")
             try:   # 読み込みで止まった時も「元に戻す」で戻せるように、読み込みの前に残した記録を読み直す（11-07 Codex のレビュー）
@@ -1125,7 +1169,7 @@ class App:
             except Exception:   # MMD が閉じられたなど。失敗の知らせはそのまま出す
                 applog.exception("失敗の後の前回の記録の読み直し:")
             self.q.put(("log", _("失敗: {error}", error=e)))
-            self.q.put(("done", (False, _("失敗: {error}", error=e))))
+            self.q.put(("done", ("failed", _("失敗: {error}", error=e), None)))
 
     def _generate_or_cancel(self, fill=False):
         """「生成」のボタン（窓・パネル）。生成中は「中断」として働く。"""
@@ -1145,6 +1189,10 @@ class App:
         except tk.TclError:   # 数字の欄（計算の回数・seed・効き）に数字でないものが入っている
             messagebox.showerror(self.name, self.tr("「詳しい設定」の計算の回数・seed には数字を入れてください"), parent=self.root)
             return
+        self._start_generate(s)
+
+    def _start_generate(self, s):
+        """設定 s で生成を始める（窓・パネルのボタンと、外からの依頼 remote_generate の両方から）。"""
         self._write_log("―" * 20)
         self.status.set(self.tr("生成中…"))
         previous = self.last_run
@@ -1159,6 +1207,82 @@ class App:
         model = (self.last_run or {}).get("model")   # バックアップを取ったモデル（違うモデルが選ばれていたら止める）
         self.status.set(self.tr("元に戻し中…"))
         self._run(lambda log: runner.undo(backup, log, link=self.link, model=model), self.tr("生成前のモーションに戻しました"))
+
+    # ---------------- 外からの操作（control.py。Hub._poll から tk のスレッドで呼ばれる） ----------------
+    # 窓のボタンと違い、知らせの窓（messagebox）は出さない。断る時は control.Refused（理由は返事で返る）
+
+    def remote_state(self):
+        """status に返す、この MMD の様子。生成中は MMD を操作しているので、モデルを読みに行かない（_read_mmd と同じ）。"""
+        model = model_error = None
+        if not self.busy:
+            try:
+                found = self.link.selected_model()
+                model = {"name": found["name"], "path": found["path"]} if found else None
+            except Exception as e:   # 読めない理由をそのまま返す（MMD の版が違う・選び替えの途中など）
+                model_error = str(e)
+        keys = self.selected_keys
+        return {
+            "host": {"hwnd": self.mmd.hwnd, "kind": self.mmd.kind, "language": self.lang},
+            "busy": self.busy, "cancellable": bool(self.busy and self.cancellable and not self.cancel.is_set()),
+            "running_job": self.remote["id"] if self.remote else None,
+            "undo_available": bool(self.last_backup and not self.busy),
+            "status_line": self.status.get(),
+            "model": model, "model_error": model_error,
+            # MMD のタイムラインで選んでいるキー（1 秒ごとに読んだ物。読めていなければ null）
+            "selected_keys": None if keys is None else {"count": len(keys), "first": keys[0] if keys else None,
+                                                        "last": keys[-1] if keys else None},
+            "ready": {"gpu": bool(self.diagnosis.usable), "gpu_note": self.diagnosis.note, "kimodo": bool(self.kimodo_ready),
+                      "motionbricks": bool(smooth_stop.available()),
+                      # false なら、文はサンプル（読み取り結果を同梱した文）しか使えない（Llama なし）
+                      "free_prompt": bool(self.llama_installed and self.cfg["use_llama"])},
+            # generate で省いた項目に使う値（窓の保存してある設定）
+            "defaults": {k: self.cfg[k] for k in ("steps", "seed", "post_processing", "cfg_text", "cfg_key", "stop_at_last_key",
+                                                  "smooth_stop", "key_stop", "wrist_lerp", "thin", "thin_nakawari", "use_llama",
+                                                  "root_move", "root_turn")},
+        }
+
+    def _remote_idle(self):
+        if self.busy:
+            raise control.Refused("busy", self.tr("生成か元に戻すの途中です。終わってから頼んでください"),
+                                  running_job=self.remote["id"] if self.remote else None)
+
+    def remote_generate(self, req):
+        """生成を始めて、依頼の記録を返す（終わるのは待たない）。始められない時は control.Refused。"""
+        self._remote_idle()
+        if not self.diagnosis.usable:
+            raise control.Refused("gpu_unusable", self.diagnosis.note)
+        s, summary = control.settings_from(req, self.cfg, self.link.selected_key_frames,
+                                           kimodo_ready=self.kimodo_ready, motionbricks_ready=smooth_stop.available())
+        self.remote = self.hub.jobs.new("generate", self.mmd.hwnd, summary)
+        self._start_generate(s)
+        self._write_log(self.tr("（外からの依頼 {id}）", id=self.remote["id"]))
+        return self.remote
+
+    def remote_cancel(self, job_id=None):
+        """生成の中断を頼む（MMD に書き戻す前まで）。job_id を付けた時は、いま動いているのがその依頼の時だけ。"""
+        if not self.busy:
+            raise control.Refused("not_running", self.tr("いま動いている生成はありません"))
+        if job_id is not None and (self.remote is None or self.remote["id"] != job_id):
+            raise control.Refused("not_running", self.tr("その依頼は、いま動いていません"),
+                                  running_job=self.remote["id"] if self.remote else None)
+        if not self.cancellable:
+            raise control.Refused("not_cancellable", self.tr("もう中断できません（MMD に書き戻しているか、元に戻している途中です）"))
+        if not self.cancel.is_set():
+            self.cancel.set()
+            self.status.set(self.tr("中断しています…"))
+            self._write_log(self.tr("中断を頼みました…"))
+        if self.remote:
+            self.remote["cancel_requested"] = True
+        return self.remote
+
+    def remote_undo(self):
+        """生成前のモーションに戻し始めて、依頼の記録を返す。"""
+        self._remote_idle()
+        if not self.last_backup:
+            raise control.Refused("nothing_to_undo", self.tr("元に戻せる生成がありません"))
+        self.remote = self.hub.jobs.new("undo", self.mmd.hwnd)
+        self._undo()
+        return self.remote
 
 
 def _notify_running(hwnd, message=OPEN_MESSAGE):

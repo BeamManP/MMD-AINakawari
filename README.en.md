@@ -173,6 +173,14 @@ The prompt and the generation method (Kimodo / MotionBricks) are shared between 
 - If a key sits just after a section boundary, the boundary is shifted back by 1 frame automatically to keep the connection
 - The first generation takes an extra 10-20 seconds to load the models. From the second time on it takes about 25 seconds (including key thinning at "Normal")
 
+### Using it from an AI agent (mmd-mcp)
+The `mmd_ainakawari_*` tools of [mmd-mcp](https://github.com/BeamManP/mmd-mcp) let an AI agent ask for a generation (MMD version, from 0.7.0): start one with a prompt, range and engine, check on it, cancel it, or undo it. An agent on another PC goes through mmd-mcp's HTTP mode.
+
+- The AI Nakawari window (it starts with MMD) waits for requests on a channel that exists only inside this PC. Nothing connects to it directly from the network
+- A generation requested by an agent never opens a message box when it fails (the reason goes back to the agent). The buttons of the window and the panel turn into "Cancel" while it runs
+
+See mmd-mcp's [AI Nakawari bridge](https://github.com/BeamManP/mmd-mcp/blob/main/docs/ainakawari.md) for how to use it.
+
 ## Updating and uninstalling
 
 **Update**: extract the new zip over the MMD (MMM) folder in the same way, and double-click `AIナカワリ導入.cmd` again. Your window settings (`MMD-AINakawari\app\work\`) are kept. Then open "Setup", and if it says an update is available, press the update button (only the steps whose version changed are redone).

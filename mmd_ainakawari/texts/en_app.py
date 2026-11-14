@@ -146,4 +146,12 @@ TEXT = {
     "歩いた分を全ての親が受け持ち、センターには揺れだけ残ります": "The master bone takes the travel; only the sway stays in the center",
     "移動": "Move",
     "向き": "Turn",
+    "MMD・MMM が {n} 個開いています。hwnd で相手を指定してください": "{n} MMD/MMM windows are open. Specify the target with hwnd",
+    "生成か元に戻すの途中です。終わってから頼んでください": "A generation or undo is in progress. Ask again when it finishes",
+    "（外からの依頼 {id}）": "(remote request {id})",
+    "いま動いている生成はありません": "No generation is running",
+    "その依頼は、いま動いていません": "That job is not running now",
+    "もう中断できません（MMD に書き戻しているか、元に戻している途中です）":
+        "It can no longer be cancelled (writing back to MMD, or undoing)",
+    "元に戻せる生成がありません": "There is no generation to undo",
 }
