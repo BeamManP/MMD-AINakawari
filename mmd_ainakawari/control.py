@@ -49,6 +49,14 @@ TERMINAL = ("done", "failed", "cancelled")
 _FIRST_INSTANCE = 0x00080000        # FILE_FLAG_FIRST_PIPE_INSTANCE（同じ名前の口がもうあれば作らない）
 _REJECT_REMOTE = 0x00000008         # PIPE_REJECT_REMOTE_CLIENTS
 
+# generate で省いた項目の値。作風に関わる物は、窓に保存してある設定を引き継がずにここで決める（11-14 マスター「分けるで」。
+# 窓の seed が固定だと同じ頼み方のたびに同じ動きが返り、窓で試した効きや「全ての親に載せる」が外からの結果に効いてしまう）。
+# 値は窓の最初の設定（app.DEFAULTS）と同じ（tests/check_control_1114.py が突き合わせる）。
+# この PC に合わせた物（MACHINE_KEYS。Llama を使うか・間引き）だけ、窓の保存してある設定から引き継ぐ
+REMOTE_DEFAULTS = {"steps": 100, "seed": -1, "post_processing": True, "cfg_text": 2.0, "cfg_key": 2.0,
+                   "stop_at_last_key": True, "smooth_stop": True, "key_stop": False, "wrist_lerp": False,
+                   "root_move": False, "root_turn": False}
+MACHINE_KEYS = ("use_llama", "thin", "thin_nakawari")
 ENGINES = ("kimodo", "motionbricks")
 MODES = ("fill", "extend", "fresh", "center")
 # 依頼に付けられる項目（generate 以外でも、知らない名前は断る）
@@ -141,6 +149,11 @@ def _range(req, selected_keys):
     raise Refused("bad_request", _('range は "selected_keys"・"all"・start と end のフレームを入れたオブジェクトのどれかで指定してください'))
 
 
+def defaults_for(cfg):
+    """generate で省いた項目に使う値。cfg は窓の保存してある設定（App.cfg）。"""
+    return {**REMOTE_DEFAULTS, **{k: cfg[k] for k in MACHINE_KEYS}}
+
+
 def settings_from(req, cfg, selected_keys, kimodo_ready, motionbricks_ready):
     """generate の依頼 → (runner.Settings, 返事に入れる要約)。窓の App._settings と同じ決まりで作る（窓の部品は読まない・設定も保存しない）。
 
@@ -149,9 +162,11 @@ def settings_from(req, cfg, selected_keys, kimodo_ready, motionbricks_ready):
     prompt（kimodo では必ず）: 英語の文。行頭に「45: …」と書いた行で区間に分けられる（pipeline.prompt_segments）
     range: "selected_keys"（既定。MMD で選んだキーの最初から最後まで）・"all"・{"start": F, "end": F}
     length: extend では足すフレーム数（必ず）・fresh で range が "all" の時は作るフレーム数（必ず）
-    残り（steps・seed・cfg_text・cfg_key・post_processing・stop_at_last_key・smooth_stop・key_stop・wrist_lerp・thin・use_llama・
-    root_move・root_turn）は、省くと窓の保存してある設定（cfg）。この PC に合わせた物（Llama を使わない・間引き）をそのまま使うため。
+    残りは defaults_for(cfg) の値: steps・seed・cfg_text・cfg_key・post_processing・stop_at_last_key・smooth_stop・key_stop・
+    wrist_lerp・root_move・root_turn は決まった既定値（REMOTE_DEFAULTS。seed は -1＝毎回違う動き）、
+    use_llama・thin だけ窓の保存してある設定（この PC に合わせた物。Llama を使わない・間引き）。
     """
+    cfg = defaults_for(cfg)
     engine = _choice(req, "engine", ENGINES, "kimodo")
     nakawari = engine == "motionbricks"
     mode = "fill" if nakawari else _choice(req, "mode", MODES, "fill")

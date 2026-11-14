@@ -47,7 +47,12 @@ def refused(fn):
 
 
 # ---------------- 1. 依頼 → 設定 ----------------
-cfg = dict(DEFAULTS, steps=40, seed=7, use_llama=False, thin=3, thin_nakawari=1, root_move=True)
+check("決まった既定値は、窓の最初の設定と同じ", control.REMOTE_DEFAULTS == {k: DEFAULTS[k] for k in control.REMOTE_DEFAULTS}
+      and not set(control.REMOTE_DEFAULTS) & set(control.MACHINE_KEYS)
+      and set(control.REMOTE_DEFAULTS) | set(control.MACHINE_KEYS) == set(DEFAULTS) - {"tab", "mode", "range_mode", "length", "prompt"})
+# 窓で試した作風の設定（seed・効き・全ての親に載せるなど）と、この PC に合わせた設定（Llama・間引き）
+cfg = dict(DEFAULTS, steps=40, seed=7, cfg_text=8.0, cfg_key=5.0, post_processing=False, stop_at_last_key=False, smooth_stop=False,
+           key_stop=True, wrist_lerp=True, root_move=True, root_turn=True, use_llama=False, thin=3, thin_nakawari=1)
 keys = lambda: [10, 20, 55]   # noqa: E731
 
 
@@ -58,8 +63,11 @@ def make(req, selected=keys, kimodo=True, mb=True):
 s, summary = make({"prompt": "A person walks."})
 check("既定は Kimodo・埋める・選んだキーの間", (s.engine, s.use_keys, s.range_start, s.range_end, s.length, s.extend) ==
       ("kimodo", True, 10, 55, None, None), str(summary))
-check("省いた項目は窓の保存してある設定", (s.steps, s.seed, s.use_llama, s.thin, s.root_move, s.stop_at_last_key) ==
-      (40, 7, False, 3, True, True))
+check("省いた項目: 作風の物は窓の設定を引き継がず、決まった既定値", (s.steps, s.seed, s.cfg_text, s.cfg_key, s.post_processing,
+      s.stop_at_last_key, s.smooth_stop, s.key_stop, s.wrist_lerp, s.root_move, s.root_turn) ==
+      (100, -1, 2.0, 2.0, True, True, True, False, False, False, False), str(summary))
+check("省いた項目: この PC に合わせた物（Llama・間引き）は窓の設定", (s.use_llama, s.thin) == (False, 3))
+check("status に返す既定値も同じ", control.defaults_for(cfg) == {**control.REMOTE_DEFAULTS, "use_llama": False, "thin": 3, "thin_nakawari": 1})
 s, _ = make({"prompt": "x", "steps": 20, "seed": -1, "use_llama": True, "thin": 0, "root_move": False, "cfg_text": 3,
              "stop_at_last_key": False, "smooth_stop": False})
 check("付けた項目はそれを使う", (s.steps, s.seed, s.use_llama, s.thin, s.root_move, s.cfg_text, s.stop_at_last_key, s.smooth_stop) ==

@@ -1235,10 +1235,8 @@ class App:
                       "motionbricks": bool(smooth_stop.available()),
                       # false なら、文はサンプル（読み取り結果を同梱した文）しか使えない（Llama なし）
                       "free_prompt": bool(self.llama_installed and self.cfg["use_llama"])},
-            # generate で省いた項目に使う値（窓の保存してある設定）
-            "defaults": {k: self.cfg[k] for k in ("steps", "seed", "post_processing", "cfg_text", "cfg_key", "stop_at_last_key",
-                                                  "smooth_stop", "key_stop", "wrist_lerp", "thin", "thin_nakawari", "use_llama",
-                                                  "root_move", "root_turn")},
+            # generate で省いた項目に使う値（決まった既定値。Llama を使うか・間引きだけ窓の保存してある設定）
+            "defaults": control.defaults_for(self.cfg),
         }
 
     def _remote_idle(self):
