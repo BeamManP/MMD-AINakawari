@@ -22,7 +22,7 @@ WATCH = ["モーションデータ読込", "用のモーションデータです
 def sections(pe, data):
     out = {}
     for s in pe.sections:
-        name = s.Name.rstrip(b"\0").decode("ascii", "replace")
+        name = s.Name.decode("ascii", "replace").rstrip("\0 ").split("\0")[0].strip()   # 中国語版は名前の後ろに空白などが混ざる
         raw = data[s.PointerToRawData:s.PointerToRawData + s.SizeOfRawData]
         out[name] = (s.VirtualAddress, s.Misc_VirtualSize, s.PointerToRawData, s.SizeOfRawData, hashlib.sha256(raw).hexdigest())
     return out
