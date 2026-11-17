@@ -6,7 +6,7 @@
 1. 載せて生成（0〜149F）→ 読み直した全ての親のキーの補間曲線が、書いた物と同じか
 2. 続きを足す（+100F・載せる）→ 全ての親が 149F の続きから進み、センターの横の移動が小さいか
 3. 同じ設定で続きを作り直す → また載るか → 元に戻す → 1 の結果に戻るか
-4. 長さを変えて作り直す（150 → 200F）→ 何が起きるかを記録する（前回載せた全ての親のキーが、マスターのキーと区別できない）
+4. 長さを変えて作り直す（150 → 200F）→ 前回の元に戻してから作り、また載るか（11-18 に直した。11-13 までは載らなかった）
 5. 元に戻す
 """
 import argparse
@@ -89,10 +89,15 @@ def main():
     _m, t4 = now("ext_undo")
     check("3: 元に戻す: 1 の全ての親に戻る", [k.frame for k in t4.get(ROOT, [])] == sorted(got), f"{[k.frame for k in t4.get(ROOT, [])]}")
 
-    print("=== 4: 長さを変えて作り直す（150 → 200F。何が起きるかの記録）")
-    r5 = runner.generate(runner.Settings(length=200, **base), log, link=link, previous=r1)
+    print("=== 4: 長さを変えて作り直す（150 → 200F）")
+    # r1 の控えは 2・3 の生成の記録で片付けられているので、150F をもう一度作ってから長さを変える（実際の使い方の順）
+    link.load_motion(os.path.join(OUT, "start.vmd"), 0, model=pmx)
+    r4 = runner.generate(runner.Settings(length=150, **base), log, link=link, previous=None)
+    check("4: 0F だけから 150F で作る: 載る", r4.get("root_written"))
+    r5 = runner.generate(runner.Settings(length=200, **base), log, link=link, previous=r4)
     _m, t5 = now("len200")
-    print(f"  記録: 全ての親に載ったか {r5.get('root_written')}・全ての親のキー {[k.frame for k in t5.get(ROOT, [])]}", flush=True)
+    roots5 = [k.frame for k in t5.get(ROOT, [])]
+    check("4: 長さを変えた作り直し: また載り、全ての親が 149F より後ろへ続く", r5.get("root_written") and max(roots5) > 149, f"{roots5}")
     runner.undo(r5["backup"], log, link=link, model=pmx)
     # r1 の控えは、後の生成の記録で置き換わった時に片付けられている（runner._save_last_run）ので、0F だけのモーションを入れ直す
     link.load_motion(os.path.join(OUT, "start.vmd"), 0, model=pmx)
