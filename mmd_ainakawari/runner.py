@@ -108,6 +108,11 @@ def _span_key(settings):
     return {"range": None, "use_keys": settings.use_keys, "length": settings.length}
 
 
+def _is_whole(span):
+    """_span_key の結果が「全部」（範囲を選ばない・続きを足さない）の生成か。"""
+    return isinstance(span, dict) and "range" in span and span["range"] is None
+
+
 def _write_runs(runs):
     # 書き終わってから置き換える（途中で止まっても前のものが残る）。一時ファイルは保存ごとに別の名前
     # （窓と確認用のスクリプトのように別のプロセスが同時に保存すると、同じ名前では片方の置き換えが失敗した。11-04 Codex のレビュー）
@@ -245,15 +250,24 @@ def _generate(settings, log, link, previous, on_commit):
     # （全部どうしで長さだけ違っても戻して、今回作らない所の前回の結果まで消えていた。11-05 Codex のレビュー 2 回目）
     span = _span_key(settings)
     same_range = previous is not None and previous.get("span") == span
+    # 前回、全ての親に載せた「全部」の生成を、長さ・キーを使うかだけ変えて「全部」で作り直す時も、前回の元に戻す（11-18 マスター）。
+    # 戻さないと、前回打った全ての親のキーがマスターのキーと区別できず、腰の通り道の目印になって載らなかった（11-13）。
+    # 全ての親だけを戻すと、前回の体のキー（載せた全ての親の上で書いた物）の場所がずれるので、書き戻す骨ごと前回の元に戻す。
+    # 範囲・続きを足す時は今までどおり（前回作った所の外の結果を消さない。11-05 Codex のレビュー）
+    whole_redo = (not same_range and previous is not None and previous.get("root_written")
+                  and _is_whole(previous.get("span")) and _is_whole(span))
     # 前回、全ての親にも書いた時は、全ての親も比べて前回の元に戻す（戻さないと、前回書いた全ての親のキーを腰の通り道の目印にしてしまう）
-    restored = written | ({vmd.vmd_name(pipeline.ROOT_BONE)} if same_range and previous.get("root_written") else set())
-    if same_range and os.path.exists(previous.get("output", "")) and os.path.exists(previous.get("backup", "")) and _same_motion(original, vmd.read(previous["output"]),
-                                                                                 fixed_pos=fixed_pos, names=restored):
+    restored = written | ({vmd.vmd_name(pipeline.ROOT_BONE)} if (same_range or whole_redo) and previous.get("root_written") else set())
+    if (same_range or whole_redo) and os.path.exists(previous.get("output", "")) and os.path.exists(previous.get("backup", "")) \
+            and _same_motion(original, vmd.read(previous["output"]), fixed_pos=fixed_pos, names=restored):
         # 前回の元のキーから取るのは、書き戻す骨だけ（前回、全ての親に載せた時は全ての親も）。指・表情・表示/IK などは今の MMD の物を使う
         # （前はモーションを丸ごと前回の元に差し替えていて、生成の後に直した指や表情が戻っていた。11-07 Codex のレビュー）
         original = _rebase(original, vmd.read(previous["backup"]), restored)
         vmd.write(backup, original)
-        log(_("  書き戻す骨は前回の結果のままなので、前回の元のキーから作り直します（ほかの骨・表情は今のまま。バックアップ: {backup}）", backup=backup))
+        if whole_redo:
+            log(_("  前回は「全ての親」に載せて全部を作ったので、設定が違っても前回の元のキーから作り直します（ほかの骨・表情は今のまま。バックアップ: {backup}）", backup=backup))
+        else:
+            log(_("  書き戻す骨は前回の結果のままなので、前回の元のキーから作り直します（ほかの骨・表情は今のまま。バックアップ: {backup}）", backup=backup))
     else:
         log(_("  バックアップ: {backup}", backup=backup))
 

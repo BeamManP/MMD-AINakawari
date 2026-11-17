@@ -14,6 +14,9 @@ TEXT = {
     "  書き戻す骨は前回の結果のままなので、前回の元のキーから作り直します（ほかの骨・表情は今のまま。バックアップ: {backup}）":
         "  The bones to write back are still the previous result, so it is redone from the previous original keys "
         "(other bones and expressions stay as they are). Backup: {backup}",
+    "  前回は「全ての親」に載せて全部を作ったので、設定が違っても前回の元のキーから作り直します（ほかの骨・表情は今のまま。バックアップ: {backup}）":
+        "  Last time the whole motion was made with the movement carried onto the master bone, so it is redone from the previous "
+        "original keys even though the settings differ (other bones and expressions stay as they are). Backup: {backup}",
     "  バックアップ: {backup}": "  Backup: {backup}",
     "{a}〜{b}F・{n} フレーム": "{a}-{b}F, {n} frames",
     "{a}F の姿勢から続けて、後ろに {n} フレーム（{b}〜{c}F）を足します":
