@@ -9,7 +9,7 @@ from mmd_mcp import scene_controls as scene
 from mmd_mcp import timeline
 from mmd_mcp.bone_controls import get_selected_bone_transform
 from mmd_mcp.bone_selection import select_bone
-from mmd_mcp.ui_language import english_mode
+from mmd_mcp.ui_language import LABELS_ZH, matches, ui_language
 from mmd_mcp.ui_state import UIReader, get_ui_state
 from mmd_mcp.windows import list_windows
 
@@ -285,17 +285,22 @@ class MMDLink:
         r = self._settle(r, stage, lambda: self._keys_cleared(track))
         return {**r, "delete_sent": True}
 
+    def ui_language(self):
+        """MMD の画面の言葉。"en"（英語モード）・"zh"（中国語版 MMD932・11-18）・"ja"。mmd-mcp の ui_language（カメラ編／モデル編のボタンの文字で見る）。"""
+        return ui_language(UIReader(self.hwnd))
+
     def english(self):
-        """MMD が英語モード（ヘルプ → English Mode）か。mmd-mcp の english_mode（カメラ編／モデル編のボタンの文字で見る）。"""
-        return english_mode(UIReader(self.hwnd))
+        """MMD が英語モード（ヘルプ → English Mode）か。"""
+        return self.ui_language() == "en"
 
     def language(self):
-        """窓に出す言葉（i18n.py）。MMD が英語モードなら "en"。"""
-        return "en" if self.english() else "ja"
+        """窓に出す言葉（i18n.py）。MMD が英語モードか中国語版なら "en"（中国語の文はまだ無いので、日本語より英語。11-18 マスター「中国版 MMD 対応」）。"""
+        return "ja" if self.ui_language() == "ja" else "en"
 
     def _track(self, track):
         """範囲選択の対象の日本語の名前を、今の MMD の言葉の名前にする（英語モードでは「全ボーンﾌﾚｰﾑ」が無く、キーを消せなかった）。"""
-        return TRACKS_EN[track] if self.english() else track
+        lang = self.ui_language()
+        return TRACKS_EN[track] if lang == "en" else LABELS_ZH[track] if lang == "zh" else track
 
     def _settle(self, result, stage, verify):
         """mmd-mcp の返事が MMD の窓で止まっていたら、その窓をログに残し、ボタン 1 つのお知らせの窓だけ閉じる。
@@ -464,13 +469,17 @@ class MMDLink:
             """その窓が「〜用のモーションデータです 続行しますか？」なら (OK のボタン, 文)。違えば None。"""
             # 英語モード（11-11 に MMD 9.32 で出して読んだ）: 「load motion data」
             # 「This motion file is the data for '○○'. / You can regist the motion only same bone name. / Are you OK?」
-            if d.get("title") not in ("モーションデータ読込", "load motion data"):   # i18n: skip
+            # 中国語版 MMD932（11-18 に exe から読んだ）: 「载入动作数据」「…制作的動作数据文件 / 注意：僅会載入同骨骼名的動作数据 / 確定要這麼做？」
+            # （ANSI の文なので、繁体字と簡体字のどちらで出ても通す）
+            if not matches(d.get("title"), "モーションデータ読込"):   # i18n: skip
                 return None
             controls = d.get("controls") or []
             texts = [c.get("text") or "" for c in controls if c.get("class") == "Static"]
             ok = [c for c in controls if c.get("class") == "Button" and c.get("id") == 1]
             if len(ok) != 1 or not any(("用のモーションデータです" in t and "続行しますか" in t)   # i18n: skip
-                                       or ("This motion file is the data for" in t and "Are you OK?" in t) for t in texts):
+                                       or ("This motion file is the data for" in t and "Are you OK?" in t)
+                                       or (("動作数据" in t or "动作数据" in t) and ("確定" in t or "确定" in t))   # i18n: skip
+                                       for t in texts):
                 return None
             return ok[0]["hwnd"], texts
 

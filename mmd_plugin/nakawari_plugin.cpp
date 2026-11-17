@@ -90,7 +90,8 @@ int help_position(HMENU bar) {
     for (int i = 0; i < n; ++i) {
         wchar_t text[64]{};
         GetMenuStringW(bar, i, text, 64, MF_BYPOSITION);
-        if (std::wcsncmp(text, L"ヘルプ", 3) == 0 || _wcsnicmp(text, L"help", 4) == 0) return i;
+        // 中国語版 MMD932 は「帮助(&H)」（11-18 に読んだ）
+        if (std::wcsncmp(text, L"ヘルプ", 3) == 0 || _wcsnicmp(text, L"help", 4) == 0 || std::wcsncmp(text, L"帮助", 2) == 0) return i;
     }
     return -1;
 }

@@ -96,7 +96,9 @@ bool mmd_english_mode(HWND mmd) {
     wchar_t text[16]{};
     const HWND toggle = GetDlgItem(mmd, kCameraButton);
     if (!toggle || !GetWindowTextW(toggle, text, 16)) return false;
-    return wcscmp(text, L"camera") == 0 || wcscmp(text, L"To camera") == 0 || wcscmp(text, kModelModeTextEn) == 0;
+    // 中国語版 MMD932 の「相机编辑」「模型编辑」も英語の字にする（中国語の字はまだ無いので、日本語より英語。11-18）
+    return wcscmp(text, L"camera") == 0 || wcscmp(text, L"To camera") == 0 || wcscmp(text, kModelModeTextEn) == 0
+        || wcscmp(text, L"相机编辑") == 0 || wcscmp(text, L"模型编辑") == 0;
 }
 
 HWND NakawariPanel::add(const wchar_t* cls, const wchar_t* text, DWORD style, int id, DWORD ex_style) {

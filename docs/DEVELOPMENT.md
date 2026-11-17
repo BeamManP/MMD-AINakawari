@@ -253,6 +253,14 @@ MotionBricks の directml・cpu と TensorRT は回転で 0.03〜0.11 度（Tens
 - **踏んだ所**: 相手がつないですぐ切ると `ConnectNamedPipe` が例外になり、次の口を作る前に 1 秒待っていた（その間、相手には「動いていない」に見えた）→ 次の口を作ってから前の口を閉じる。生成の `Job.num_frames` には前後のつなぎ用のフレームも入るので、返事に「作ったフレーム」としては出さない（0〜60F を頼んで 63 と出た）
 - **確かめ**: `tests\check_control_1114.py`（MMD なし・62 件。相手は mmd-mcp の本物の部品）。本物の MMD では mmd-mcp の `scripts\smoke_ainakawari.py`（stdio と HTTP の両方で、生成・生成中の編集の断り・失敗の報告・中断・元に戻すが通った。11-14）。窓の「終わった時の処理」を書き換えたので、窓から動かした時は今までどおりかも見る: `tests\live_control_window_1114.py`（本物の窓の部品・17 件。窓から動かした失敗は知らせの窓が出る・外からの依頼では出ない）と、開発版の Hub に右下のパネルの「生成」の合図（`AINakawari.Panel.v1`）を送って最後まで通るか
 
+## 中国語版 MMD「MMD932」（11-18 マスター「中国版MMD対応」）
+
+- **何か**: 中国の MMD 情報サイト MMD-YBK（https://mmdybk.vercel.app ・「软件下载」）が案内する「MMD932 汉化版」。蓝奏云の `MMD932.7z`（1.7MB）に、中国語化した `MikuMikudance.exe`（d が小文字・SHA256 `882c97dc…`）・MME 一式・Microsoft の `d3dx9_43.dll` が入っている
+- **中身**（`tools\compare_mmd_exe.py` で日本語版と比べた）: ビルドの日付は 2017-12-05（日本語版 9.32 は 2019-12-08）。`.reloc` が同じで、`.data` は 4 バイト（関数の番地の表）以外同じ。`.text` は RVA 0xf480 から後ろが 16 バイト手前に詰まっている。なのでメモリの形（`0x1445F8`・構造体の番地）は全部同じで、違うのはボーン選択の関数（`0x71230` → `0x71220`）と画面の文字だけ
+- **直した所**: mmd-mcp（ブランチ `mmd-cn-profile`）の `bone_state.PROFILES`（SHA256 → 言葉・ボーン選択の番地）と `native/selection_bridge.cpp` の `kProfiles`（ビルドの日付 → 番地）、`ui_language.LABELS_ZH`（exe の同じ番地の UTF-16 と、窓のリソースの番号で組にした訳）と `ui_language()`。AIナカワリは `install_plugin.check_version` が PROFILES を引く・`mmd_link.ui_language()`（`_track` は「全部幀」など）・確認の窓の文（「該動作文件是 … 制作的動作数据文件 / 確定要這麼做？」）・パネルの DLL が「帮助(&H)」の後ろにメニューを出し、中国語版では英語の字にする
+- **踏んだ物**: 窓のタイトルは UTF-16 の簡体字（「载入动作数据」）と、ANSI の繁体字ふう＋空白（「載入動作数据        」。別のモデル用の確認の窓）の 2 通りがある。同梱の `d3dx9_43.dll` は Microsoft の本物（署名あり・System32 と同じ中身）で、インストーラーが「MMDPlugin の物ではない」と止まっていた → System32 に同じ物があれば `plugin\MMDPlugin\d3dx9_43_microsoft.dll` に移す、無ければ DirectX のランタイムを入れてもらう
+- **確かめ**: 中国語版（`F:\MMD_CN_Test\MMD932`）で `tests\live_root_carry_1112.py`・`live_root_carry2_1112.py` が全部 OK（数字も日本語版と同じ）、別のモデル用のモーションの読み込み、ネイティブのボーン選択（右腕・センター）、メニューとパネル（英語）。同じ日に日本語版でも同じ確認を回して今までどおり
+
 ## MMM 版（11-11。ブランチ work/mmm）
 MikuMikuMoving（MMM 1.2.9.2）でも、MMD 版と**同じ窓（app.py）**で、選んだキーの間を Kimodo・MotionBricks で作れる。AI の部分（`runner`・`pipeline`・`nakawari`）も同じ。
 

@@ -41,7 +41,7 @@ Two NVIDIA models do the work:
 | | Needed | Tested on / user reports |
 |---|---|---|
 | OS | Windows 10/11 (64-bit) | Windows 11 |
-| Software | MikuMikuDance 9.32 x64 (Japanese version; English Mode is fine), or MikuMikuMoving 1.2.9.2 (64-bit; a bonus, experimental) | MMD 9.32 x64, MMM 1.2.9.2 |
+| Software | MikuMikuDance 9.32 x64 (Japanese version; English Mode is fine; the Chinese "MMD932" localization also works), or MikuMikuMoving 1.2.9.2 (64-bit; a bonus, experimental) | MMD 9.32 x64, MMM 1.2.9.2 |
 | GPU | NVIDIA GTX 16 series / RTX 20 series or newer. Keep the driver up to date. For other GPUs see "GPU backends" below | RTX 3090 (24GB). Users have also reported it working on a GTX 1650 (4GB) |
 | Runtime | [Microsoft Visual C++ Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe). If it is missing, Setup points you here | |
 
@@ -98,7 +98,7 @@ plugin\MMD-AINakawari\   The DLL that MMD loads (for MMM, the .cmd removes it)
 |---|---|---|
 | What it places | MMDPlugin (`MMDPlugin.dll`, `d3d9.dll`, `d3dx9_43.dll`) next to `MikuMikuDance.exe`. If MMDPlugin is already installed, nothing is changed | The button and panel DLL, and the bridge that talks to MMM (MmmBridge), into MMM's `Plugins\`. MMDPlugin is not placed |
 | MME | If MME is installed, MME's files (`d3d9.dll`, `MMEffect.dll`, etc.) are moved to `plugin\mme\`. This follows the "using MME as well" layout in the MMDPlugin readme, and MME keeps working | Not involved |
-| When it stops without changing anything (the reason appears in the black window) | MMD is running; MMD is not the 9.32 x64 Japanese version; there is a `d3d9.dll` or `d3dx9_43.dll` that belongs to neither MME nor MMDPlugin | MMM is running; MMM is not 1.2.9.2 (64-bit) |
+| When it stops without changing anything (the reason appears in the black window) | MMD is running; MMD is not the 9.32 x64 Japanese version or the Chinese MMD932 localization; there is a `d3d9.dll` or `d3dx9_43.dll` that belongs to neither MME nor MMDPlugin | MMM is running; MMM is not 1.2.9.2 (64-bit) |
 
 - If Windows shows a warning such as "the publisher could not be verified", press "Run"
 - If you extracted the zip outside the MMD or MMM folder, a window asks you to choose the folder, and the files are copied there
@@ -221,7 +221,8 @@ Common problems:
 - When rebuilding only the selected range, motion outside the range is kept within a deviation of 0.05 in position and 0.5° in rotation. At sudden changes a curve cannot express, extra keys may be added outside the range too
 - Key thinning ("Normal") allows a deviation of 0.05 in position and 0.5° in rotation per bone, and 0.06 (about 0.5cm) in position for the wrists, head, foot IK and similar. "Fine" is half of that, "Coarse" is double, and "Very coarse" is four times. Thinning makes generation a few seconds longer (about 6 seconds for 300 frames). For Kimodo motion where the wrists and so on jitter frame to frame, that jitter is preserved, so the keys do not reduce much (use "Coarse" to reduce them)
 - Keys with physics turned off may be turned back on by generating or by "Undo" (unconfirmed)
-- MMD: only checked on the Japanese version of MMD 9.32 x64 (some parts read MMD's memory directly, so other versions do not work). English Mode on that version is fine
+- MMD: only checked on the Japanese version of MMD 9.32 x64 and the Chinese "MMD932" localization (the one linked from the Chinese MMD site MMD-YBK); some parts read MMD's memory directly, so other versions do not work. English Mode on the Japanese version is fine
+- On the Chinese MMD, the AI Nakawari window and panel are shown in English (there is no Chinese text yet). The `d3dx9_43.dll` (Microsoft's) bundled with the Chinese MMD is moved to `plugin\MMDPlugin\d3dx9_43_microsoft.dll` and replaced by MMDPlugin's, when Windows has the same file
 - MMM: only 1.2.9.2 (64-bit), because undo uses MMM's non-public internals. It has only been tested with one model and two motions. **Please tell me whether it worked for you**
 - In MMM, only the bones in the lowest motion layer of the selected model are rewritten (facial keys and other layers are not touched). Models loaded from inside a zip are not supported yet (it shows a message and stops)
 

@@ -107,9 +107,10 @@ def choose_target(start):
 
 
 def check_version(mmd):
-    from mmd_mcp.bone_state import VERIFIED_SHA256
-    if sha256(os.path.join(mmd, EXE)) != VERIFIED_SHA256:
-        raise Stop("AIナカワリ が使えるのは MikuMikuDance 9.32 x64（日本語版）だけです。\n"
+    # 確かめた exe の一覧は mmd-mcp の bone_state.PROFILES（日本語版 9.32 x64 と、中国語版 MMD932・11-18）
+    from mmd_mcp.bone_state import PROFILES
+    if sha256(os.path.join(mmd, EXE)) not in PROFILES:
+        raise Stop("AIナカワリ が使えるのは MikuMikuDance 9.32 x64（日本語版・中国語版 MMD932）だけです。\n"
                    "この MikuMikuDance.exe は別の版なので、ファイルは何も変えずに終わります。")
 
 
@@ -182,6 +183,22 @@ def tidy_mmd_files(mmm):
 FOREIGN_D3DX9 = ("MikuMikuDance.exe の横に、MMDPlugin の物ではない d3dx9_43.dll があります。\n"
                  "AIナカワリ を入れると、この d3dx9_43.dll を MMDPlugin の物と入れ替えることになるので、ファイルは何も変えずに止めます。\n"
                  "今の d3dx9_43.dll を別のフォルダへ移してから、もう一度ダブルクリックしてください。")
+# Microsoft の DirectX（June 2010）の x64 の d3dx9_43.dll 9.29.952.3111。中国語版 MMD932 の配布物が exe の横に同梱している
+# （11-18。署名は Microsoft で、この PC の System32 の物と同じ中身）。MMDPlugin の中継は System32 の物を呼ぶので、
+# System32 に同じ物があれば、exe の横の物は控えに移して中継と入れ替えてよい
+MS_D3DX9_SHA256 = "84b900dbd7fa978d6e0caee26fc54f2f61d92c9c75d10b35f00e3e82cd1d67b4"
+MS_D3DX9_KEEP = os.path.join("plugin", "MMDPlugin", "d3dx9_43_microsoft.dll")   # 控えの置き場（MMD のフォルダから）
+NO_SYSTEM_D3DX9 = ("MikuMikuDance.exe の横に Microsoft の d3dx9_43.dll がありますが、Windows（System32）には入っていません。\n"
+                   "MMDPlugin は Windows の d3dx9_43.dll を呼ぶので、このまま入れると MMD が起動しなくなります。ファイルは何も変えずに止めます。\n"
+                   "Microsoft の「DirectX End-User Runtime」を入れてから、もう一度ダブルクリックしてください。")
+
+
+def microsoft_d3dx9(path):
+    """path が Microsoft の d3dx9_43.dll（MS_D3DX9_SHA256）なら、System32 に同じ物があるか（True/False）。違う物なら None。"""
+    if sha256(path) != MS_D3DX9_SHA256:
+        return None
+    system = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "d3dx9_43.dll")
+    return os.path.isfile(system) and sha256(system) == MS_D3DX9_SHA256
 
 
 def plan_mme(mmd):
@@ -239,10 +256,22 @@ def place_mmdplugin(mmd):
     if os.path.isfile(root("d3d9.dll")) and "d3d9.dll" not in moving and not is_ours("d3d9.dll"):
         raise Stop("MikuMikuDance.exe の横に、MME でも MMDPlugin でもない d3d9.dll があります。\n"
                    "上書きすると、今それを使っているツールが動かなくなるかもしれないので、ファイルは何も変えずに止めます。この d3d9.dll の配布元を確かめてください。")
+    keep_d3dx9 = False
     if os.path.isfile(d3dx9) and not is_ours("d3dx9_43.dll"):
-        raise Stop(FOREIGN_D3DX9)
+        system = microsoft_d3dx9(d3dx9)
+        if system is None:
+            raise Stop(FOREIGN_D3DX9)
+        if not system:
+            raise Stop(NO_SYSTEM_D3DX9)
+        if os.path.exists(root(MS_D3DX9_KEEP)) and sha256(root(MS_D3DX9_KEEP)) != MS_D3DX9_SHA256:
+            raise Stop(f"{root(MS_D3DX9_KEEP)} に、Microsoft の物ではない d3dx9_43_microsoft.dll があります。ファイルは何も変えずに止めます。")
+        keep_d3dx9 = True
     # ここから先が変える所
     move_mme(moves)
+    if keep_d3dx9:
+        os.makedirs(os.path.dirname(root(MS_D3DX9_KEEP)), exist_ok=True)
+        os.replace(d3dx9, root(MS_D3DX9_KEEP))
+        print(f"Microsoft の d3dx9_43.dll を控えに移しました: {MS_D3DX9_KEEP}（Windows に同じ物があるので、MMD はそちらを使います）", flush=True)
     for name in MMDPLUGIN_FILES:
         copy_atomic(os.path.join(MMDPLUGIN_SRC, name), root(name))
     readme_dir = os.path.join(mmd, "plugin", "MMDPlugin")
