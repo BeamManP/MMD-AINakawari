@@ -55,24 +55,23 @@
 転ぶ：A person walks and falls to the ground.
 
 [様子をつけて歩く|Walking Styles]
-ゾンビ：A zombie shambles forward slowly, dragging its feet with both arms stretched out in front.
-足を引きずる：An injured person limps forward, dragging their right leg.
-千鳥足：A drunk person staggers forward, swaying from side to side.
+ゾンビ（すり足）：A zombie shambles forward slowly, dragging its feet with both arms stretched out in front.
+ゾンビ（よろよろ）：A person walks like a zombie, limping and swaying with both arms raised forward.
 疲れて歩く：A tired person trudges forward with slumped shoulders.
 お年寄り：An old person walks forward slowly with a hunched back.
 うれしく歩く：A happy person walks forward with a bounce in their step.
 しょんぼり歩く：A sad person walks forward slowly with their head down.
 怒って歩く：An angry person storms forward with clenched fists.
 怖がって下がる：A scared person backs away slowly, looking around nervously.
+子どもっぽく跳ねる：A childlike person hops around happily, swinging their arms.
 箱を運ぶ：A person walks forward while carrying a box.
 つまずく：A person walking forward quickly stumbles but maintains their balance.
 
 [戦い|Fighting]
 構える：A person raises their fists into a fighting stance and bounces on their feet.
 コンボ：A person throws a left jab, a right punch, and then a kick.
-剣を振る：A person swings a sword overhead with both hands.
 よける：A person dodges quickly to the left and then returns to a fighting stance.
-やられる：A person gets hit in the stomach and staggers backward.
+ダメージ：A person gets hit in the stomach and staggers backward.
 倒れる：A person is hit and falls backward onto the ground.
 
 [日常|Everyday]
