@@ -54,7 +54,7 @@
 しゃがむ：A person squats down and stands back up.
 転ぶ：A person walks and falls to the ground.
 
-[様子をつけて歩く|Walking Styles]
+[いろいろな歩き方|Walking Styles]
 ゾンビ（すり足）：A zombie shambles forward slowly, dragging its feet with both arms stretched out in front.
 ゾンビ（よろよろ）：A person walks like a zombie, limping and swaying with both arms raised forward.
 疲れて歩く：A tired person trudges forward with slumped shoulders.
