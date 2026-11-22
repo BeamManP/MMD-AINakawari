@@ -11,6 +11,7 @@ import json
 
 import numpy as np
 
+from . import errors
 from . import quat as Q
 from .i18n import _
 
@@ -84,7 +85,8 @@ class Retargeter:
         if not sides:
             lacking.append(_("左右どちらかの 足・ひざ・足首"))
         if lacking:
-            raise KeyError(_("モデルにボーンがありません: {names}（体の位置と大きさを決めるのに要ります）", names=_("・").join(lacking)))
+            raise errors.ModelError(_("モデルにボーンがありません: {names}（体の位置と大きさを決めるのに要ります）。{hint}",
+                                     names=_("・").join(lacking), hint=_(errors.BONES_HINT)))
         # 腰の位置の基準にする脚の付け根（ある方だけ。両方あれば真ん中）
         self.leg_roots = [(soma, m) for soma, m in (("LeftLeg", "左足"), ("RightLeg", "右足")) if m in mmd_skel]   # i18n: skip
 

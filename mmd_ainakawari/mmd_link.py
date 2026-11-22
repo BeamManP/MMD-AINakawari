@@ -13,7 +13,7 @@ from mmd_mcp.ui_language import LABELS_ZH, matches, ui_language
 from mmd_mcp.ui_state import UIReader, parse_number
 from mmd_mcp.windows import list_windows
 
-from . import mmd_memory, vmd
+from . import errors, mmd_memory, vmd
 from .i18n import _
 
 # MMD の中のモデルのデータでの、読み込んだファイルの場所（UTF-16・256 文字）。
@@ -133,10 +133,10 @@ class MMDLink:
         """選択中のモデルのモーションを丸ごと書き出す。MMD は選択したキーだけを書き出す（何も選んでいないと断る）ので、先に全部選ぶ。"""
         r = timeline.select_range(0, 999999, self._track("全ﾌﾚｰﾑ"), self.hwnd)   # i18n: skip
         if r.get("status") != "completed":
-            raise RuntimeError(_("MMD で全部のキーを選択できませんでした: {status} {dialogs}", status=r.get("status"), dialogs=r.get("dialogs", "")))
+            raise RuntimeError(_("MMD で全部のキーを選択できませんでした: {why}", why=errors.describe(r)))
         r = files.export_file("motion", path, True, self.hwnd)
         if r.get("status") != "completed":
-            raise RuntimeError(_("MMD からモーションを書き出せませんでした: {status} {dialogs}", status=r.get("status"), dialogs=r.get("dialogs", "")))
+            raise RuntimeError(_("MMD からモーションを書き出せませんでした: {why}", why=errors.describe(r)))
 
     def check_model(self, model):
         """選ばれているモデルが model（PMX の場所）でなければ止める。キーを消す前・控えを取る前に呼ぶ。"""
@@ -222,7 +222,7 @@ class MMDLink:
         r = self._delete_keys("全ボーンﾌﾚｰﾑ", _("ボーンのキーを消す時"))   # i18n: skip
         if r.get("status") != "completed" and not r.get("delete_sent"):   # 消す操作を送る前に止まった（キーは消えていない）
             notices = r["dismissed"] if "dismissed" in r else self._dismiss_notices(r)
-            why = _("・").join(notices) or f"{r.get('status')} {r.get('dialogs', '')}".strip()
+            why = _("・").join(notices) or errors.describe(r)
             raise RuntimeError(_("MMD で今のキーを消せませんでした（{stage}: {why}）。キーは消していません", stage=r.get("stage", ""), why=why))
         try:   # ボーンを消す操作を送った後は、何で止まっても下の戻しを通す（表情を消せなかった時も）
             if r.get("status") == "completed":
@@ -238,7 +238,7 @@ class MMDLink:
             # 戻しの読み込みも止まる（11-07 本物の MMD で、壊れた VMD を読ませて確かめた）。ボタン 1 つのお知らせの窓だけ閉じる
             # （_settle で閉じた後なら、閉じた窓の文を使う。閉じた窓にもう一度送ると、無い窓への送信で落ちる）
             notices = r["dismissed"] if "dismissed" in r else self._dismiss_notices(r)
-            why = _("・").join(notices) or f"{r.get('status')} {r.get('dialogs', '')}".strip()
+            why = _("・").join(notices) or errors.describe(r)
             if r.get("stage"):
                 why = f"{r['stage']}: {why}"
             if restore is None:
@@ -299,8 +299,9 @@ class MMDLink:
         return self.ui_language() == "en"
 
     def language(self):
-        """窓に出す言葉（i18n.py）。MMD が英語モードか中国語版なら "en"（中国語の文はまだ無いので、日本語より英語。11-18 マスター「中国版 MMD 対応」）。"""
-        return "ja" if self.ui_language() == "ja" else "en"
+        """窓に出す言葉（i18n.py）。MMD の画面の言葉と同じ: 英語モードなら "en"、中国語版 MMD932 なら "zh"（簡体字）。
+        11-18 は中国語の文が無く英語にしていた。11-22 マスター「中国モード時は中国語」で中国語の表を足した。"""
+        return self.ui_language()
 
     def _track(self, track):
         """範囲選択の対象の日本語の名前を、今の MMD の言葉の名前にする（英語モードでは「全ボーンﾌﾚｰﾑ」が無く、キーを消せなかった）。"""
@@ -542,7 +543,7 @@ class MMDLink:
         try:
             self.set_frame(frame)
         except Exception as e:
-            return str(e)
+            return errors.explain(e)
         return None
 
     def bone_value(self, name, frame):

@@ -1,88 +1,88 @@
 # MMD の右下の「AIナカワリ簡易操作」パネルの「サンプルから選ぶ」に出すプロンプト（英語が苦手な人向け）。
-# 書き方: [種類|英語の種類] の行で種類を分け（英語は MMD の英語モードの時に出す）、その下に「動作：英語のプロンプト」を 1 行ずつ。# で始まる行は読み飛ばす。
+# 書き方: [種類|英語の種類|中国語の種類] の行で種類を分け（英語は MMD の英語モード、中国語は中国語版 MMD932 の時に出す）、その下に「動作|中国語の動作：英語のプロンプト」を 1 行ずつ。# で始まる行は読み飛ばす。
 # 英語の文は Kimodo のデモの例文と同じく「A person ＋ 今の形の動詞」で、何をするかを具体的に書く
 # （例: A person walks forward.）。パネルはボタンを押すたびにこのファイルを読むので、書き換えたらすぐ反映される。
 
-[基本|Basics]
-キーの間を自然につなぐ（最初の文）：A person moves naturally between poses.
+[基本|Basics|基本]
+キーの間を自然につなぐ（最初の文）|自然连接关键帧之间（第一句）：A person moves naturally between poses.
 
-[歩く・走る|Walk / Run]
-前へ歩く：A person walks forward.
-ゆっくり歩く：A person is casually walking forward slowly.
-後ろへ歩く：A person walks backward.
-横へ歩く：A person side steps to the right.
-走る：A person runs forward.
-ジョギング：A person jogs forward at a steady pace.
-スキップ：A person skips forward happily.
-忍び足：A person sneaks forward on tiptoes.
-階段を上る：A person begins walking up the stairs.
-歩いて向きを変える：A person walks forward and then turns around.
+[歩く・走る|Walk / Run|走、跑]
+前へ歩く|向前走：A person walks forward.
+ゆっくり歩く|慢慢走：A person is casually walking forward slowly.
+後ろへ歩く|向后走：A person walks backward.
+横へ歩く|横向走：A person side steps to the right.
+走る|跑：A person runs forward.
+ジョギング|慢跑：A person jogs forward at a steady pace.
+スキップ|蹦跳着走：A person skips forward happily.
+忍び足|蹑手蹑脚：A person sneaks forward on tiptoes.
+階段を上る|上楼梯：A person begins walking up the stairs.
+歩いて向きを変える|走着转身：A person walks forward and then turns around.
 
-[止まる・立つ|Stop / Stand]
-走って止まる：A person runs forward and comes to a stop.
-立って見回す：A person stands still and looks around.
-体重を移す：A person stands and shifts their weight from one leg to the other.
-待つ：A person waits impatiently, tapping their foot.
+[止まる・立つ|Stop / Stand|停下、站立]
+走って止まる|跑步后停下：A person runs forward and comes to a stop.
+立って見回す|站着环顾四周：A person stands still and looks around.
+体重を移す|转移重心：A person stands and shifts their weight from one leg to the other.
+待つ|等待：A person waits impatiently, tapping their foot.
 
-[身ぶり|Gestures]
-手を振る：A person waves with their right hand.
-両手を振る：A person waves both hands above their head.
-指さす：A person points forward with their right hand.
-おじぎ：A person bows politely.
-拍手：A person claps their hands.
-腕を組む：A person crosses their arms.
-考える：A person puts a hand on their chin and thinks.
-伸び：A person stretches both arms up high.
-物を拾う：A person picks something up from the ground.
-物を置く：A person sets a box down onto the ground.
+[身ぶり|Gestures|手势]
+手を振る|挥手：A person waves with their right hand.
+両手を振る|双手挥舞：A person waves both hands above their head.
+指さす|指向前方：A person points forward with their right hand.
+おじぎ|鞠躬：A person bows politely.
+拍手|鼓掌：A person claps their hands.
+腕を組む|双臂交叉：A person crosses their arms.
+考える|思考：A person puts a hand on their chin and thinks.
+伸び|伸懒腰：A person stretches both arms up high.
+物を拾う|捡东西：A person picks something up from the ground.
+物を置く|放下东西：A person sets a box down onto the ground.
 
-[ダンス|Dance]
-ダンス：A person is dancing energetically.
-ヒップホップ：A person is doing a hip hop dance while moving around.
-ステップ：A person is performing dance steps while stepping back and forward.
-くるっと回る：A person spins around once.
-かわいくポーズ：A person poses cutely, tilting the head.
-ノリノリで揺れる：A person sways side to side to the music.
+[ダンス|Dance|舞蹈]
+ダンス|跳舞：A person is dancing energetically.
+ヒップホップ|嘻哈舞：A person is doing a hip hop dance while moving around.
+ステップ|舞步：A person is performing dance steps while stepping back and forward.
+くるっと回る|转一圈：A person spins around once.
+かわいくポーズ|可爱地摆姿势：A person poses cutely, tilting the head.
+ノリノリで揺れる|随音乐摇摆：A person sways side to side to the music.
 
-[スポーツ・アクション|Sports / Action]
-ジャンプ：A person jumps up.
-ジャンプして手を振る：A person jumps and waves.
-飛び越える：A person runs forward and then leaps over an obstacle in front of them.
-パンチ：A person throws a right punch.
-キック：A person kicks forward with their right leg.
-ボールを投げる：A person throws a ball overhand.
-しゃがむ：A person squats down and stands back up.
-転ぶ：A person walks and falls to the ground.
+[スポーツ・アクション|Sports / Action|运动、动作]
+ジャンプ|跳跃：A person jumps up.
+ジャンプして手を振る|跳起来挥手：A person jumps and waves.
+飛び越える|跨越障碍：A person runs forward and then leaps over an obstacle in front of them.
+パンチ|出拳：A person throws a right punch.
+キック|踢腿：A person kicks forward with their right leg.
+ボールを投げる|投球：A person throws a ball overhand.
+しゃがむ|蹲下：A person squats down and stands back up.
+転ぶ|摔倒：A person walks and falls to the ground.
 
-[いろいろな歩き方|Walking Styles]
-ゾンビ（すり足）：A zombie shambles forward slowly, dragging its feet with both arms stretched out in front.
-ゾンビ（よろよろ）：A person walks like a zombie, limping and swaying with both arms raised forward.
-疲れて歩く：A tired person trudges forward with slumped shoulders.
-お年寄り：An old person walks forward slowly with a hunched back.
-うれしく歩く：A happy person walks forward with a bounce in their step.
-しょんぼり歩く：A sad person walks forward slowly with their head down.
-怒って歩く：An angry person storms forward with clenched fists.
-怖がって下がる：A scared person backs away slowly, looking around nervously.
-子どもっぽく跳ねる：A childlike person hops around happily, swinging their arms.
-箱を運ぶ：A person walks forward while carrying a box.
-つまずく：A person walking forward quickly stumbles but maintains their balance.
+[いろいろな歩き方|Walking Styles|各种走法]
+ゾンビ（すり足）|僵尸（拖着脚）：A zombie shambles forward slowly, dragging its feet with both arms stretched out in front.
+ゾンビ（よろよろ）|僵尸（摇摇晃晃）：A person walks like a zombie, limping and swaying with both arms raised forward.
+疲れて歩く|疲惫地走：A tired person trudges forward with slumped shoulders.
+お年寄り|老人：An old person walks forward slowly with a hunched back.
+うれしく歩く|开心地走：A happy person walks forward with a bounce in their step.
+しょんぼり歩く|垂头丧气地走：A sad person walks forward slowly with their head down.
+怒って歩く|生气地走：An angry person storms forward with clenched fists.
+怖がって下がる|害怕地后退：A scared person backs away slowly, looking around nervously.
+子どもっぽく跳ねる|孩子气地蹦跳：A childlike person hops around happily, swinging their arms.
+箱を運ぶ|搬箱子：A person walks forward while carrying a box.
+つまずく|绊了一下：A person walking forward quickly stumbles but maintains their balance.
 
-[戦い|Fighting]
-構える：A person raises their fists into a fighting stance and bounces on their feet.
-コンボ：A person throws a left jab, a right punch, and then a kick.
-よける：A person dodges quickly to the left and then returns to a fighting stance.
-ダメージ：A person gets hit in the stomach and staggers backward.
-倒れる：A person is hit and falls backward onto the ground.
+[戦い|Fighting|战斗]
+構える|摆出架势：A person raises their fists into a fighting stance and bounces on their feet.
+コンボ|连招：A person throws a left jab, a right punch, and then a kick.
+よける|闪避：A person dodges quickly to the left and then returns to a fighting stance.
+ダメージ|受击：A person gets hit in the stomach and staggers backward.
+倒れる|倒下：A person is hit and falls backward onto the ground.
 
-[日常|Everyday]
-飲む：A person drinks from a cup held in their right hand.
-電話：A person talks on the phone, holding it to their right ear.
-時計を見る：A person looks at the watch on their left wrist.
-座る：A person sits down on the ground and crosses their legs.
+[日常|Everyday|日常]
+飲む|喝水：A person drinks from a cup held in their right hand.
+電話|打电话：A person talks on the phone, holding it to their right ear.
+時計を見る|看手表：A person looks at the watch on their left wrist.
+座る|坐下：A person sits down on the ground and crosses their legs.
 
-[気持ち|Emotions]
-喜ぶ：A person jumps for joy with both arms raised.
-がっかり：A person hangs their head and slumps their shoulders.
-怒る：A person stomps their foot angrily.
-驚く：A person is startled and steps back.
-照れる：A person looks down shyly and fidgets.
+[気持ち|Emotions|情绪]
+喜ぶ|欢喜：A person jumps for joy with both arms raised.
+がっかり|失望：A person hangs their head and slumps their shoulders.
+怒る|生气：A person stomps their foot angrily.
+驚く|吃惊：A person is startled and steps back.
+照れる|害羞：A person looks down shyly and fidgets.

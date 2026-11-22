@@ -34,7 +34,7 @@ import win32file
 import win32pipe
 import winerror
 
-from . import __version__, applog, i18n, runner, thin
+from . import __version__, applog, errors, i18n, runner, thin
 from .i18n import _
 
 PROTOCOL = 1
@@ -136,7 +136,7 @@ def _range(req, selected_keys):
         try:
             keys = selected_keys()
         except Exception as e:   # 選び替えの途中など。理由をそのまま返す
-            raise Refused("keys_unreadable", _("選んだキーを読めません。MMD の操作を終えてから選び直してください") + f" ({e})") from None
+            raise Refused("keys_unreadable", _("選んだキーを読めません（{why}）", why=errors.explain(e))) from None
         if keys is None or len(keys) < 2:
             raise Refused("range_required", _("MMD のタイムラインで、作り直す範囲の最初と最後のキーを選んでください（2 つ以上のフレーム）"))
         return keys[0], keys[-1]
@@ -324,7 +324,7 @@ def handle(hub, req):
         return e.reply()
     except Exception as e:   # 口を落とさない。どこで落ちたかは記録に
         applog.exception("外からの依頼の途中:")
-        return {"ok": False, "code": "internal", "message": f"{type(e).__name__}: {e}"}
+        return {"ok": False, "code": "internal", "message": errors.explain(e), "detail": f"{type(e).__name__}: {e}"}
 
 
 # ---------------- 口（別のスレッド） ----------------

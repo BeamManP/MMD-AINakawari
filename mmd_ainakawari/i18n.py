@@ -1,4 +1,5 @@
-"""画面に出す文の言葉（日本語・英語）。MMD が英語モード（ヘルプ → English Mode）の時は英語にする（11-11 マスター）。
+"""画面に出す文の言葉（日本語・英語・中国語）。MMD が英語モード（ヘルプ → English Mode）の時は英語（11-11 マスター）、
+中国語版 MMD（MMD932）の時は簡体字の中国語にする（11-22 マスター）。
 
 書き方:
     from .i18n import _, N_
@@ -6,7 +7,8 @@
     raise RuntimeError(_("PMX が見つかりません: {path}", path=pmx))
     NOTE = N_("…")        # 後で _(NOTE) で訳す定数（N_ は何もしない。確認スクリプトが訳の表と突き合わせる印）
 
-- 文の中身は日本語のまま書く。英語の時だけ texts/en_*.py の表（日本語 → 英語）から引き、表に無ければ日本語で出す。
+- 文の中身は日本語のまま書く。英語・中国語の時は texts/en_*.py・zh_*.py の表（日本語 → 訳）から引き、表に無ければ日本語で出す。
+  用語は docs/英語の用語.md・docs/中国語の用語.md。
 - 差し込みは {名前}（str.format）。f-string の中身を _() に入れない（表から引けなくなる）。差し込みがある時の { } は {{ }} と書く。
 - 言葉は MMD ごとの窓が、その MMD のモードで決める。モードが変わったら（起動直後の取り違えも）、窓が 2 秒ごとに見て作り直す
   （app.App._check_language。0.4.1。0.4.0 は窓を作る時に 1 回読むだけで、MMD の起動直後は英語モードでも日本語になった）。
@@ -22,8 +24,8 @@ import os
 import pkgutil
 import threading
 
-LANGS = ("ja", "en")
-NAME = {"ja": "AIナカワリ", "en": "AI Nakawari"}   # 名前（英語の時は AI Nakawari。11-11 マスター）
+LANGS = ("ja", "en", "zh")
+NAME = {"ja": "AIナカワリ", "en": "AI Nakawari", "zh": "AI Nakawari"}   # 名前（英語・中国語の時は AI Nakawari。11-11 マスター）
 
 _LANG = contextvars.ContextVar("ainakawari_lang", default=None)
 _default = "ja"
@@ -55,7 +57,7 @@ def _table(lang):
 
 
 def lang():
-    """今の言葉（"ja"・"en"）。"""
+    """今の言葉（"ja"・"en"・"zh"）。"""
     return _LANG.get() or _default
 
 
@@ -99,5 +101,5 @@ def translator(value):
 
 
 def name(value=None):
-    """AIナカワリ の名前（英語の時は AI Nakawari）。"""
+    """AIナカワリ の名前（英語・中国語の時は AI Nakawari）。"""
     return NAME[value or lang()]

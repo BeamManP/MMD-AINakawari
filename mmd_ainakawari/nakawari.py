@@ -34,7 +34,7 @@ def generate(job, work_dir, key_stop=False, wrist_lerp=False, log=print):
         raise RuntimeError(_("MotionBricks が入っていません。詳細の窓のセットアップで MotionBricks を入れてください"))
     keys = sorted(job.request["keys"], key=lambda k: k["frame"])
     if len(keys) < 2:
-        raise ValueError(_("中割りには体のキーが 2 つ以上要ります"))
+        raise ValueError(_("中割りには、体のボーンのキーが 2 つ以上要ります。間を作りたいポーズのキーを 2 つ以上打ってから、もう一度押してください"))
     if job.root_frames or job.limb_frames:
         log(_("  中割りに使うのは体のキーです（全ての親だけ・手足の IK だけのキーは対象外）"))
     poses = [_pose(k) for k in keys]
@@ -55,7 +55,8 @@ def generate(job, work_dir, key_stop=False, wrist_lerp=False, log=print):
                   a=frames[i] + job.first, b=frames[i + 1] + job.first, gap=gaps[i], lo=smooth_stop.MIN_LEN, hi=smooth_stop.MAX_LEN))
             i += 1
     if not runs:
-        raise ValueError(_("キーの間が {lo}〜{hi} フレームの所がありません", lo=smooth_stop.MIN_LEN, hi=smooth_stop.MAX_LEN))
+        raise ValueError(_("中割りできる所がありません。中割りは、キーとキーの間が {lo}〜{hi} フレームの所を作ります。キーの間をこの長さにしてから、もう一度押してください",
+                           lo=smooth_stop.MIN_LEN, hi=smooth_stop.MAX_LEN))
     jobs = []
     for s, e in runs:
         targets = []

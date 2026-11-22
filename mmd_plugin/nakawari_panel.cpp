@@ -13,6 +13,7 @@ namespace {
 constexpr wchar_t kClass[] = L"AINakawari.Panel";   // Python（mmd_ainakawari/panel.py）はこの名前でパネルを探す
 constexpr wchar_t kCaption[] = L"AIナカワリ簡易操作";
 constexpr wchar_t kCaptionEn[] = L"AI Nakawari quick panel";   // 英語モードの時（11-11）
+constexpr wchar_t kCaptionZh[] = L"AI Nakawari 快捷操作";   // 中国語版 MMD932 の時（11-22）
 constexpr int kCameraButton = 536;   // 3D 画面の下の帯の「カメラ編／モデル編」。字体を借りる・今のモードを見る
 constexpr wchar_t kModelModeText[] = L"モデル編";   // カメラ用のモードの時の、このボタンの字
 constexpr wchar_t kModelModeTextEn[] = L"To model";   // 英語モードでの同じ字（11-11 に MMD 9.32 で読んだ）
@@ -92,13 +93,13 @@ BOOL CALLBACK find_fold(HWND child, LPARAM param) {
 }
 }  // namespace
 
-bool mmd_english_mode(HWND mmd) {
+MmdLanguage mmd_language(HWND mmd) {
     wchar_t text[16]{};
     const HWND toggle = GetDlgItem(mmd, kCameraButton);
-    if (!toggle || !GetWindowTextW(toggle, text, 16)) return false;
-    // 中国語版 MMD932 の「相机编辑」「模型编辑」も英語の字にする（中国語の字はまだ無いので、日本語より英語。11-18）
-    return wcscmp(text, L"camera") == 0 || wcscmp(text, L"To camera") == 0 || wcscmp(text, kModelModeTextEn) == 0
-        || wcscmp(text, L"相机编辑") == 0 || wcscmp(text, L"模型编辑") == 0;
+    if (!toggle || !GetWindowTextW(toggle, text, 16)) return MmdLanguage::Japanese;
+    if (wcscmp(text, L"camera") == 0 || wcscmp(text, L"To camera") == 0 || wcscmp(text, kModelModeTextEn) == 0) return MmdLanguage::English;
+    if (wcscmp(text, L"相机编辑") == 0 || wcscmp(text, L"模型编辑") == 0) return MmdLanguage::Chinese;
+    return MmdLanguage::Japanese;
 }
 
 HWND NakawariPanel::add(const wchar_t* cls, const wchar_t* text, DWORD style, int id, DWORD ex_style) {
@@ -142,14 +143,15 @@ bool NakawariPanel::create(HWND mmd, std::function<void(int)> on_command, std::w
     add(L"EDIT", L"", WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL, kPrompt);
     // ボタンは MMD のボタン（再生・登録など。ＭＳ Ｐゴシック 12）と同じ字にする（11-05 マスター）。字体は MMD のを借りる（消さない）
     // 字は MMD のモードで選ぶ。Python の窓がつながると、窓の言葉で書き直す（mmd_ainakawari/panel.py の LABELS）
-    const bool en = mmd_english_mode(mmd_);
-    for (const auto& b : {std::make_pair(en ? L"Samples ▼" : L"サンプルから選ぶ ▼", kSamples),
-                          std::make_pair(en ? L"Generate" : L"生　成", kGenerate),
-                          std::make_pair(en ? L"Undo" : L"元に戻す", kUndo), std::make_pair(en ? L"Details" : L"詳　細", kDetails)}) {
+    const MmdLanguage lang = mmd_language(mmd_);
+    for (const auto& b : {std::make_pair(pick(lang, L"サンプルから選ぶ ▼", L"Samples ▼", L"从示例选择 ▼"), kSamples),
+                          std::make_pair(pick(lang, L"生　成", L"Generate", L"生　成"), kGenerate),
+                          std::make_pair(pick(lang, L"元に戻す", L"Undo", L"撤　销"), kUndo),
+                          std::make_pair(pick(lang, L"詳　細", L"Details", L"详　细"), kDetails)}) {
         const HWND button = add(L"BUTTON", b.first, BS_PUSHBUTTON | WS_TABSTOP, b.second);
         if (mmd_font) SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(mmd_font), FALSE);
     }
-    add(L"STATIC", en ? L"Starting AI Nakawari..." : L"AIナカワリ を起動中…", SS_OWNERDRAW, kStatus);
+    add(L"STATIC", pick(lang, L"AIナカワリ を起動中…", L"Starting AI Nakawari...", L"正在启动 AI Nakawari…"), SS_OWNERDRAW, kStatus);
     SetTimer(panel_, kLayoutTimer, 500, nullptr);
     request_layout();
     return true;
@@ -185,7 +187,8 @@ void NakawariPanel::show_samples() {
         text.resize(n);
         MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), &text[0], n);
     }
-    const bool en = mmd_english_mode(mmd_);
+    const MmdLanguage lang = mmd_language(mmd_);
+    const bool en = lang == MmdLanguage::English;
     const HMENU menu = CreatePopupMenu();
     HMENU group = nullptr;
     std::vector<std::wstring> prompts;
@@ -197,22 +200,37 @@ void NakawariPanel::show_samples() {
         start = end + 1;
         while (!line.empty() && (line.back() == L'\r' || line.back() == L' ')) line.pop_back();
         if (line.empty() || line[0] == L'#') continue;
-        if (line.front() == L'[' && line.back() == L']') {   // [種類] か [種類|英語の種類]（英語モードでは | の後ろ。11-11）
+        if (line.front() == L'[' && line.back() == L']') {   // [種類|英語の種類|中国語の種類]（英語モードは 2 つ目・中国語版は 3 つ目。11-11・11-22）
             std::wstring name = line.substr(1, line.size() - 2);
-            const size_t bar = name.find(L'|');
-            if (bar != std::wstring::npos) name = en ? name.substr(bar + 1) : name.substr(0, bar);
+            std::vector<std::wstring> parts;
+            for (size_t from = 0;;) {
+                const size_t bar = name.find(L'|', from);
+                parts.push_back(name.substr(from, bar == std::wstring::npos ? std::wstring::npos : bar - from));
+                if (bar == std::wstring::npos) break;
+                from = bar + 1;
+            }
+            const size_t index = static_cast<size_t>(lang);
+            name = index < parts.size() && !parts[index].empty() ? parts[index] : parts[0];
             group = CreatePopupMenu();
             AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(group), name.c_str());
             continue;
         }
-        const size_t colon = line.find(L'：');   // 動作：英語のプロンプト
+        const size_t colon = line.find(L'：');   // 動作|中国語の動作：英語のプロンプト
         if (colon == std::wstring::npos) continue;
         prompts.push_back(line.substr(colon + 1));
-        // 英語モードでは、動作の名前（日本語）を出さずに英語の文だけ
-        AppendMenuW(group ? group : menu, MF_STRING, kFirstSample + prompts.size() - 1, en ? prompts.back().c_str() : line.c_str());
+        // 英語モードでは動作の名前を出さずに英語の文だけ。中国語版は中国語の名前（無ければ日本語）
+        std::wstring label = line.substr(0, colon);
+        const size_t bar = label.find(L'|');
+        if (bar != std::wstring::npos) {
+            const std::wstring zh = label.substr(bar + 1);
+            label = lang == MmdLanguage::Chinese && !zh.empty() ? zh : label.substr(0, bar);
+        }
+        const std::wstring shown = en ? prompts.back() : label + L"：" + prompts.back();
+        AppendMenuW(group ? group : menu, MF_STRING, kFirstSample + prompts.size() - 1, shown.c_str());
     }
     if (prompts.empty()) {
-        AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, ((en ? L"Cannot read the sample list: " : L"サンプルの一覧が読めません: ") + samples_).c_str());
+        AppendMenuW(menu, MF_STRING | MF_GRAYED, 0,
+                    (std::wstring(pick(lang, L"サンプルの一覧が読めません: ", L"Cannot read the sample list: ", L"无法读取示例列表：")) + samples_).c_str());
     }
     RECT r;
     GetWindowRect(GetDlgItem(panel_, kSamples), &r);
@@ -358,7 +376,7 @@ void NakawariPanel::draw(HDC dc) {
     SetBkMode(dc, TRANSPARENT);
     SetTextColor(dc, RGB(255, 255, 255));
     const HGDIOBJ old = font_ ? SelectObject(dc, font_) : nullptr;
-    DrawTextW(dc, mmd_english_mode(mmd_) ? kCaptionEn : kCaption, -1, &caption, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    DrawTextW(dc, pick(mmd_language(mmd_), kCaption, kCaptionEn, kCaptionZh), -1, &caption, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     if (old) SelectObject(dc, old);
 }
 

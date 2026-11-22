@@ -7,7 +7,7 @@ TEXT = {
     "計算の方式が正しくありません（{value}。{choices} のどれか）。{hint}": "Invalid backend ({value}. Use one of: {choices}). {hint}",
     "一時ファイルの置き場 {folder} を作れません（{error}）。詳しい設定で置き場を選び直してください":
         "Cannot create the temporary files location {folder} ({error}). Choose a location again in the advanced settings",
-    "{name} が {folder} にありません（{python} が無い）": "{name} is not in {folder} ({python} is missing)",
     "Kimodo の場所が決まっていません。{hint}": "The Kimodo location is not set. {hint}",
     "Kimodo が {folder} にありません。{hint}": "Kimodo is not in {folder}. {hint}",
+    "{name} が {folder} にありません（{python} が無い）。{hint}": "{name} is not in {folder} ({python} is missing). {hint}",
 }

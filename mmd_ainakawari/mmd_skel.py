@@ -7,6 +7,7 @@ MMD の骨は基準姿勢で全部回転 0（ワールドと同じ向き）。�
 import numpy as np
 from mmd_mcp.pmx_geometry import read_pmx_geometry
 
+from . import errors
 from . import quat as Q
 from .i18n import _
 from .vmd import vmd_name
@@ -41,7 +42,7 @@ class MMDSkeleton:
 
     def i(self, name):
         if name not in self.index:
-            raise KeyError(_("モデルにボーン「{name}」がありません", name=name))
+            raise errors.ModelError(_("モデルにボーン「{name}」がありません。{hint}", name=name, hint=_(errors.BONES_HINT)))
         return self.index[name]
 
     # ---------------- 姿勢 ----------------

@@ -712,7 +712,7 @@ def _build_frames(args):
     skel = MMDSkeleton(job.pmx)
     rt = Retargeter(skel, paths.soma_json())
     if names != rt.soma_names:
-        raise ValueError(_("Kimodo の結果の関節の並びが SOMA の骨格ファイルと違います"))
+        raise ValueError(_("Kimodo の結果の関節の並びが SOMA の骨格ファイルと違います。詳細の窓の「セットアップ」で Kimodo を入れ直してください"))
     from_canon = Q.from_axis_angle([0, 1, 0], job.ref_yaw)
     rows = []
     for k in ks:

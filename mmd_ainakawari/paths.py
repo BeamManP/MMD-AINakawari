@@ -130,7 +130,7 @@ def save_cache_dir(folder):
 def check(folder, name):
     """folder に name（Kimodo・MotionBricks）の環境があるか。無ければ NotSetUp。"""
     if not os.path.isfile(_venv_python(folder)):
-        raise NotSetUp(_("{name} が {folder} にありません（{python} が無い）", name=name, folder=folder, python=_venv_python(folder)))
+        raise NotSetUp(_("{name} が {folder} にありません（{python} が無い）。{hint}", name=name, folder=folder, python=_venv_python(folder), hint=_(SETUP_HINT)))
 
 
 def kimodo_dir():

@@ -3,10 +3,10 @@
     E:\\Projects\\mmd-mcp\\.venv\\Scripts\\python.exe -X utf8 tests\\check_i18n.py [--list]
 
 見る物（mmd_ainakawari の .py 全部。texts と i18n.py を除く）:
-1. _()・N_()・tr()（self.tr など）に渡した文が、英語の表にあるか
-2. 差し込み {名前}: 呼ぶ側の名前と文の中の名前が合うか・英語の訳も同じ名前を使うか
+1. _()・N_()・tr()（self.tr など）に渡した文が、訳の表（英語・中国語。--lang=zh で 1 つだけ）にあるか
+2. 差し込み {名前}: 呼ぶ側の名前と文の中の名前が合うか・訳も同じ名前を使うか
 3. 包み忘れた日本語の文（説明の文・applog の記録・コマンドの引数の説明・行の末尾に「# i18n: skip」がある行は見ない）
-4. 英語の表にあって、どこからも使われていない文（--list の時に一覧）
+4. 訳の表にあって、どこからも使われていない文（--list の時に一覧）
 問題があれば 1 で終わる。
 """
 import ast
@@ -113,7 +113,8 @@ def scan(path):
 
 def main():
     show_all = "--list" in sys.argv
-    en = i18n._table("en")
+    langs = [a.split("=", 1)[1] for a in sys.argv if a.startswith("--lang=")] or [l for l in i18n.LANGS if l != "ja"]
+    tables = {lang: i18n._table(lang) for lang in langs}
     bad = 0
     all_used = set()
     for root, dirs, files in os.walk(PKG):
@@ -127,24 +128,26 @@ def main():
             missing = []
             for line, text in used:
                 all_used.add(text)
-                if text not in en:
-                    missing.append((line, text))
-                elif fields(en[text]) != fields(text):
-                    problems.append((line, f"英語の訳の差し込みが違う: {sorted(fields(text))} / {sorted(fields(en[text]))}: {text[:40]!r}"))
+                for lang, table in tables.items():
+                    if text not in table:
+                        missing.append((line, lang, text))
+                    elif fields(table[text]) != fields(text):
+                        problems.append((line, f"{lang} の訳の差し込みが違う: {sorted(fields(text))} / {sorted(fields(table[text]))}: {text[:40]!r}"))
             if missing or problems or loose:
                 print(f"== {rel}: 訳が無い {len(missing)}・食い違い {len(problems)}・包み忘れ {len(loose)}")
-                for line, text in (missing if show_all else missing[:5]):
-                    print(f"   {line}: 訳が無い: {text[:60]!r}")
+                for line, lang, text in (missing if show_all else missing[:5]):
+                    print(f"   {line}: {lang} の訳が無い: {text[:60]!r}")
                 for line, msg in problems:
                     print(f"   {line}: {msg}")
                 for line, text in (loose if show_all else loose[:5]):
                     print(f"   {line}: 包み忘れ: {text}")
                 bad += len(missing) + len(problems) + len(loose)
-    unused = sorted(set(en) - all_used)
-    if unused:
-        print(f"== 英語の表の、どこからも使われていない文 {len(unused)}" + ("" if show_all else "（--list で一覧）"))
-        for text in (unused if show_all else []):
-            print(f"   {text[:60]!r}")
+    for lang, table in tables.items():
+        unused = sorted(set(table) - all_used)
+        if unused:
+            print(f"== {lang} の表の、どこからも使われていない文 {len(unused)}" + ("" if show_all else "（--list で一覧）"))
+            for text in (unused if show_all else []):
+                print(f"   {text[:60]!r}")
     print("---")
     print("問題なし" if not bad else f"問題 {bad} 件")
     return 1 if bad else 0

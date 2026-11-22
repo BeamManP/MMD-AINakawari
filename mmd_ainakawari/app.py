@@ -23,7 +23,7 @@ import win32event
 import win32gui
 import winerror
 
-from . import __version__, applog, control, gpu, hosts, i18n, panel, paths, pipeline, resident, runner, samples, smooth_stop, thin
+from . import __version__, applog, control, errors, gpu, hosts, i18n, panel, paths, pipeline, resident, runner, samples, smooth_stop, thin
 from .i18n import N_, _
 from .installer import window as setup_window
 from .message_window import MessageWindow, register_message
@@ -78,7 +78,7 @@ NO_MODEL = N_("AI のモデルがまだ入っていません。下の「セッ�
 
 
 def language(host):
-    """その MMD（MMM）の言葉。MMD が英語モード（ヘルプ → English Mode）なら "en"。読めなければ日本語（11-11 マスター）。"""
+    """その MMD（MMM）の言葉。MMD が英語モード（ヘルプ → English Mode）なら "en"、中国語版 MMD932 なら "zh"。読めなければ日本語（11-11 マスター）。"""
     try:
         return host.link().language()
     except Exception:
@@ -232,8 +232,8 @@ class App:
         self.tr = i18n.translator(self.lang)
         self.name = i18n.name(self.lang)   # 知らせの窓のタイトル
         self.app_title = f"{self.name} {__version__}"   # 窓のタイトル（更新されたかが分かるように版を付ける。11-11 マスター）
-        self._lw = 10 if self.lang == "ja" else 14   # 行の名前の幅（英語は長い）
-        self._vw = 12 if self.lang == "ja" else 18   # スライダの値の幅（「（推奨）」の英語が長い）
+        self._lw = 14 if self.lang == "en" else 10   # 行の名前の幅（英語は長い。中国語は日本語と同じくらい）
+        self._vw = 18 if self.lang == "en" else 12   # スライダの値の幅（「（推奨）」の英語が長い）
         root.withdraw()  # 出すのは Hub が決める
         root.title(self.app_title)
         root.minsize(560, 0)   # 高さの下限は _build で決める（上と下の段が必ず見える高さ）
@@ -536,7 +536,7 @@ class App:
         try:
             paths.save_cache_dir(folder)
         except OSError as e:
-            messagebox.showerror(self.name, self.tr("そのフォルダには書けません: {folder}\n（{error}）", folder=folder, error=e),
+            messagebox.showerror(self.name, self.tr("そのフォルダには書けません: {folder}\n（{error}）", folder=folder, error=self._explain(e)),
                                  parent=self.root)
             return
         for app in list(self.hub.apps.values()):
@@ -546,7 +546,7 @@ class App:
         try:
             os.startfile(paths.cache_dir())
         except (paths.NotSetUp, OSError) as e:
-            messagebox.showerror(self.name, str(e), parent=self.root)
+            messagebox.showerror(self.name, self._explain(e), parent=self.root)
 
     def _cfg_slider(self, d, row, title, var, note):
         """効きのスライダ 1 本（名前・スライダ・今の値）と、その下の説明。値は CFG_RANGE の刻みにそろえる。"""
@@ -764,7 +764,7 @@ class App:
         try:
             groups = samples.load()
         except OSError as e:
-            messagebox.showerror(self.name, self.tr("サンプルの一覧が読めません: {error}", error=e), parent=self.root)
+            messagebox.showerror(self.name, self.tr("サンプルの一覧が読めません: {error}", error=self._explain(e)), parent=self.root)
             return
         if getattr(self, "_sample_menu", None) is not None:   # 前に開いた一覧は消す（開くたびに増えていた。11-05 Codex のレビュー）
             self._sample_menu.destroy()
@@ -775,12 +775,18 @@ class App:
         for name, items in groups:
             name = samples.group_name(name, self.lang)
             sub = tk.Menu(menu, tearoff=0) if name else menu
-            for label, prompt in items:   # 英語の時は、動作の名前（日本語）を出さずに英語の文だけ
-                shown = prompt if self.lang == "en" else f"{label}：{prompt}"   # i18n: skip
+            for label, prompt in items:   # 英語の時は、動作の名前を出さずに英語の文だけ。中国語は「中国語の名前：英語の文」
+                label = samples.label_name(label, self.lang)
+                shown = f"{label}：{prompt}" if label else prompt   # i18n: skip
                 sub.add_command(label=shown, command=lambda p=prompt: self.prompt_rows.set_current(p))
             if name:
                 menu.add_cascade(label=name, menu=sub)
         menu.tk_popup(button.winfo_rootx(), button.winfo_rooty() + button.winfo_height())
+
+    def _explain(self, e):
+        """例外を、この窓の言葉の文にする（errors.explain。mmd-mcp の英語の文は言い換える）。"""
+        with i18n.use(self.lang):
+            return errors.explain(e)
 
     def _split_here(self):
         """MMD で今いるフレームから新しい区間にする。"""
@@ -792,7 +798,7 @@ class App:
             error = None
         if frame is None:
             self.status.set(self.tr("MMD の今のフレームを読めませんでした")
-                            + (self.tr("（{error}）", error=error) if error else ""))
+                            + (self.tr("（{error}）", error=self._explain(error)) if error else ""))
         elif not self.prompt_rows.add_at(frame):
             self.status.set(self.tr("{frame}F から始まる区間はもうあります", frame=frame))
 
@@ -805,8 +811,8 @@ class App:
         try:
             model = self.link.selected_model()
             frame = self.link.current_frame()
-        except Exception as e:  # 読めない理由をそのまま出す（MMD の版が違う・選び替えの途中など）
-            text = self.tr("選択中のモデル：（読み取れません: {error}）", error=e)
+        except Exception as e:  # 読めない理由を出す（MMD の版が違う・選び替えの途中など。mmd-mcp の英語は errors で言い換える）
+            text = self.tr("選択中のモデル：（読み取れません: {error}）", error=self._explain(e))
         else:
             text = (self.tr("選択中のモデル：{name}", name=model['name']) if model else
                     self._for_host(self.tr("選択中のモデル：（なし。MMD のモデル欄でモデルを選んでください）")))
@@ -1168,8 +1174,11 @@ class App:
                     self.last_run, self.last_backup = r, r["backup"]
             except Exception:   # MMD が閉じられたなど。失敗の知らせはそのまま出す
                 applog.exception("失敗の後の前回の記録の読み直し:")
-            self.q.put(("log", _("失敗: {error}", error=e)))
-            self.q.put(("done", ("failed", _("失敗: {error}", error=e), None)))
+            message = _("失敗: {error}", error=self._explain(e))
+            self.q.put(("log", message))
+            if message != _("失敗: {error}", error=e):   # 言い換えた時は、原文もログ欄に残す（報告をもらった時に追えるように）
+                self.q.put(("log", _("（詳しく: {detail}）", detail=f"{type(e).__name__}: {e}")))
+            self.q.put(("done", ("failed", message, None)))
 
     def _generate_or_cancel(self, fill=False):
         """「生成」のボタン（窓・パネル）。生成中は「中断」として働く。"""
@@ -1184,7 +1193,7 @@ class App:
         try:
             s = self._settings(fill=fill)
         except (ValueError, RuntimeError) as e:
-            messagebox.showerror(self.name, str(e), parent=self.root)
+            messagebox.showerror(self.name, self._explain(e), parent=self.root)
             return
         except tk.TclError:   # 数字の欄（計算の回数・seed・効き）に数字でないものが入っている
             messagebox.showerror(self.name, self.tr("「詳しい設定」の計算の回数・seed には数字を入れてください"), parent=self.root)
@@ -1218,8 +1227,8 @@ class App:
             try:
                 found = self.link.selected_model()
                 model = {"name": found["name"], "path": found["path"]} if found else None
-            except Exception as e:   # 読めない理由をそのまま返す（MMD の版が違う・選び替えの途中など）
-                model_error = str(e)
+            except Exception as e:   # 読めない理由を返す（MMD の版が違う・選び替えの途中など）
+                model_error = self._explain(e)
         keys = self.selected_keys
         return {
             "host": {"hwnd": self.mmd.hwnd, "kind": self.mmd.kind, "language": self.lang},

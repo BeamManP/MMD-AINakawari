@@ -6,8 +6,6 @@ TEXT = {
     "MMD のモデル欄（{name}）と中のモデルが合いません。もう一度選び直してください":
         "MMD's model selector ({name}) does not match the model inside. Select the model again",
     "MMD でモデルを選んでください": "Select a model in MMD",
-    "MMD で全部のキーを選択できませんでした: {status} {dialogs}": "Could not select all the keys in MMD: {status} {dialogs}",
-    "MMD からモーションを書き出せませんでした: {status} {dialogs}": "Could not export the motion from MMD: {status} {dialogs}",
     "モデル以外": "not a model",
     "始めた時と違うモデル（{now}）が選ばれています。キーは消していません。「{name}」を選んでから、もう一度押してください":
         "A different model from the one you started with is selected ({now}). No keys were deleted. Select \"{name}\" and try again",
@@ -27,4 +25,6 @@ TEXT = {
         "Could not load the motion into MMD ({why}), and the backup could not be loaded either. "
         "In MMD, load this file from File > Load motion data: {path}",
     "OK を押した後、読み込みが終わりませんでした": "Loading did not finish after pressing OK",
+    "MMD で全部のキーを選択できませんでした: {why}": "Could not select all the keys in MMD: {why}",
+    "MMD からモーションを書き出せませんでした: {why}": "Could not export the motion from MMD: {why}",
 }

@@ -12,9 +12,15 @@
 #include <functional>
 #include <string>
 
-// MMD が英語モード（ヘルプ → English Mode）か。3D 画面の下の「カメラ編／モデル編」ボタンの字で見る（英語では camera・To camera・To model。
-// mmd-mcp の ui_language.english_mode と同じ見方。メニューバーの字は切り替えの 1 回あとに変わるので使わない。11-11）
-bool mmd_english_mode(HWND mmd);
+// MMD の画面の言葉。3D 画面の下の「カメラ編／モデル編」ボタンの字で見る（英語モードでは camera・To camera・To model、
+// 中国語版 MMD932 では 相机编辑・模型编辑。mmd-mcp の ui_language と同じ見方。メニューバーの字は切り替えの 1 回あとに変わるので使わない。
+// 11-11 英語モード、11-22 中国語（マスター「中国モード時は中国語」。11-18 から 11-22 までは中国語版も英語の字にしていた））
+enum class MmdLanguage { Japanese = 0, English = 1, Chinese = 2 };
+MmdLanguage mmd_language(HWND mmd);
+// 言葉に合わせて ja・en・zh のどれかを返す
+inline const wchar_t* pick(MmdLanguage lang, const wchar_t* ja, const wchar_t* en, const wchar_t* zh) {
+    return lang == MmdLanguage::English ? en : lang == MmdLanguage::Chinese ? zh : ja;
+}
 
 class NakawariPanel {
 public:
@@ -30,7 +36,7 @@ public:
     bool filter(MSG* message);
     // プロンプト欄（フォーカスがここにある間は MMD のショートカットを止める。nakawari_plugin.cpp の quiet_get_key_state）
     HWND prompt() const { return panel_ ? GetDlgItem(panel_, 103) : nullptr; }
-    // 見出しを描き直す（英語モードを切り替えた後。見出しは描くたびに MMD のモードで字を選ぶ）
+    // 見出しを描き直す（英語モードを切り替えた後。見出しは描くたびに MMD の言葉で字を選ぶ）
     void refresh() const { if (panel_) InvalidateRect(panel_, nullptr, TRUE); }
 
 private:

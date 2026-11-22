@@ -169,10 +169,10 @@ def _start(server, log):
             conn = _connect_waiting(server, deadline)
             if conn is not None:
                 return conn
-            raise RuntimeError(_("{name} の常駐が起動できませんでした:\n{tail}", name=server.name, tail=_log_tail(_log_path(server))))
+            raise RuntimeError(_("{name} の常駐（裏で動く生成の部品）が起動できませんでした。もう一度押しても続く時は、パソコンを再起動してください。それでも続く時は、詳細の窓の「セットアップ」をやり直してください\n{tail}", name=server.name, tail=_log_tail(_log_path(server))))
         check_cancel()   # 常駐は読み込みを続ける（次の生成ですぐ使える）
         time.sleep(0.5)
-    raise RuntimeError(_("{name} の常駐が {sec:.0f} 秒たっても準備できません（{path}）", name=server.name, sec=server.start_timeout, path=_log_path(server)))
+    raise RuntimeError(_("{name} の常駐（裏で動く生成の部品）が {sec:.0f} 秒たっても準備できません。パソコンの負荷が高いか、ビデオメモリが足りないかもしれません。もう一度押しても続く時は、パソコンを再起動してください。それでも続く時は、詳細の窓の「セットアップ」をやり直してください（記録: {path}）", name=server.name, sec=server.start_timeout, path=_log_path(server)))
 
 
 def _ready(server, log):
@@ -198,7 +198,7 @@ def call(server, request, log=print):
     if reply.get("cancelled") or cancel_requested():   # 常駐が途中でやめた・作り終わるのと中断が行き違った（結果は捨てる）
         raise Cancelled()
     if not reply["ok"]:
-        raise RuntimeError(_("{name} が失敗しました:\n", name=server.name) + reply.get("error", "")[-1500:])
+        raise RuntimeError(_("{name} が生成に失敗しました。設定を変えるか、長さを短くして、もう一度押してください。詳しく:\n", name=server.name) + reply.get("error", "")[-1500:])
     return reply["result"], reply.get("line", "")
 
 
@@ -251,7 +251,7 @@ def _wait_closed(server, seconds=10):
             return
         conn.close()
         time.sleep(0.2)
-    raise RuntimeError(_("{name} の常駐が終わりません（{path}）", name=server.name, path=_log_path(server)))
+    raise RuntimeError(_("{name} の常駐（裏で動く生成の部品）が終わりません。AIナカワリ を閉じてから開き直してください（記録: {path}）", name=server.name, path=_log_path(server)))
 
 
 def _send(conn, server, request):
@@ -264,11 +264,11 @@ def _send(conn, server, request):
                 conn.send({"cancel": True})
                 told = True
             if time.monotonic() > deadline:
-                raise RuntimeError(_("{name} が {min} 分たっても答えません（{path}）", name=server.name, min=REPLY_TIMEOUT // 60, path=_log_path(server)))
+                raise RuntimeError(_("{name} が {min} 分たっても答えません。生成が重すぎるか、止まっているかもしれません。長さを短くしてください。もう一度押しても続く時は、パソコンを再起動してください。それでも続く時は、詳細の窓の「セットアップ」をやり直してください（記録: {path}）", name=server.name, min=REPLY_TIMEOUT // 60, path=_log_path(server)))
         return conn.recv()
     except (EOFError, ConnectionError):
         if told:   # 中断を知らない橋渡しが、知らせを読まないまま接続を閉じた（結果は届かない）。頼んだのは中断なので、中断として扱う
             raise Cancelled()
-        raise RuntimeError(_("{name} の常駐が途中で終わりました（{path}）", name=server.name, path=_log_path(server)))
+        raise RuntimeError(_("{name} の常駐（裏で動く生成の部品）が途中で終わりました。ビデオメモリが足りなかったかもしれません。もう一度押しても続く時は、パソコンを再起動してください。それでも続く時は、詳細の窓の「セットアップ」をやり直してください（記録: {path}）", name=server.name, path=_log_path(server)))
     finally:
         conn.close()

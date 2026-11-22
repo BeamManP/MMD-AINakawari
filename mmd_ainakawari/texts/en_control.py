@@ -19,4 +19,5 @@ TEXT = {
         "The {name} window is not responding. Wait a moment and try again",
     "{name} の返事が間に合いませんでした。頼んだ事は受け付けられたかもしれません。status で確かめてください":
         "{name} did not reply in time. The request may have been accepted; check with status",
+    "選んだキーを読めません（{why}）": "Could not read the selected keys ({why})",
 }

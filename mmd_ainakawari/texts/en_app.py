@@ -154,4 +154,5 @@ TEXT = {
     "もう中断できません（MMD に書き戻しているか、元に戻している途中です）":
         "It can no longer be cancelled (writing back to MMD, or undoing)",
     "元に戻せる生成がありません": "There is no generation to undo",
+    "（詳しく: {detail}）": "(Details: {detail})",
 }

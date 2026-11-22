@@ -133,7 +133,8 @@ class MotionReader:
         morphs = m.integer(model + MORPH_COUNT)
         iks = m.integer(model + IK_COUNT)
         if morphs != len(morph_names) or iks != len(ik_names):
-            raise RuntimeError(_("MMD の表情 {morphs}・IK {iks} 個が、PMX の {pmx_morphs}・{pmx_iks} 個と合いません",
+            raise RuntimeError(_("MMD の表情 {morphs}・IK {iks} 個が、PMX の {pmx_morphs}・{pmx_iks} 個と合いません。"
+                                 "MMD に読み込んだ後で PMX を書き換えると起きます。モデルを MMD に読み込み直してから、もう一度押してください",
                                  morphs=morphs, iks=iks, pmx_morphs=len(morph_names), pmx_iks=len(ik_names)))
         names = self.bone_names(model, count)
         bones_at = m.pointer(model + BONE_KEYFRAMES)
@@ -198,7 +199,7 @@ class _Reader:
     def take(self, n):
         out = self.data[self.off:self.off + n]
         if len(out) != n:
-            raise ValueError(_("PMX が途中で終わっています"))
+            raise ValueError(_("PMX ファイルが途中で切れています（壊れているかもしれません）"))
         self.off += n
         return out
 

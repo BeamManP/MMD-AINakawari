@@ -7,7 +7,6 @@ TEXT = {
     "{s}F からの区間が {n} フレームあります。Kimodo の 1 区間は {max_frames} フレーム（10 秒）までです。区間を分けるか、範囲か長さを絞ってください":
         "The segment from {s}F is {n} frames long. A Kimodo segment can be up to {max_frames} frames (10 s). "
         "Split it into segments, or narrow the range or length",
-    "Kimodo の結果の関節の並びが SOMA の骨格ファイルと違います": "The joint order of the Kimodo result differs from the SOMA skeleton file",
     "キーが 1 つもありません（0F にキーを打ってください）": "There are no keys (set a key at 0F)",
     "区間の始めをキーの次へずらしたら、{st}F の区間が {n} フレームになりました（{min} フレーム以上要ります）。区間の始めをキーから離してください":
         "After moving the segment start past the key, the segment at {st}F is {n} frames long ({min} or more are needed). "
@@ -33,4 +32,5 @@ TEXT = {
     "{frames}F の体の姿勢が決まっています（キーは元の「{bone}」の上で打たれているので、「{bone}」は動かしません）": "the body pose is set at {frames}F (those keys were made on the original \"{bone}\", so \"{bone}\" is not moved)",
     "作る所より後ろ（{frames}F）に体のキーがあります（「{bone}」を動かすと、そのキーの場所がずれます）": "there are body keys after the generated part ({frames}F) (moving \"{bone}\" would shift where they are)",
     "モデルの「{bone}」が、回転・移動のできないボーンです": "\"{bone}\" in the model cannot be rotated or moved",
+    "Kimodo の結果の関節の並びが SOMA の骨格ファイルと違います。詳細の窓の「セットアップ」で Kimodo を入れ直してください": "The joint order of the Kimodo result differs from the SOMA skeleton file. Reinstall Kimodo with Setup in the details window",
 }

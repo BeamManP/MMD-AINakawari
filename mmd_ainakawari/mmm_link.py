@@ -12,7 +12,7 @@ import socket
 
 import numpy as np
 
-from . import vmd
+from . import errors, vmd
 from .i18n import _
 from .mmd_memory import interp_bytes
 from .mmd_skel import MMDSkeleton, curve_points
@@ -226,5 +226,5 @@ class MMMLink:
         try:
             self.set_frame(frame)
         except Exception as e:
-            return str(e)
+            return errors.explain(e)
         return None
