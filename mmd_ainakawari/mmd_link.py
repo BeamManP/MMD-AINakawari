@@ -10,7 +10,7 @@ from mmd_mcp import timeline
 from mmd_mcp.bone_controls import get_selected_bone_transform
 from mmd_mcp.bone_selection import select_bone
 from mmd_mcp.ui_language import LABELS_ZH, matches, ui_language
-from mmd_mcp.ui_state import UIReader, get_ui_state
+from mmd_mcp.ui_state import UIReader, parse_number
 from mmd_mcp.windows import list_windows
 
 from . import mmd_memory, vmd
@@ -50,9 +50,14 @@ class MMDLink:
         return f"{wins[0].pid}-{wins[0].process_started:.0f}"
 
     def state(self):
-        s = get_ui_state(self.hwnd)
-        return {"frame": s["displayed_frame"]["value"], "model": s["model_selector"]["selected_name"],
-                "model_selected": not s["model_selector"]["camera_light_accessory_selected"]}
+        """今のフレーム・モデル欄の名前・モデルが選ばれているか。
+
+        モデル欄と現在フレームの欄だけ読む。get_ui_state はモーフ欄まで読み、1 つの欄に 1024 個を超えるモーフがあると
+        「MMD selector size is unsupported.」で止まっていた（11-22 海外の変換モデルで報告。「その他」1100 個で再現）。
+        """
+        frame_text, selector_index, name = UIReader(self.hwnd).anchor()
+        return {"frame": parse_number(frame_text, integer=True) if frame_text is not None else None,
+                "model": name, "model_selected": selector_index > 0}   # 0 はカメラ・照明・アクセサリ
 
     def selected_model(self):
         """MMD で選択中のモデルの名前と、読み込んだファイルの場所。モデル以外が選ばれていれば None。
@@ -507,7 +512,7 @@ class MMDLink:
                 if now or not win32gui.IsWindowEnabled(self.hwnd):   # 窓が消えるのを待つ・読み込み中
                     quiet = None
                 else:
-                    get_ui_state(self.hwnd)
+                    UIReader(self.hwnd).anchor()   # MMD が応答するか（モーフ欄は読まない。state() と同じ理由）
                     quiet = quiet or time.monotonic()
                     if time.monotonic() - quiet >= 0.3:
                         return {"status": "completed", "path_submitted": True, "accepted": texts}
